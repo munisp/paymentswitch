@@ -18,6 +18,7 @@ const (
 	StepWaitingPayment   WorkflowStep = "waiting_payment"
 	StepConverting       WorkflowStep = "converting"
 	StepKYCVerification  WorkflowStep = "kyc_verification"
+	StepAMLScreening     WorkflowStep = "aml_screening"
 	StepVerifyingAccount WorkflowStep = "verifying_account"
 	StepOpeningAccount   WorkflowStep = "opening_account"
 	StepTransferring     WorkflowStep = "transferring"
@@ -66,6 +67,10 @@ type RemittanceWorkflowState struct {
 	ExchangeRate           float64                `json:"exchangeRate,omitempty"`
 	KYCVerificationID      string                 `json:"kycVerificationId,omitempty"`
 	KYCApproved            bool                   `json:"kycApproved,omitempty"`
+	AMLCleared             bool                   `json:"amlCleared,omitempty"`
+	AMLRiskLevel           string                 `json:"amlRiskLevel,omitempty"`
+	SanctionsCleared       bool                   `json:"sanctionsCleared,omitempty"`
+	KYCTier                int                    `json:"kycTier,omitempty"`
 	AccountID              string                 `json:"accountId,omitempty"`
 	TransferReference      string                 `json:"transferReference,omitempty"`
 	Error                  string                 `json:"error,omitempty"`
@@ -161,6 +166,8 @@ func (o *RemittanceOrchestrator) ProcessWorkflowStep(state *RemittanceWorkflowSt
 		state, err = o.handleConverting(state)
 	case StepKYCVerification:
 		state, err = o.handleKYCVerification(state)
+	case StepAMLScreening:
+		state, err = o.handleAMLScreening(state)
 	case StepVerifyingAccount:
 		state, err = o.handleVerifyingAccount(state)
 	case StepOpeningAccount:
@@ -288,12 +295,8 @@ func (o *RemittanceOrchestrator) handleKYCVerification(state *RemittanceWorkflow
 
 	if kycStatus.Status == kyc.KYCStatusApproved {
 		state.KYCApproved = true
-
-		if state.DeliveryOption == DeliveryExistingAccount {
-			state.CurrentStep = StepVerifyingAccount
-		} else if state.DeliveryOption == DeliveryNewAccount {
-			state.CurrentStep = StepOpeningAccount
-		}
+		state.KYCTier = int(kyc.DetermineKYCTier(kycStatus))
+		state.CurrentStep = StepAMLScreening
 
 		state.LastUpdated = time.Now()
 
@@ -310,6 +313,87 @@ func (o *RemittanceOrchestrator) handleKYCVerification(state *RemittanceWorkflow
 			"reason": kycStatus.RejectionReason,
 		})
 	}
+
+	return state, nil
+}
+
+func (o *RemittanceOrchestrator) handleAMLScreening(state *RemittanceWorkflowState) (*RemittanceWorkflowState, error) {
+	if state.KYCData == nil {
+		return state, fmt.Errorf("KYC data required for AML screening")
+	}
+
+	// Sanctions screening
+	sanctionsResult, err := o.kycService.CheckSanctionsList(
+		state.KYCData.FirstName, state.KYCData.LastName,
+		state.KYCData.DateOfBirth, "",
+	)
+	if err != nil {
+		return state, fmt.Errorf("sanctions screening failed: %w", err)
+	}
+
+	if len(sanctionsResult.Matches) > 0 {
+		state.CurrentStep = StepFailed
+		state.Error = fmt.Sprintf("sanctions match detected: %d potential matches", len(sanctionsResult.Matches))
+		state.LastUpdated = time.Now()
+		o.sendWebhook(state.RemittanceID, "compliance.sanctions_match", map[string]interface{}{
+			"matchCount": len(sanctionsResult.Matches),
+		})
+		return state, nil
+	}
+	state.SanctionsCleared = true
+
+	// AML screening
+	amlResult, err := o.kycService.PerformAMLScreening(
+		state.KYCData.FirstName, state.KYCData.LastName,
+		state.KYCData.DateOfBirth, "", state.KYCData.IDNumber,
+	)
+	if err != nil {
+		return state, fmt.Errorf("AML screening failed: %w", err)
+	}
+
+	state.AMLRiskLevel = string(amlResult.RiskLevel)
+
+	if amlResult.RiskLevel == "high" {
+		state.CurrentStep = StepFailed
+		state.Error = "AML high risk — manual review required"
+		state.LastUpdated = time.Now()
+		o.sendWebhook(state.RemittanceID, "compliance.aml_high_risk", map[string]interface{}{
+			"riskLevel": amlResult.RiskLevel,
+			"score":     amlResult.RiskScore,
+		})
+		return state, nil
+	}
+
+	state.AMLCleared = true
+
+	// KYC Tier enforcement for outbound FX
+	tierEnforcer := kyc.NewTierLimitEnforcer(kyc.NewDailyUsageTracker())
+	fxCheck := tierEnforcer.CheckOutboundFXAllowed(kyc.KYCTier(state.KYCTier), state.SenderAmount)
+	if !fxCheck.Allowed {
+		state.CurrentStep = StepFailed
+		state.Error = fxCheck.Reason
+		state.LastUpdated = time.Now()
+		o.sendWebhook(state.RemittanceID, "compliance.tier_limit_exceeded", map[string]interface{}{
+			"tier":   state.KYCTier,
+			"reason": fxCheck.Reason,
+		})
+		return state, nil
+	}
+
+	if state.DeliveryOption == DeliveryExistingAccount {
+		state.CurrentStep = StepVerifyingAccount
+	} else if state.DeliveryOption == DeliveryNewAccount {
+		state.CurrentStep = StepOpeningAccount
+	} else {
+		state.CurrentStep = StepTransferring
+	}
+	state.LastUpdated = time.Now()
+
+	o.sendWebhook(state.RemittanceID, "compliance.cleared", map[string]interface{}{
+		"amlRiskLevel":     state.AMLRiskLevel,
+		"sanctionsCleared": true,
+		"kycTier":          state.KYCTier,
+	})
 
 	return state, nil
 }
