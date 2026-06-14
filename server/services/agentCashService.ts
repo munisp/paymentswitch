@@ -98,7 +98,8 @@ export async function generateCollectionCode(params: {
   const expiresAt = new Date(Date.now() + expiryHours * 60 * 60 * 1000);
 
   // Generate 6-digit collection code
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const { randomInt } = require('crypto');
+  const code = String(randomInt(100000, 999999));
 
   // Generate QR code (in production, use QR code library)
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${code}`;

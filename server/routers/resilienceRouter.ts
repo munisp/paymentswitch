@@ -12,7 +12,7 @@ export const resilienceRouter = router({
       priority: z.number().default(5),
     }))
     .mutation(async ({ ctx, input }) => {
-      const [entry] = await db.getDb().insert(offlineQueue).values({
+      const [entry] = await (await db.requireDb()).insert(offlineQueue).values({
         userId: ctx.user.id,
         operationType: input.operationType,
         payload: input.payload,
@@ -36,19 +36,19 @@ export const resilienceRouter = router({
         payload: op.payload,
         priority: op.priority,
       }));
-      await db.getDb().insert(offlineQueue).values(entries);
+      await (await db.requireDb()).insert(offlineQueue).values(entries);
       return { queued: entries.length };
     }),
 
   getQueueStatus: protectedProcedure
     .query(async ({ ctx }) => {
-      const [{ pending }] = await db.getDb().select({ pending: sql<number>`count(*)` })
+      const [{ pending }] = await (await db.requireDb()).select({ pending: sql<number>`count(*)` })
         .from(offlineQueue)
         .where(and(eq(offlineQueue.userId, ctx.user.id), sql`${offlineQueue.status} = 'queued'`));
-      const [{ processing }] = await db.getDb().select({ processing: sql<number>`count(*)` })
+      const [{ processing }] = await (await db.requireDb()).select({ processing: sql<number>`count(*)` })
         .from(offlineQueue)
         .where(and(eq(offlineQueue.userId, ctx.user.id), sql`${offlineQueue.status} = 'processing'`));
-      const [{ failed }] = await db.getDb().select({ failed: sql<number>`count(*)` })
+      const [{ failed }] = await (await db.requireDb()).select({ failed: sql<number>`count(*)` })
         .from(offlineQueue)
         .where(and(eq(offlineQueue.userId, ctx.user.id), sql`${offlineQueue.status} = 'failed'`));
       return { pending: Number(pending), processing: Number(processing), failed: Number(failed) };
@@ -56,7 +56,7 @@ export const resilienceRouter = router({
 
   processQueue: protectedProcedure
     .mutation(async ({ ctx }) => {
-      const items = await db.getDb().select().from(offlineQueue)
+      const items = await (await db.requireDb()).select().from(offlineQueue)
         .where(and(eq(offlineQueue.userId, ctx.user.id), sql`${offlineQueue.status} = 'queued'`))
         .orderBy(offlineQueue.priority, offlineQueue.createdAt)
         .limit(50);
@@ -65,15 +65,15 @@ export const resilienceRouter = router({
       let failed = 0;
       for (const item of items) {
         try {
-          await db.getDb().update(offlineQueue)
+          await (await db.requireDb()).update(offlineQueue)
             .set({ status: "processing", updatedAt: new Date() })
             .where(eq(offlineQueue.id, item.id));
-          await db.getDb().update(offlineQueue)
+          await (await db.requireDb()).update(offlineQueue)
             .set({ status: "completed", processedAt: new Date(), updatedAt: new Date() })
             .where(eq(offlineQueue.id, item.id));
           processed++;
         } catch {
-          await db.getDb().update(offlineQueue)
+          await (await db.requireDb()).update(offlineQueue)
             .set({
               status: item.retryCount >= item.maxRetries ? "failed" : "queued",
               retryCount: item.retryCount + 1,
@@ -96,7 +96,7 @@ export const resilienceRouter = router({
       region: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const [entry] = await db.getDb().insert(connectionStatusLog).values({
+      const [entry] = await (await db.requireDb()).insert(connectionStatusLog).values({
         userId: ctx.user.id,
         connectionType: input.connectionType,
         bandwidth: input.bandwidth,

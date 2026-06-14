@@ -387,7 +387,7 @@ async def health_check():
                     timeout=2.0
                 )
                 mojaloop_connected = response.status_code == 200
-        except:
+        except Exception:
             pass
         
         # Check TigerBeetle connection
@@ -399,7 +399,7 @@ async def health_check():
             result = sock.connect_ex(('tigerbeetle.payment-switch', 3000))
             tigerbeetle_connected = (result == 0)
             sock.close()
-        except:
+        except Exception:
             tigerbeetle_connected = False
         
         status = "healthy" if (mojaloop_connected or tigerbeetle_connected) else "degraded"

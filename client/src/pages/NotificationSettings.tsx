@@ -53,7 +53,7 @@ export default function NotificationSettings() {
       }
     } catch (error) {
       toast.error('Failed to save preferences');
-      log.error(error);
+      log.error(String(error));
     }
   };
 
@@ -74,7 +74,7 @@ export default function NotificationSettings() {
       }
     } catch (error) {
       toast.error('Failed to reset preferences');
-      log.error(error);
+      log.error(String(error));
     }
   };
 

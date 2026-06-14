@@ -27,10 +27,11 @@ export default function IntegrationDevelopment() {
   const [runningTest, setRunningTest] = useState<string | null>(null);
 
   // Get sandbox environment
-  const { data: environment, isLoading: envLoading } = trpc.integration.getEnvironment.useQuery({
+  const { data: environmentData, isLoading: envLoading } = trpc.integration.getEnvironment.useQuery({
     applicationId,
     environmentType: "sandbox",
   });
+  const environment = environmentData as any;
 
   // Get integration tests
   const { data: tests = [], refetch: refetchTests } = trpc.integration.getTests.useQuery({

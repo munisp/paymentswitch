@@ -69,8 +69,8 @@ export function SlackConfigurationPanel({ credentialId }: SlackConfigurationPane
   // Initialize form with existing config
   useEffect(() => {
     if (slackConfig) {
-      setWebhookUrl(slackConfig.webhookUrl);
-      setChannelName(slackConfig.channelName);
+      setWebhookUrl(slackConfig.webhookUrl ?? '');
+      setChannelName(slackConfig.channelName ?? '');
       setIsEnabled(slackConfig.isActive);
     }
   }, [slackConfig]);

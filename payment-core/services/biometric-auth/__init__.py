@@ -1,2 +1,2 @@
-"""$service_name service package."""
+"""Biometric Authentication service package."""
 __version__ = "1.0.0"

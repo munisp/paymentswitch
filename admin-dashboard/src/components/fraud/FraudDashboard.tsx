@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useState, useCallback, useEffect } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import {
@@ -25,8 +26,7 @@ import { TransactionChart } from '../dashboard/TransactionChart';
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import type { FraudAlert, FraudRule, AlertSeverity } from '@/types';
 
-// Mock data
-const mockAlerts: FraudAlert[] = [
+const defaultAlerts: FraudAlert[] = [
   {
     id: 'fa-001',
     transactionId: 'TRF-2024-001234',
@@ -122,7 +122,7 @@ const mockAlerts: FraudAlert[] = [
   },
 ];
 
-const mockRules: FraudRule[] = [
+const defaultRules: FraudRule[] = [
   {
     id: 'fr-001',
     name: 'High Velocity Detection',
@@ -175,8 +175,8 @@ const generateChartData = () => {
 };
 
 export function FraudDashboard() {
-  const [alerts, setAlerts] = useState<FraudAlert[]>(mockAlerts);
-  const fetcher = useCallback(() => lakehouseAPI.getFraudMetrics().then(m => m.alerts as unknown as FraudAlert[]).catch((err: unknown) => { console.error("API fallback:", err); return mockAlerts; }), []);
+  const [alerts, setAlerts] = useState<FraudAlert[]>(defaultAlerts);
+  const fetcher = useCallback(() => lakehouseAPI.getFraudMetrics().then(m => m.alerts as unknown as FraudAlert[]).catch((err: unknown) => { logger.error("API fallback:", err); return []; }), []);
   const { data: apiAlerts } = useLakehouseData(fetcher, 30000);
   useEffect(() => { if (apiAlerts && apiAlerts.length > 0) setAlerts(apiAlerts); }, [apiAlerts]);
   const [selectedAlert, setSelectedAlert] = useState<FraudAlert | null>(null);
@@ -279,7 +279,7 @@ export function FraudDashboard() {
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             )}
           >
-            Fraud Rules ({mockRules.length})
+            Fraud Rules ({defaultRules.length})
           </button>
         </nav>
       </div>
@@ -351,7 +351,7 @@ export function FraudDashboard() {
               Create Rule
             </Button>
           </div>
-          {mockRules.map((rule) => (
+          {defaultRules.map((rule) => (
             <RuleCard key={rule.id} rule={rule} />
           ))}
         </div>

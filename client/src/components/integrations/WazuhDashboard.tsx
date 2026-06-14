@@ -51,9 +51,9 @@ export default function WazuhDashboard() {
     );
   }
 
-  const criticalAlerts = alerts.filter((a) => a.rule.level >= 12).length;
-  const activeAgents = agents.filter((a) => a.status === "active").length;
-  const criticalVulns = vulnerabilities.filter((v) => v.severity === "critical").length;
+  const criticalAlerts = alerts.filter((a: any) => a.rule.level >= 12).length;
+  const activeAgents = agents.filter((a: any) => a.status === "active").length;
+  const criticalVulns = vulnerabilities.filter((v: any) => v.severity === "critical").length;
 
   return (
     <div className="space-y-6">
@@ -136,7 +136,7 @@ export default function WazuhDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {alerts.slice(0, 10).map((alert) => (
+                  {alerts.slice(0, 10).map((alert: any) => (
                     <TableRow key={alert.id}>
                       <TableCell className="text-xs">
                         {new Date(alert.timestamp).toLocaleString()}
@@ -178,7 +178,7 @@ export default function WazuhDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {agents.slice(0, 10).map((agent) => (
+                  {agents.slice(0, 10).map((agent: any) => (
                     <TableRow key={agent.id}>
                       <TableCell>{agent.name}</TableCell>
                       <TableCell className="font-mono text-xs">{agent.ip}</TableCell>
@@ -219,7 +219,7 @@ export default function WazuhDashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {vulnerabilities.slice(0, 10).map((vuln) => (
+                {vulnerabilities.slice(0, 10).map((vuln: any) => (
                   <TableRow key={vuln.id}>
                     <TableCell className="font-mono text-xs">{vuln.cve}</TableCell>
                     <TableCell className="max-w-xs truncate">{vuln.title}</TableCell>

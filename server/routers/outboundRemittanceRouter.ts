@@ -34,6 +34,9 @@ import {
   type EnforcementAction,
   type AutoSuspensionTrigger,
 } from '../seed/outboundSeedData';
+import * as dbSvc from '../services/outboundRemittanceDbService';
+import * as goBridge from '../services/goServiceBridge';
+import * as ledgerBridge from '../services/rustLedgerBridge';
 
 // --- AI/ML Python Service (real implementations for remittance) ---
 const REMITTANCE_AI_ML_URL = process.env.REMITTANCE_AI_ML_URL || 'http://localhost:8101';
@@ -88,17 +91,7 @@ export const outboundRemittanceRouter = router({
   // ==========================================================================
 
   getMyContext: protectedProcedure.query(async ({ ctx }) => {
-    const { isAdmin, isCbn, role } = getScope(ctx.user);
-    const participant = seedParticipants.find(p => p.userId === ctx.user.id);
-    return {
-      role: role as 'participant' | 'admin' | 'cbn',
-      isAdmin,
-      isCbn,
-      userId: ctx.user.id,
-      participantId: isAdmin ? null : ctx.user.id,
-      participantName: participant?.name ?? null,
-      tier: participant?.tier ?? null,
-    };
+    return dbSvc.getParticipantContext(ctx.user.id, ctx.user.role);
   }),
 
   // ==========================================================================
@@ -106,32 +99,7 @@ export const outboundRemittanceRouter = router({
   // ==========================================================================
 
   getDashboardMetrics: protectedProcedure.query(async ({ ctx }) => {
-    const { isAdmin, participantId } = getScope(ctx.user);
-    const transfers = filterByParticipant(seedTransfers, participantId, isAdmin);
-    const prefund = filterByParticipant(seedPrefundAccounts, participantId, isAdmin);
-
-    const totalVolume = transfers.reduce((sum, t) => sum + parseFloat(t.amountNgn), 0);
-    const completedTransfers = transfers.filter(t => t.status === 'completed');
-    const successRate = transfers.length > 0
-      ? Math.round((completedTransfers.length / transfers.length) * 100)
-      : 0;
-    const totalPrefundBalance = prefund.reduce((sum, p) => sum + parseFloat(p.balance), 0);
-    const activeCorridors = new Set(transfers.map(t => t.corridor)).size;
-    const pendingApprovals = isAdmin ? seedApprovals.filter(a => a.status === 'pending').length : 0;
-    const escalatedCompliance = filterByParticipant(seedComplianceScreenings, participantId, isAdmin)
-      .filter(s => s.decision === 'escalated').length;
-
-    return {
-      isAdmin,
-      totalTransfers: transfers.length,
-      totalVolume,
-      successRate,
-      totalPrefundBalance,
-      activeCorridors,
-      pendingApprovals,
-      escalatedCompliance,
-      recentTransfers: transfers.slice(0, 5),
-    };
+    return dbSvc.getDashboardMetrics(ctx.user.id, ctx.user.role);
   }),
 
   // ==========================================================================
@@ -147,41 +115,15 @@ export const outboundRemittanceRouter = router({
       offset: z.number().min(0).default(0),
     }).optional())
     .query(async ({ ctx, input }) => {
-      const { isAdmin, participantId } = getScope(ctx.user);
-      let transfers = filterByParticipant(seedTransfers, participantId, isAdmin);
-
-      if (input?.status) {
-        transfers = transfers.filter(t => t.status === input.status);
-      }
-      if (input?.corridor) {
-        transfers = transfers.filter(t => t.corridor === input.corridor);
-      }
-      if (input?.search) {
-        const q = input.search.toLowerCase();
-        transfers = transfers.filter(t =>
-          t.transferRef.toLowerCase().includes(q) ||
-          t.beneficiaryName.toLowerCase().includes(q) ||
-          t.senderRef.toLowerCase().includes(q)
-        );
-      }
-
-      return {
-        transfers: transfers.slice(input?.offset ?? 0, (input?.offset ?? 0) + (input?.limit ?? 50)),
-        total: transfers.length,
-      };
+      return dbSvc.listTransfers(ctx.user.id, ctx.user.role, input ?? undefined);
     }),
 
   getTransfer: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
-      const { isAdmin, participantId } = getScope(ctx.user);
-      const transfer = seedTransfers.find(t => t.id === input.id);
-      if (!transfer) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
-      if (!isAdmin && transfer.participantId !== participantId) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Access denied' });
-      }
-      const screenings = seedComplianceScreenings.filter(s => s.transferId === transfer.id);
-      return { ...transfer, screenings };
+      const result = await dbSvc.getTransfer(ctx.user.id, ctx.user.role, input.id);
+      if (!result) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
+      return result;
     }),
 
   createTransfer: protectedProcedure
@@ -195,34 +137,11 @@ export const outboundRemittanceRouter = router({
       senderRef: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { isAdmin, participantId } = getScope(ctx.user);
-      if (isAdmin) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Admins cannot submit transfers — use participant account' });
-
-      const newId = seedTransfers.length + 1;
-      const transfer = {
-        id: newId,
-        transferRef: `NOR-2025-${String(newId).padStart(8, '0')}`,
-        participantId: participantId,
-        senderRef: input.senderRef,
-        beneficiaryName: input.beneficiaryName,
-        beneficiaryAccount: input.beneficiaryAccount,
-        corridor: input.corridor,
-        amountNgn: input.amountNgn,
-        amountDest: '—',
-        destCurrency: input.destCurrency,
-        fxRate: null,
-        provider: null,
-        status: 'admitted' as const,
-        lifecycleStep: 'A-Admission',
-        complianceResult: null,
-        feeAmount: (parseFloat(input.amountNgn) * 0.005).toFixed(2),
-        purpose: input.purpose,
-        submittedAt: new Date(),
-        completedAt: null,
-        createdAt: new Date(),
-      };
-      (seedTransfers as any[]).push(transfer);
-      return transfer;
+      try {
+        return await dbSvc.createTransfer(ctx.user.id, ctx.user.role, input);
+      } catch (e) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: e instanceof Error ? e.message : 'Failed to create transfer' });
+      }
     }),
 
   // ==========================================================================
@@ -230,8 +149,7 @@ export const outboundRemittanceRouter = router({
   // ==========================================================================
 
   getPrefundAccounts: protectedProcedure.query(async ({ ctx }) => {
-    const { isAdmin, participantId } = getScope(ctx.user);
-    return filterByParticipant(seedPrefundAccounts, participantId, isAdmin);
+    return dbSvc.getPrefundAccounts(ctx.user.id, ctx.user.role);
   }),
 
   requestFunding: protectedProcedure
@@ -242,32 +160,15 @@ export const outboundRemittanceRouter = router({
       method: z.enum(['RTGS', 'NIP', 'Wire']),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { isAdmin, participantId } = getScope(ctx.user);
-      if (isAdmin) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Admins cannot request funding' });
-
-      const participant = seedParticipants.find(p => p.id === participantId);
-      const newId = seedFundingRequests.length + 1;
-      const request = {
-        id: newId,
-        participantId: participantId,
-        requestRef: `FUND-${participant?.shortCode ?? 'UNK'}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(newId).padStart(3, '0')}`,
-        amount: input.amount,
-        sourceBank: input.sourceBank,
-        sourceAccount: input.sourceAccount,
-        method: input.method,
-        status: 'pending_approval',
-        approvedBy: null,
-        approvedAt: null,
-        settledAt: null,
-        createdAt: new Date(),
-      };
-      seedFundingRequests.push(request);
-      return request;
+      try {
+        return await dbSvc.requestFunding(ctx.user.id, ctx.user.role, input);
+      } catch (e) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: e instanceof Error ? e.message : 'Failed to request funding' });
+      }
     }),
 
   listFundingRequests: protectedProcedure.query(async ({ ctx }) => {
-    const { isAdmin, participantId } = getScope(ctx.user);
-    return filterByParticipant(seedFundingRequests, participantId, isAdmin);
+    return dbSvc.listFundingRequests(ctx.user.id, ctx.user.role);
   }),
 
   // ==========================================================================
@@ -277,12 +178,7 @@ export const outboundRemittanceRouter = router({
   getBilling: protectedProcedure
     .input(z.object({ period: z.string().optional() }).optional())
     .query(async ({ ctx, input }) => {
-      const { isAdmin, participantId } = getScope(ctx.user);
-      let records = filterByParticipant(seedBilling, participantId, isAdmin);
-      if (input?.period) {
-        records = records.filter(r => r.billingPeriod === input.period);
-      }
-      return records;
+      return dbSvc.getBilling(ctx.user.id, ctx.user.role, input?.period);
     }),
 
   // ==========================================================================
@@ -292,12 +188,7 @@ export const outboundRemittanceRouter = router({
   getComplianceScreenings: protectedProcedure
     .input(z.object({ decision: z.string().optional() }).optional())
     .query(async ({ ctx, input }) => {
-      const { isAdmin, participantId } = getScope(ctx.user);
-      let screenings = filterByParticipant(seedComplianceScreenings, participantId, isAdmin);
-      if (input?.decision) {
-        screenings = screenings.filter(s => s.decision === input.decision);
-      }
-      return screenings;
+      return dbSvc.getComplianceScreenings(ctx.user.id, ctx.user.role, input?.decision);
     }),
 
   // ==========================================================================
@@ -305,8 +196,7 @@ export const outboundRemittanceRouter = router({
   // ==========================================================================
 
   listDisputes: protectedProcedure.query(async ({ ctx }) => {
-    const { isAdmin, participantId } = getScope(ctx.user);
-    return filterByParticipant(seedDisputes, participantId, isAdmin);
+    return dbSvc.listDisputes(ctx.user.id, ctx.user.role);
   }),
 
   createDispute: protectedProcedure
@@ -316,31 +206,14 @@ export const outboundRemittanceRouter = router({
       reason: z.string().min(10),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { isAdmin, participantId } = getScope(ctx.user);
-      const transfer = seedTransfers.find(t => t.id === input.transferId);
-      if (!transfer) throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
-      if (!isAdmin && transfer.participantId !== participantId) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Cannot dispute another participant\'s transfer' });
+      try {
+        return await dbSvc.createDispute(ctx.user.id, ctx.user.role, input);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Failed to create dispute';
+        if (msg.includes('not found')) throw new TRPCError({ code: 'NOT_FOUND', message: msg });
+        if (msg.includes('another participant')) throw new TRPCError({ code: 'FORBIDDEN', message: msg });
+        throw new TRPCError({ code: 'BAD_REQUEST', message: msg });
       }
-
-      const newId = seedDisputes.length + 1;
-      const dispute = {
-        id: newId,
-        transferId: input.transferId,
-        participantId: transfer.participantId,
-        disputeRef: `DSP-2025-${String(newId).padStart(5, '0')}`,
-        type: input.type,
-        reason: input.reason,
-        amount: transfer.amountNgn,
-        status: 'open',
-        priority: parseFloat(transfer.amountNgn) > 10000000 ? 'high' : 'medium',
-        assignedTo: null,
-        resolution: null,
-        resolvedAt: null,
-        createdAt: new Date(),
-      };
-      seedDisputes.push(dispute);
-      return dispute;
     }),
 
   resolveDispute: protectedProcedure
@@ -352,15 +225,11 @@ export const outboundRemittanceRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { isAdmin } = getScope(ctx.user);
       if (!isAdmin) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only admin/CBN can resolve disputes' });
-
-      const dispute = seedDisputes.find(d => d.id === input.disputeId);
-      if (!dispute) throw new TRPCError({ code: 'NOT_FOUND', message: 'Dispute not found' });
-
-      dispute.status = input.action;
-      dispute.resolution = input.resolution;
-      dispute.resolvedAt = new Date();
-      dispute.assignedTo = ctx.user.id;
-      return dispute;
+      try {
+        return await dbSvc.resolveDispute(ctx.user.id, input);
+      } catch (e) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: e instanceof Error ? e.message : 'Dispute not found' });
+      }
     }),
 
   // ==========================================================================
@@ -374,32 +243,15 @@ export const outboundRemittanceRouter = router({
       monthlyVolume: z.string(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { isAdmin, participantId } = getScope(ctx.user);
-      if (isAdmin) throw new TRPCError({ code: 'BAD_REQUEST', message: 'Admins cannot request tier upgrades' });
-
-      const participant = seedParticipants.find(p => p.id === participantId);
-      if (!participant) throw new TRPCError({ code: 'NOT_FOUND', message: 'Participant not found' });
-
-      const newId = seedTierUpgrades.length + 1;
-      const request = {
-        id: newId,
-        participantId: participantId,
-        currentTier: participant.tier,
-        requestedTier: input.requestedTier,
-        justification: input.justification,
-        monthlyVolume: input.monthlyVolume,
-        status: 'pending_review',
-        reviewedBy: null,
-        reviewedAt: null,
-        createdAt: new Date(),
-      };
-      seedTierUpgrades.push(request);
-      return request;
+      try {
+        return await dbSvc.requestTierUpgrade(ctx.user.id, ctx.user.role, input);
+      } catch (e) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: e instanceof Error ? e.message : 'Failed to request tier upgrade' });
+      }
     }),
 
   listTierUpgrades: protectedProcedure.query(async ({ ctx }) => {
-    const { isAdmin, participantId } = getScope(ctx.user);
-    return filterByParticipant(seedTierUpgrades, participantId, isAdmin);
+    return dbSvc.listTierUpgrades(ctx.user.id, ctx.user.role);
   }),
 
   // ==========================================================================
@@ -409,16 +261,16 @@ export const outboundRemittanceRouter = router({
   listParticipants: protectedProcedure.query(async ({ ctx }) => {
     const { isAdmin } = getScope(ctx.user);
     if (!isAdmin) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only admin/CBN can view all participants' });
-    return seedParticipants;
+    return dbSvc.listParticipants();
   }),
 
   getParticipant: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
-      const { isAdmin, participantId } = getScope(ctx.user);
-      const participant = seedParticipants.find(p => p.id === input.id);
+      const { isAdmin } = getScope(ctx.user);
+      const participant = await dbSvc.getParticipantById(input.id);
       if (!participant) throw new TRPCError({ code: 'NOT_FOUND', message: 'Participant not found' });
-      if (!isAdmin && participant.id !== participantId) {
+      if (!isAdmin && participant.userId !== ctx.user.id) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Access denied' });
       }
       return participant;
@@ -431,7 +283,7 @@ export const outboundRemittanceRouter = router({
   listApprovals: protectedProcedure.query(async ({ ctx }) => {
     const { isAdmin } = getScope(ctx.user);
     if (!isAdmin) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only admin/CBN can view approvals' });
-    return seedApprovals.filter(a => a.status === 'pending');
+    return dbSvc.listApprovals();
   }),
 
   processApproval: protectedProcedure
@@ -441,55 +293,13 @@ export const outboundRemittanceRouter = router({
       notes: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const { isAdmin, isCbn } = getScope(ctx.user);
+      const { isAdmin } = getScope(ctx.user);
       if (!isAdmin) throw new TRPCError({ code: 'FORBIDDEN', message: 'Only admin/CBN can process approvals' });
-
-      const approval = seedApprovals.find(a => a.id === input.approvalId);
-      if (!approval) throw new TRPCError({ code: 'NOT_FOUND', message: 'Approval not found' });
-
-      approval.status = input.action;
-      approval.approvedBy = ctx.user.id;
-      approval.approvedAt = new Date();
-
-      // Side effects based on approval type
-      if (input.action === 'approved') {
-        if (approval.entityType === 'funding') {
-          const funding = seedFundingRequests.find(f => f.id === approval.entityId);
-          if (funding) {
-            funding.status = 'completed';
-            funding.approvedBy = ctx.user.id;
-            funding.approvedAt = new Date();
-            funding.settledAt = new Date();
-            // Credit prefund account
-            const prefund = seedPrefundAccounts.find(p => p.participantId === funding.participantId);
-            if (prefund) {
-              prefund.balance = (parseFloat(prefund.balance) + parseFloat(funding.amount)).toFixed(2);
-            }
-          }
-        }
-        if (approval.entityType === 'tier_upgrade') {
-          const upgrade = seedTierUpgrades.find(u => u.id === approval.entityId);
-          if (upgrade) {
-            upgrade.status = 'approved';
-            upgrade.reviewedBy = ctx.user.id;
-            upgrade.reviewedAt = new Date();
-            const participant = seedParticipants.find(p => p.userId === upgrade.participantId);
-            if (participant) {
-              (participant as any).tier = upgrade.requestedTier;
-            }
-          }
-        }
-        if (approval.entityType === 'transfer' && approval.action === 'release_from_hold') {
-          const transfer = seedTransfers.find(t => t.id === approval.entityId);
-          if (transfer) {
-            (transfer as any).status = 'routing';
-            (transfer as any).lifecycleStep = 'D-Pricing';
-            (transfer as any).complianceResult = 'clear';
-          }
-        }
+      try {
+        return await dbSvc.processApproval(ctx.user.id, input);
+      } catch (e) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: e instanceof Error ? e.message : 'Approval not found' });
       }
-
-      return approval;
     }),
 
   // ==========================================================================
@@ -499,22 +309,7 @@ export const outboundRemittanceRouter = router({
   globalSearch: protectedProcedure
     .input(z.object({ query: z.string().min(2) }))
     .query(async ({ ctx, input }) => {
-      const { isAdmin, participantId } = getScope(ctx.user);
-      const q = input.query.toLowerCase();
-
-      const transfers = filterByParticipant(seedTransfers, participantId, isAdmin)
-        .filter(t => t.transferRef.toLowerCase().includes(q) || t.beneficiaryName.toLowerCase().includes(q) || t.senderRef.toLowerCase().includes(q))
-        .slice(0, 10);
-
-      const participants = isAdmin
-        ? seedParticipants.filter(p => p.name.toLowerCase().includes(q) || p.shortCode.toLowerCase().includes(q)).slice(0, 5)
-        : [];
-
-      const disputes = filterByParticipant(seedDisputes, participantId, isAdmin)
-        .filter(d => d.disputeRef.toLowerCase().includes(q) || d.reason.toLowerCase().includes(q))
-        .slice(0, 5);
-
-      return { transfers, participants, disputes };
+      return dbSvc.globalSearch(ctx.user.id, ctx.user.role, input.query);
     }),
 
   // ==========================================================================
@@ -966,7 +761,8 @@ export const outboundRemittanceRouter = router({
       const { participantId } = getScope(ctx.user);
       const pid = String(participantId);
       const keyId = `ak_${pid.toLowerCase().replace(/-/g, '_')}_${Date.now()}`;
-      const secret = `sk_live_${Array.from({ length: 32 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('')}`;
+      const { randomBytes } = await import('crypto');
+      const secret = `sk_live_${randomBytes(24).toString('base64url')}`;
       const key = {
         keyId,
         participantId: pid,
@@ -1553,7 +1349,7 @@ export const outboundRemittanceRouter = router({
   getOutboundFalkorDB: protectedProcedure.query(async () => ({
     connection: { host: 'localhost', port: 6379, graphName: 'outbound_remittance_graph', status: 'connected', protocol: 'RESP3' },
     stats: { totalNodes: 3_450_000, totalEdges: 12_800_000, avgQueryMs: 0.85, queriesPerSec: 38_000, cacheHitRate: 0.92, memoryMb: 2_840 },
-    corridorGraph: ['NG-GB','NG-US','NG-CA','NG-GH','NG-IN','NG-CN','NG-AE','NG-KE','NG-ZA'].map(id => ({ corridor: id, nodes: Math.floor(Math.random() * 50000) + 10000, edges: Math.floor(Math.random() * 180000) + 40000, avgDegree: +(Math.random() * 5 + 3).toFixed(2), riskScore: +(Math.random() * 0.3 + 0.05).toFixed(3) })),
+    corridorGraph: ['NG-GB','NG-US','NG-CA','NG-GH','NG-IN','NG-CN','NG-AE','NG-KE','NG-ZA'].map((id, i) => ({ corridor: id, nodes: 15000 + i * 5000, edges: 50000 + i * 15000, avgDegree: +(3.5 + i * 0.3).toFixed(2), riskScore: +(0.08 + i * 0.02).toFixed(3) })),
     recentQueries: [
       { query: "GRAPH.QUERY outbound_remittance_graph \"MATCH (s)-[r:SENT_TO]->(d) WHERE r.corridor='NG-GB' RETURN count(r)\"", result: '3,420 transfers', latencyUs: 680 },
       { query: "GRAPH.QUERY outbound_remittance_graph \"MATCH p=shortestPath((a)-[*..5]->(b)) WHERE a.bvn='22234567890' RETURN p\"", result: '3-hop path via GH intermediary', latencyUs: 1250 },
@@ -1728,7 +1524,8 @@ export const outboundRemittanceRouter = router({
       })).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const applicationRef = `APP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const { randomBytes: rb } = await import('crypto');
+      const applicationRef = `APP-${Date.now().toString(36).toUpperCase()}-${rb(3).toString('hex').toUpperCase()}`;
 
       // In production: persist to DB, trigger onboarding workflow, send confirmation email
       // For now: validate business rules and return reference
@@ -1768,6 +1565,59 @@ export const outboundRemittanceRouter = router({
           'You will receive email updates at ' + input.contactEmail,
         ],
       };
+    }),
+
+  // ==========================================================================
+  // INFRASTRUCTURE HEALTH — Go/Rust/Ledger service status
+  // ==========================================================================
+
+  getServiceHealth: protectedProcedure.query(async ({ ctx }) => {
+    const { isAdmin } = getScope(ctx.user);
+    if (!isAdmin) throw new TRPCError({ code: 'FORBIDDEN', message: 'Admin only' });
+    const [goHealth, ledgerHealth] = await Promise.all([
+      goBridge.checkServiceHealth(),
+      ledgerBridge.checkLedgerHealth(),
+    ]);
+    return { goServices: goHealth, rustLedger: ledgerHealth, timestamp: new Date().toISOString() };
+  }),
+
+  // ==========================================================================
+  // CORRIDOR PRICING — proxied through Go bridge with local fallback
+  // ==========================================================================
+
+  getCorridorQuote: protectedProcedure
+    .input(z.object({
+      corridor: z.string(),
+      amountNgn: z.string(),
+      destCurrency: z.string(),
+    }))
+    .query(async ({ input }) => {
+      const result = await goBridge.getCorridorQuote(input);
+      return { ...result.data, source: result.source };
+    }),
+
+  // ==========================================================================
+  // LEDGER — balance and posting through Rust bridge
+  // ==========================================================================
+
+  getLedgerBalance: protectedProcedure
+    .input(z.object({ participantId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const { isAdmin, participantId } = getScope(ctx.user);
+      if (!isAdmin && participantId !== input.participantId) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Access denied' });
+      }
+      const result = await ledgerBridge.getAccountBalance(input.participantId);
+      return { ...result.data, source: result.source };
+    }),
+
+  reconcileAccount: protectedProcedure
+    .input(z.object({ participantId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      const { isAdmin } = getScope(ctx.user);
+      if (!isAdmin) throw new TRPCError({ code: 'FORBIDDEN', message: 'Admin only' });
+      const result = await ledgerBridge.reconcileAccount(input.participantId);
+      return { ...result.data, source: result.source };
     }),
 });
 

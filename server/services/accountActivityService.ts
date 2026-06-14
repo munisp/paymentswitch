@@ -41,7 +41,7 @@ export async function logLoginAttempt(params: {
     // Create login history record
     const loginRecord: InsertLoginHistory = {
       userId: params.userId,
-      success: params.success ? 'true' : 'false',
+      success: !!params.success,
       userAgent: params.userAgent,
       deviceFingerprint: params.deviceFingerprint,
       deviceName: params.deviceName,
@@ -51,23 +51,23 @@ export async function logLoginAttempt(params: {
       region: geoData?.region,
       latitude: geoData?.latitude,
       longitude: geoData?.longitude,
-      isTrustedDevice: params.isTrustedDevice ? 'true' : 'false',
-      isSuspicious: 'false', // Will be updated by suspicious activity detection
-      requiresTwoFactor: params.requiresTwoFactor ? 'true' : 'false',
-      twoFactorCompleted: params.twoFactorCompleted ? 'true' : 'false',
+      isTrustedDevice: !!params.isTrustedDevice,
+      isSuspicious: false, // Will be updated by suspicious activity detection
+      requiresTwoFactor: !!params.requiresTwoFactor,
+      twoFactorCompleted: !!params.twoFactorCompleted,
       sessionId: params.sessionId,
-      sessionActive: params.success ? 'true' : 'false',
+      sessionActive: !!params.success,
       failureReason: params.failureReason,
     };
 
-    const result = await db.insert(loginHistory).values(loginRecord);
-    const loginId = result[0]?.insertId ? Number(result[0].insertId) : 0;
+    const [insertedLogin] = await db.insert(loginHistory).values(loginRecord).returning({ id: loginHistory.id });
+    const loginId = insertedLogin?.id ?? 0;
 
     log.info(`[AccountActivity] Logged ${params.success ? 'successful' : 'failed'} login for user ${params.userId} from ${geoData?.city}, ${geoData?.country}`);
 
     return { success: true, loginId };
   } catch (error) {
-    log.error('[AccountActivity] Error logging login attempt:', error);
+    log.error({ err: error }, '[AccountActivity] Error logging login attempt:');
     return { success: false, error: 'Failed to log login attempt' };
   }
 }
@@ -91,7 +91,7 @@ export async function getLoginHistory(params: {
     const conditions = [eq(loginHistory.userId, params.userId)];
 
     if (params.successOnly) {
-      conditions.push(eq(loginHistory.success, 'true'));
+      conditions.push(eq(loginHistory.success, true));
     }
 
     if (params.since) {
@@ -108,7 +108,7 @@ export async function getLoginHistory(params: {
 
     return results;
   } catch (error) {
-    log.error('[AccountActivity] Error getting login history:', error);
+    log.error({ err: error }, '[AccountActivity] Error getting login history:');
     return [];
   }
 }
@@ -129,15 +129,15 @@ export async function getActiveSessions(userId: number): Promise<LoginHistory[]>
       .where(
         and(
           eq(loginHistory.userId, userId),
-          eq(loginHistory.success, 'true'),
-          eq(loginHistory.sessionActive, 'true')
+          eq(loginHistory.success, true),
+          eq(loginHistory.sessionActive, true)
         )
       )
       .orderBy(desc(loginHistory.loginAt));
 
     return results;
   } catch (error) {
-    log.error('[AccountActivity] Error getting active sessions:', error);
+    log.error({ err: error }, '[AccountActivity] Error getting active sessions:');
     return [];
   }
 }
@@ -158,7 +158,7 @@ export async function endSession(params: {
     await db
       .update(loginHistory)
       .set({
-        sessionActive: 'false',
+        sessionActive: false,
         sessionEndedAt: new Date(),
       })
       .where(
@@ -171,7 +171,7 @@ export async function endSession(params: {
     log.info(`[AccountActivity] Ended session ${params.sessionId} for user ${params.userId}`);
     return { success: true };
   } catch (error) {
-    log.error('[AccountActivity] Error ending session:', error);
+    log.error({ err: error }, '[AccountActivity] Error ending session:');
     return { success: false, error: 'Failed to end session' };
   }
 }
@@ -191,7 +191,7 @@ export async function endAllSessions(params: {
   try {
     const conditions = [
       eq(loginHistory.userId, params.userId),
-      eq(loginHistory.sessionActive, 'true'),
+      eq(loginHistory.sessionActive, true),
     ];
 
     // Get count of sessions to end
@@ -217,7 +217,7 @@ export async function endAllSessions(params: {
     log.info(`[AccountActivity] Ended ${sessionsToEnd.length} sessions for user ${params.userId}`);
     return { success: true, count: sessionsToEnd.length };
   } catch (error) {
-    log.error('[AccountActivity] Error ending all sessions:', error);
+    log.error({ err: error }, '[AccountActivity] Error ending all sessions:');
     return { success: false, error: 'Failed to end sessions' };
   }
 }
@@ -234,12 +234,12 @@ export async function markLoginAsSuspicious(loginId: number): Promise<{ success:
   try {
     await db
       .update(loginHistory)
-      .set({ isSuspicious: 'true' })
+      .set({ isSuspicious: true })
       .where(eq(loginHistory.id, loginId));
 
     return { success: true };
   } catch (error) {
-    log.error('[AccountActivity] Error marking login as suspicious:', error);
+    log.error({ err: error }, '[AccountActivity] Error marking login as suspicious:');
     return { success: false };
   }
 }
@@ -260,7 +260,7 @@ export async function getLastSuccessfulLogin(userId: number): Promise<LoginHisto
       .where(
         and(
           eq(loginHistory.userId, userId),
-          eq(loginHistory.success, 'true')
+          eq(loginHistory.success, true)
         )
       )
       .orderBy(desc(loginHistory.loginAt))
@@ -268,7 +268,7 @@ export async function getLastSuccessfulLogin(userId: number): Promise<LoginHisto
 
     return result || null;
   } catch (error) {
-    log.error('[AccountActivity] Error getting last login:', error);
+    log.error({ err: error }, '[AccountActivity] Error getting last login:');
     return null;
   }
 }

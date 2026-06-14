@@ -1,6 +1,7 @@
 package smartrouting
 
 import (
+	"database/sql"
 	"fmt"
 	"math"
 	"sort"
@@ -54,6 +55,15 @@ type SmartRouter struct {
 	railHealth map[PaymentRail]*RailHealth
 	costMatrix map[PaymentRail]map[string]float64
 	weights    RoutingWeights
+	db         *sql.DB
+	// Sliding window counters for live health computation
+	outcomes   map[PaymentRail]*outcomeWindow
+}
+
+type outcomeWindow struct {
+	total   int64
+	success int64
+	sumMs   float64
 }
 
 type RoutingWeights struct {
@@ -74,9 +84,89 @@ func NewSmartRouter() *SmartRouter {
 			AvailabilityWeight: 0.15,
 		},
 	}
+	r.outcomes = make(map[PaymentRail]*outcomeWindow)
 	r.initHealth()
 	r.initCosts()
 	return r
+}
+
+// AttachDB enables PostgreSQL persistence for routing health metrics.
+func (r *SmartRouter) AttachDB(db *sql.DB) {
+	r.db = db
+	if db != nil {
+		db.Exec(`CREATE TABLE IF NOT EXISTS smart_routing_health (
+			rail TEXT PRIMARY KEY,
+			current_tps REAL, max_tps REAL,
+			avg_latency_ms REAL, success_rate_24h REAL,
+			circuit_breaker_open BOOLEAN DEFAULT FALSE,
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`)
+		r.loadFromDB()
+	}
+}
+
+func (r *SmartRouter) loadFromDB() {
+	if r.db == nil {
+		return
+	}
+	rows, err := r.db.Query(`SELECT rail, current_tps, max_tps, avg_latency_ms, success_rate_24h, circuit_breaker_open FROM smart_routing_health`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for rows.Next() {
+		var rail string
+		var h RailHealth
+		rows.Scan(&rail, &h.CurrentTPS, &h.MaxTPS, &h.AvgLatencyMs, &h.SuccessRate24h, &h.CircuitBreakerOpen)
+		h.Rail = PaymentRail(rail)
+		h.Available = !h.CircuitBreakerOpen
+		r.railHealth[PaymentRail(rail)] = &h
+	}
+}
+
+// RecordOutcome updates live health metrics from an actual transaction result.
+func (r *SmartRouter) RecordOutcome(rail PaymentRail, success bool, latencyMs float64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	w, ok := r.outcomes[rail]
+	if !ok {
+		w = &outcomeWindow{}
+		r.outcomes[rail] = w
+	}
+	w.total++
+	if success {
+		w.success++
+	}
+	w.sumMs += latencyMs
+
+	h, ok := r.railHealth[rail]
+	if !ok {
+		return
+	}
+
+	// Update live metrics (exponential moving average)
+	if w.total > 0 {
+		h.SuccessRate24h = float64(w.success) / float64(w.total) * 100
+		h.AvgLatencyMs = w.sumMs / float64(w.total)
+	}
+	if !success {
+		h.LastFailure = time.Now()
+		if w.total > 10 && h.SuccessRate24h < 90.0 {
+			h.CircuitBreakerOpen = true
+			h.Available = false
+		}
+	}
+
+	// Persist to DB asynchronously
+	if r.db != nil {
+		go r.db.Exec(`INSERT INTO smart_routing_health (rail, current_tps, max_tps, avg_latency_ms, success_rate_24h, circuit_breaker_open, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, NOW())
+			ON CONFLICT (rail) DO UPDATE SET current_tps=$2, avg_latency_ms=$4, success_rate_24h=$5, circuit_breaker_open=$6, updated_at=NOW()`,
+			string(rail), h.CurrentTPS, h.MaxTPS, h.AvgLatencyMs, h.SuccessRate24h, h.CircuitBreakerOpen)
+	}
 }
 
 func (r *SmartRouter) initHealth() {

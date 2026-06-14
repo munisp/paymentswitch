@@ -4,7 +4,7 @@ import { serial, integer, pgEnum, pgTable, text, timestamp, varchar, decimal, bo
 // Note: In PostgreSQL, enums must be defined separately before use in tables
 
 export const roleEnum = pgEnum("role", ["user", "admin", "merchant", "participant", "cbn"]);
-export const outboundTransferStatusEnum = pgEnum("outbound_transfer_status", ["admitted", "workflow", "compliance", "pricing", "routing", "settlement", "audit", "completed", "failed", "manual_review"]);
+export const outboundTransferStatusEnum = pgEnum("outbound_transfer_status", ["admitted", "workflow", "compliance", "pricing", "routing", "settlement", "audit", "completed", "failed", "manual_review", "blocked"]);
 export const participantStatusEnum = pgEnum("participant_status", ["pending", "onboarding", "sandbox", "active", "suspended"]);
 export const participantTierEnum = pgEnum("participant_tier", ["starter", "growth", "enterprise", "premium"]);
 export const twoFactorEnabledEnum = pgEnum("two_factor_enabled", ["true", "false"]);
@@ -28,24 +28,24 @@ export const environmentStatusEnum = pgEnum("environment_status", ["provisioning
 export const keyActionEnum = pgEnum("key_action", ["created", "rotated", "revoked", "expired"]);
 export const sdkTypeEnum = pgEnum("sdk_type", ["javascript", "python", "java", "go", "ruby", "php", "dotnet"]);
 export const testStatusEnum = pgEnum("test_status", ["pending", "running", "passed", "failed"]);
-export const certificationStatusEnum = pgEnum("certification_status", ["pending", "passed", "failed", "expired"]);
+export const certificationStatusEnum = pgEnum("certification_status", ["pending", "in_progress", "passed", "failed", "expired"]);
 export const complianceStatusEnum = pgEnum("compliance_status", ["compliant", "non_compliant", "pending_review"]);
-export const frequencyEnum = pgEnum("frequency", ["hourly", "daily", "weekly", "monthly"]);
-export const credentialStatusEnum = pgEnum("credential_status", ["active", "suspended", "revoked"]);
+export const frequencyEnum = pgEnum("frequency", ["hourly", "daily", "weekly", "monthly", "custom"]);
+export const credentialStatusEnum = pgEnum("credential_status", ["active", "pending", "suspended", "revoked"]);
 export const checklistStatusEnum = pgEnum("checklist_status", ["pending", "in_progress", "completed", "blocked"]);
 export const monitoringStatusEnum = pgEnum("monitoring_status", ["healthy", "degraded", "down"]);
 export const incidentTypeEnum = pgEnum("incident_type", ["outage", "degradation", "security", "data_breach", "other"]);
-export const severityEnum = pgEnum("severity", ["critical", "high", "medium", "low"]);
+export const severityEnum = pgEnum("severity", ["critical", "high", "medium", "low", "warning", "info"]);
 export const incidentStatusEnum = pgEnum("incident_status", ["open", "investigating", "resolved", "closed"]);
 export const metricTypeEnum = pgEnum("metric_type", ["latency", "error_rate", "throughput", "availability"]);
 export const operatorEnum = pgEnum("operator", ["gt", "lt", "eq", "gte", "lte"]);
 export const alertStatusEnum = pgEnum("alert_status", ["active", "acknowledged", "resolved"]);
 export const notificationStatusEnum = pgEnum("notification_status", ["sent", "failed", "pending"]);
-export const applicationStatusEnum = pgEnum("application_status", ["draft", "submitted", "under_review", "approved", "rejected", "suspended"]);
+export const applicationStatusEnum = pgEnum("application_status", ["draft", "pending", "submitted", "under_review", "approved", "rejected", "suspended"]);
 export const stageEnum = pgEnum("stage", ["kyc", "kyb", "technical", "compliance", "go_live"]);
-export const recoveryMethodEnum = pgEnum("recovery_method", ["email", "phone", "security_questions", "admin_reset"]);
-export const recoveryStatusEnum = pgEnum("recovery_status", ["pending", "verified", "completed", "expired", "failed"]);
-export const channelTypeEnum = pgEnum("channel_type", ["email", "sms", "push", "in_app"]);
+export const recoveryMethodEnum = pgEnum("recovery_method", ["email", "phone", "sms", "security_questions", "admin_reset", "admin"]);
+export const recoveryStatusEnum = pgEnum("recovery_status", ["pending", "verified", "completed", "expired", "failed", "approved", "rejected"]);
+export const channelTypeEnum = pgEnum("channel_type", ["email", "sms", "push", "in_app", "slack", "webhook"]);
 export const rateConditionEnum = pgEnum("rate_condition", ["above", "below", "exact"]);
 export const rateAlertStatusEnum = pgEnum("rate_alert_status", ["active", "triggered", "expired", "cancelled"]);
 
@@ -420,6 +420,9 @@ export const participantApplications = pgTable("participant_applications", {
   primaryContactName: varchar("primary_contact_name", { length: 255 }).notNull(),
   primaryContactEmail: varchar("primary_contact_email", { length: 320 }).notNull(),
   primaryContactPhone: varchar("primary_contact_phone", { length: 32 }),
+  contactName: varchar("contact_name", { length: 255 }),
+  contactEmail: varchar("contact_email", { length: 320 }),
+  businessType: varchar("business_type_desc", { length: 100 }),
   address: text("address"),
   city: varchar("city", { length: 100 }),
   state: varchar("state", { length: 100 }),
@@ -430,6 +433,9 @@ export const participantApplications = pgTable("participant_applications", {
   submittedAt: timestamp("submitted_at"),
   approvedAt: timestamp("approved_at"),
   rejectedAt: timestamp("rejected_at"),
+  reviewNotes: text("review_notes"),
+  reviewedBy: integer("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -445,12 +451,17 @@ export const accountRecoveryRequests = pgTable("account_recovery_requests", {
   userId: integer("user_id").notNull(),
   recoveryMethod: recoveryMethodEnum("recovery_method").notNull(),
   recoveryToken: varchar("recovery_token", { length: 255 }).notNull().unique(),
+  recoveryCode: varchar("recovery_code", { length: 64 }),
   status: recoveryStatusEnum("status").default("pending").notNull(),
+  requestedAt: timestamp("requested_at").defaultNow().notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   verifiedAt: timestamp("verified_at"),
   completedAt: timestamp("completed_at"),
   ipAddress: varchar("ip_address", { length: 45 }),
   userAgent: text("user_agent"),
+  reviewedBy: integer("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNotes: text("review_notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -466,6 +477,9 @@ export const trustedDevices = pgTable("trusted_devices", {
   deviceFingerprint: varchar("device_fingerprint", { length: 255 }).notNull(),
   deviceName: varchar("device_name", { length: 255 }),
   deviceType: varchar("device_type", { length: 100 }),
+  userAgent: text("user_agent"),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  isActive: varchar("is_active", { length: 10 }).default("true").notNull(),
   lastUsedAt: timestamp("last_used_at").defaultNow().notNull(),
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -503,14 +517,23 @@ export const loginHistory = pgTable("login_history", {
   ipAddress: varchar("ip_address", { length: 45 }),
   userAgent: text("user_agent"),
   deviceFingerprint: varchar("device_fingerprint", { length: 255 }),
+  deviceName: varchar("device_name", { length: 255 }),
   country: varchar("country", { length: 100 }),
   city: varchar("city", { length: 100 }),
+  region: varchar("region", { length: 100 }),
+  latitude: varchar("latitude", { length: 20 }),
+  longitude: varchar("longitude", { length: 20 }),
   loginMethod: varchar("login_method", { length: 64 }),
+  loginAt: timestamp("login_at").defaultNow().notNull(),
+  sessionId: varchar("session_id", { length: 255 }),
+  sessionActive: boolean("session_active").default(true).notNull(),
+  requiresTwoFactor: boolean("requires_two_factor").default(false).notNull(),
   success: boolean("success").default(true).notNull(),
   failureReason: text("failure_reason"),
   isSuspicious: boolean("is_suspicious").default(false).notNull(),
   isTrustedDevice: boolean("is_trusted_device").default(false).notNull(),
   twoFactorCompleted: boolean("two_factor_completed").default(false).notNull(),
+  sessionEndedAt: timestamp("session_ended_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -543,12 +566,19 @@ export type InsertRateAlert = typeof rateAlerts.$inferInsert;
 export const productionMonitoring = pgTable("production_monitoring", {
   id: serial("id").primaryKey(),
   applicationId: integer("application_id").notNull(),
+  credentialId: integer("credential_id"),
   healthStatus: monitoringStatusEnum("health_status").default("healthy").notNull(),
   lastHealthCheck: timestamp("last_health_check"),
   avgLatencyMs: integer("avg_latency_ms"),
   errorRate: decimal("error_rate", { precision: 5, scale: 2 }),
   throughputTps: integer("throughput_tps"),
   activeAlerts: integer("active_alerts").default(0),
+  date: timestamp("date"),
+  totalTransactions: integer("total_transactions").default(0),
+  successfulTransactions: integer("successful_transactions").default(0),
+  failedTransactions: integer("failed_transactions").default(0),
+  averageResponseTime: integer("average_response_time"),
+  uptimePercentage: decimal("uptime_percentage", { precision: 5, scale: 2 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -562,12 +592,14 @@ export type InsertProductionMonitoring = typeof productionMonitoring.$inferInser
 export const incidentReports = pgTable("incident_reports", {
   id: serial("id").primaryKey(),
   applicationId: integer("application_id").notNull(),
+  credentialId: integer("credential_id"),
   incidentType: incidentTypeEnum("incident_type").notNull(),
   severity: severityEnum("severity").notNull(),
   status: incidentStatusEnum("status").default("open").notNull(),
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description").notNull(),
   detectedAt: timestamp("detected_at").notNull(),
+  occurredAt: timestamp("occurred_at"),
   acknowledgedAt: timestamp("acknowledged_at"),
   resolvedAt: timestamp("resolved_at"),
   rootCause: text("root_cause"),
@@ -587,6 +619,7 @@ export type InsertIncidentReport = typeof incidentReports.$inferInsert;
 export const monitoringAlertRules = pgTable("monitoring_alert_rules", {
   id: serial("id").primaryKey(),
   applicationId: integer("application_id").notNull(),
+  credentialId: integer("credential_id"),
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
   metricType: metricTypeEnum("metric_type").notNull(),
@@ -612,6 +645,8 @@ export const monitoringAlerts = pgTable("monitoring_alerts", {
   id: serial("id").primaryKey(),
   ruleId: integer("rule_id").notNull(),
   applicationId: integer("application_id").notNull(),
+  credentialId: integer("credential_id"),
+  title: varchar("title", { length: 255 }),
   status: alertStatusEnum("status").default("active").notNull(),
   severity: severityEnum("severity").notNull(),
   message: text("message").notNull(),
@@ -642,6 +677,11 @@ export const goLiveChecklist = pgTable("go_live_checklist", {
   monitoringConfigured: boolean("monitoring_configured").default(false),
   alertsConfigured: boolean("alerts_configured").default(false),
   rollbackPlanDocumented: boolean("rollback_plan_documented").default(false),
+  certificationPassed: boolean("certification_passed").default(false),
+  documentationReviewed: boolean("documentation_reviewed").default(false),
+  disasterRecoveryPlanSubmitted: boolean("disaster_recovery_plan_submitted").default(false),
+  supportContactsProvided: boolean("support_contacts_provided").default(false),
+  productionEndpointsConfigured: boolean("production_endpoints_configured").default(false),
   technicalSignOff: integer("technical_sign_off"),
   technicalSignOffAt: timestamp("technical_sign_off_at"),
   businessSignOff: integer("business_sign_off"),
@@ -661,10 +701,13 @@ export type InsertGoLiveChecklist = typeof goLiveChecklist.$inferInsert;
 export const apiKeyWebhooks = pgTable("api_key_webhooks", {
   id: serial("id").primaryKey(),
   apiKeyId: integer("api_key_id").notNull(),
+  credentialId: integer("credential_id"),
   webhookUrl: varchar("webhook_url", { length: 512 }).notNull(),
   secret: varchar("secret", { length: 128 }).notNull(),
   events: text("events").notNull(),
   enabled: boolean("enabled").default(true).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  payloadTemplate: text("payload_template"),
   retriesEnabled: boolean("retries_enabled").default(true).notNull(),
   maxRetries: integer("max_retries").default(5).notNull(),
   retryBackoffMs: integer("retry_backoff_ms").default(60000).notNull(),
@@ -685,8 +728,11 @@ export type InsertApiKeyWebhook = typeof apiKeyWebhooks.$inferInsert;
 export const webhookDeliveryLogs = pgTable("webhook_delivery_logs", {
   id: serial("id").primaryKey(),
   webhookId: integer("webhook_id").notNull(),
+  event: varchar("event", { length: 128 }),
   eventType: varchar("event_type", { length: 64 }).notNull(),
+  eventData: text("event_data"),
   payload: text("payload").notNull(),
+  info: text("info"),
   status: webhookStatusEnum("status").default("pending").notNull(),
   statusCode: integer("status_code"),
   responseBody: text("response_body"),
@@ -709,6 +755,8 @@ export const retryAttemptLogs = pgTable("retry_attempt_logs", {
   deliveryLogId: integer("delivery_log_id").notNull(),
   attemptNumber: integer("attempt_number").notNull(),
   timestamp: timestamp("timestamp").defaultNow().notNull(),
+  statusCode: integer("status_code"),
+  responseBody: text("response_body"),
   errorMessage: text("error_message"),
   durationMs: integer("duration_ms"),
   success: boolean("success").default(false).notNull(),
@@ -724,6 +772,7 @@ export type InsertRetryAttemptLog = typeof retryAttemptLogs.$inferInsert;
 export const apiKeyHistory = pgTable("api_key_history", {
   id: serial("id").primaryKey(),
   apiKeyId: integer("api_key_id").notNull(),
+  credentialId: integer("credential_id"),
   action: keyActionEnum("action").notNull(),
   performedBy: integer("performed_by"),
   previousValue: text("previous_value"),
@@ -741,7 +790,12 @@ export type InsertApiKeyHistory = typeof apiKeyHistory.$inferInsert;
 export const apiKeyPermissions = pgTable("api_key_permissions", {
   id: serial("id").primaryKey(),
   apiKeyId: integer("api_key_id").notNull(),
+  credentialId: integer("credential_id"),
   permission: varchar("permission", { length: 128 }).notNull(),
+  resource: varchar("resource", { length: 128 }),
+  canRead: boolean("can_read").default(false),
+  canWrite: boolean("can_write").default(false),
+  canDelete: boolean("can_delete").default(false),
   enabled: boolean("enabled").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -755,12 +809,17 @@ export type InsertApiKeyPermission = typeof apiKeyPermissions.$inferInsert;
 export const apiKeyUsageLogs = pgTable("api_key_usage_logs", {
   id: serial("id").primaryKey(),
   apiKeyId: integer("api_key_id").notNull(),
+  credentialId: integer("credential_id"),
   endpoint: varchar("endpoint", { length: 256 }).notNull(),
   method: varchar("method", { length: 10 }).notNull(),
   statusCode: integer("status_code"),
   responseTimeMs: integer("response_time_ms"),
   ipAddress: varchar("ip_address", { length: 45 }),
   userAgent: text("user_agent"),
+  errorMessage: text("error_message"),
+  requestBody: text("request_body"),
+  responseBody: text("response_body"),
+  timestamp: timestamp("timestamp").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -773,10 +832,14 @@ export type InsertApiKeyUsageLog = typeof apiKeyUsageLogs.$inferInsert;
 export const apiKeyUsageStats = pgTable("api_key_usage_stats", {
   id: serial("id").primaryKey(),
   apiKeyId: integer("api_key_id").notNull(),
+  credentialId: integer("credential_id"),
   date: timestamp("date").notNull(),
   totalRequests: integer("total_requests").default(0).notNull(),
   successfulRequests: integer("successful_requests").default(0).notNull(),
   failedRequests: integer("failed_requests").default(0).notNull(),
+  requestCount: integer("request_count").default(0),
+  errorCount: integer("error_count").default(0),
+  peakRequestsPerHour: integer("peak_requests_per_hour").default(0),
   avgResponseTimeMs: integer("avg_response_time_ms"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -806,6 +869,8 @@ export type InsertApiPermissionTemplate = typeof apiPermissionTemplates.$inferIn
 export const certificationResults = pgTable("certification_results", {
   id: serial("id").primaryKey(),
   applicationId: integer("application_id").notNull(),
+  credentialId: integer("credential_id"),
+  certificateId: varchar("certificate_id", { length: 128 }),
   testSuiteId: integer("test_suite_id"),
   status: certificationStatusEnum("status").default("pending").notNull(),
   score: integer("score"),
@@ -828,11 +893,18 @@ export const notificationChannels = pgTable("notification_channels", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
   channelType: channelTypeEnum("channel_type").notNull(),
+  channelName: varchar("channel_name", { length: 128 }),
   destination: varchar("destination", { length: 320 }).notNull(),
   verified: boolean("verified").default(false).notNull(),
   verificationToken: varchar("verification_token", { length: 128 }),
   verifiedAt: timestamp("verified_at"),
   enabled: boolean("enabled").default(true).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  dndEnabled: integer("dnd_enabled").default(0).notNull(),
+  dndUntil: timestamp("dnd_until"),
+  config: text("config"),
+  template: text("template"),
+  credentialId: integer("credential_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -866,6 +938,11 @@ export const productionCredentials = pgTable("production_credentials", {
   applicationId: integer("application_id").notNull(),
   apiKey: varchar("api_key", { length: 128 }).notNull().unique(),
   apiSecret: varchar("api_secret", { length: 128 }).notNull(),
+  productionApiKey: varchar("production_api_key", { length: 128 }),
+  productionApiSecret: varchar("production_api_secret", { length: 128 }),
+  productionWebhookSecret: varchar("production_webhook_secret", { length: 128 }),
+  dailyTransactionLimit: integer("daily_transaction_limit"),
+  monthlyTransactionLimit: integer("monthly_transaction_limit"),
   status: credentialStatusEnum("status").default("active").notNull(),
   issuedAt: timestamp("issued_at").defaultNow().notNull(),
   expiresAt: timestamp("expires_at"),
@@ -882,11 +959,21 @@ export type InsertProductionCredential = typeof productionCredentials.$inferInse
 export const savedComparisons = pgTable("saved_comparisons", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
+  credentialId: integer("credential_id"),
   name: varchar("name", { length: 128 }).notNull(),
   fromCurrency: varchar("from_currency", { length: 10 }).notNull(),
   toCurrency: varchar("to_currency", { length: 10 }).notNull(),
   amount: decimal("amount", { precision: 18, scale: 4 }),
   providers: text("providers"),
+  tags: text("tags"),
+  notes: text("notes"),
+  scanCount: integer("scan_count").default(0).notNull(),
+  lastScannedAt: timestamp("last_scanned_at"),
+  executionId1: integer("execution_id_1"),
+  executionId2: integer("execution_id_2"),
+  isPublic: boolean("is_public").default(false).notNull(),
+  shareToken: varchar("share_token", { length: 128 }),
+  sharedAt: timestamp("shared_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -900,9 +987,16 @@ export type InsertSavedComparison = typeof savedComparisons.$inferInsert;
 export const technicalOnboardingReviews = pgTable("technical_onboarding_reviews", {
   id: serial("id").primaryKey(),
   configurationId: integer("configuration_id").notNull(),
+  applicationId: integer("application_id"),
   reviewerId: integer("reviewer_id").notNull(),
   status: reviewStatusEnum("status").default("pending").notNull(),
   comments: text("comments"),
+  reviewNotes: text("review_notes"),
+  correctionsRequired: text("corrections_required"),
+  endpointConnectivityTest: boolean("endpoint_connectivity_test"),
+  securityHeadersTest: boolean("security_headers_test"),
+  authenticationFlowTest: boolean("authentication_flow_test"),
+  tlsCertificateValid: boolean("tls_certificate_valid"),
   reviewedAt: timestamp("reviewed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -917,6 +1011,7 @@ export const testExecutions = pgTable("test_executions", {
   id: serial("id").primaryKey(),
   scenarioId: integer("scenario_id").notNull(),
   applicationId: integer("application_id").notNull(),
+  credentialId: integer("credential_id"),
   status: testStatusEnum("status").default("pending").notNull(),
   startedAt: timestamp("started_at"),
   completedAt: timestamp("completed_at"),
@@ -941,6 +1036,9 @@ export const testScenarios = pgTable("test_scenarios", {
   testType: varchar("test_type", { length: 64 }).notNull(),
   configuration: text("configuration"),
   expectedResult: text("expected_result"),
+  testScript: text("test_script"),
+  isRequired: boolean("is_required").default(false),
+  passingCriteria: text("passing_criteria"),
   timeout: integer("timeout").default(30000).notNull(),
   enabled: boolean("enabled").default(true).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -956,6 +1054,8 @@ export type InsertTestScenario = typeof testScenarios.$inferInsert;
 export const ocrCorrectionSettings = pgTable("ocr_correction_settings", {
   id: serial("id").primaryKey(),
   fieldName: varchar("field_name", { length: 100 }).notNull().unique(),
+  settingKey: varchar("setting_key", { length: 100 }),
+  settingValue: text("setting_value"),
   autoCorrectEnabled: boolean("auto_correct_enabled").default(true).notNull(),
   minConfidenceThreshold: integer("min_confidence_threshold").default(80).notNull(),
   requireReview: boolean("require_review").default(false).notNull(),
@@ -1805,3 +1905,191 @@ export const participantBilling = pgTable("participant_billing", {
 
 export type ParticipantBilling = typeof participantBilling.$inferSelect;
 export type InsertParticipantBilling = typeof participantBilling.$inferInsert;
+
+// ============================================================
+// OUTBOUND REMITTANCE MODULE - Additional Tables
+// ============================================================
+
+export const disputeTypeEnum = pgEnum("dispute_type", ["failed_delivery", "wrong_amount", "duplicate_charge", "unauthorized", "other"]);
+export const outboundDisputeStatusEnum = pgEnum("outbound_dispute_status", ["open", "under_review", "resolved", "rejected", "escalated"]);
+export const disputePriorityEnum = pgEnum("dispute_priority", ["low", "medium", "high", "critical"]);
+export const fundingMethodEnum = pgEnum("funding_method", ["RTGS", "NIP", "Wire"]);
+export const fundingStatusEnum = pgEnum("funding_status", ["pending_approval", "approved", "completed", "rejected"]);
+export const tierUpgradeStatusEnum = pgEnum("tier_upgrade_status", ["pending_review", "approved", "rejected"]);
+export const approvalStatusEnum = pgEnum("approval_status_enum", ["pending", "approved", "rejected"]);
+export const enforcementTypeEnum = pgEnum("enforcement_type", ["suspension", "corridor_restriction", "limit_override", "compliance_directive", "license_revocation", "warning", "show_cause"]);
+export const enforcementStatusEnum = pgEnum("enforcement_status", ["active", "resolved", "expired", "pending_review"]);
+export const triggerOperatorEnum = pgEnum("trigger_operator", ["gt", "lt", "gte", "lte"]);
+export const triggerActionEnum = pgEnum("trigger_action", ["suspend", "restrict_corridors", "reduce_limit", "warning"]);
+export const webhookEventStatusEnum = pgEnum("webhook_event_status", ["pending", "delivered", "failed", "retrying"]);
+
+/**
+ * Outbound Disputes - Transfer dispute tracking
+ */
+export const outboundDisputes = pgTable("outbound_disputes", {
+  id: serial("id").primaryKey(),
+  transferId: integer("transfer_id").notNull(),
+  participantId: integer("participant_id").notNull(),
+  disputeRef: varchar("dispute_ref", { length: 64 }).notNull().unique(),
+  type: disputeTypeEnum("type").notNull(),
+  reason: text("reason").notNull(),
+  amount: decimal("amount", { precision: 20, scale: 2 }).notNull(),
+  status: outboundDisputeStatusEnum("status").default("open").notNull(),
+  priority: disputePriorityEnum("priority").default("medium").notNull(),
+  assignedTo: integer("assigned_to"),
+  resolution: text("resolution"),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type OutboundDispute = typeof outboundDisputes.$inferSelect;
+export type InsertOutboundDispute = typeof outboundDisputes.$inferInsert;
+
+/**
+ * Funding Requests - Participant prefund top-up requests
+ */
+export const fundingRequests = pgTable("funding_requests", {
+  id: serial("id").primaryKey(),
+  participantId: integer("participant_id").notNull(),
+  requestRef: varchar("request_ref", { length: 128 }).notNull().unique(),
+  amount: decimal("amount", { precision: 20, scale: 2 }).notNull(),
+  sourceBank: varchar("source_bank", { length: 128 }).notNull(),
+  sourceAccount: varchar("source_account", { length: 32 }).notNull(),
+  method: fundingMethodEnum("method").notNull(),
+  status: fundingStatusEnum("status").default("pending_approval").notNull(),
+  approvedBy: integer("approved_by"),
+  approvedAt: timestamp("approved_at"),
+  settledAt: timestamp("settled_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type FundingRequest = typeof fundingRequests.$inferSelect;
+export type InsertFundingRequest = typeof fundingRequests.$inferInsert;
+
+/**
+ * Tier Upgrade Requests - Participant tier promotion requests
+ */
+export const tierUpgrades = pgTable("tier_upgrades", {
+  id: serial("id").primaryKey(),
+  participantId: integer("participant_id").notNull(),
+  currentTier: varchar("current_tier", { length: 32 }).notNull(),
+  requestedTier: varchar("requested_tier", { length: 32 }).notNull(),
+  justification: text("justification").notNull(),
+  monthlyVolume: decimal("monthly_volume", { precision: 20, scale: 2 }).notNull(),
+  status: tierUpgradeStatusEnum("status").default("pending_review").notNull(),
+  reviewedBy: integer("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type TierUpgrade = typeof tierUpgrades.$inferSelect;
+export type InsertTierUpgrade = typeof tierUpgrades.$inferInsert;
+
+/**
+ * Approval Queue - CBN/Admin approval items
+ */
+export const approvalQueue = pgTable("approval_queue", {
+  id: serial("id").primaryKey(),
+  entityType: varchar("entity_type", { length: 32 }).notNull(),
+  entityId: integer("entity_id").notNull(),
+  action: varchar("action", { length: 64 }).notNull(),
+  requestedBy: integer("requested_by").notNull(),
+  requestedByName: varchar("requested_by_name", { length: 256 }).notNull(),
+  reason: text("reason").notNull(),
+  status: approvalStatusEnum("status").default("pending").notNull(),
+  approvedBy: integer("approved_by"),
+  approvedAt: timestamp("approved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type Approval = typeof approvalQueue.$inferSelect;
+export type InsertApproval = typeof approvalQueue.$inferInsert;
+
+/**
+ * CBN Enforcement Actions - Regulatory enforcement against participants
+ */
+export const enforcementActions = pgTable("enforcement_actions", {
+  id: serial("id").primaryKey(),
+  participantId: integer("participant_id").notNull(),
+  participantName: varchar("participant_name", { length: 256 }).notNull(),
+  type: enforcementTypeEnum("type").notNull(),
+  status: enforcementStatusEnum("status").default("active").notNull(),
+  reason: text("reason").notNull(),
+  cbnReference: varchar("cbn_reference", { length: 128 }).notNull(),
+  issuedBy: varchar("issued_by", { length: 256 }).notNull(),
+  issuedAt: timestamp("issued_at").notNull(),
+  effectiveAt: timestamp("effective_at").notNull(),
+  expiresAt: timestamp("expires_at"),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: varchar("resolved_by", { length: 256 }),
+  resolutionNote: text("resolution_note"),
+  details: text("details"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type EnforcementAction = typeof enforcementActions.$inferSelect;
+export type InsertEnforcementAction = typeof enforcementActions.$inferInsert;
+
+/**
+ * Auto-Suspension Triggers - Automated enforcement rules
+ */
+export const autoTriggers = pgTable("auto_triggers", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 128 }).notNull(),
+  description: text("description").notNull(),
+  metric: varchar("metric", { length: 64 }).notNull(),
+  operator: triggerOperatorEnum("operator").notNull(),
+  threshold: decimal("threshold", { precision: 16, scale: 4 }).notNull(),
+  unit: varchar("unit", { length: 16 }).notNull(),
+  windowDays: integer("window_days").notNull(),
+  action: triggerActionEnum("action").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  lastTriggered: timestamp("last_triggered"),
+  triggeredCount: integer("triggered_count").default(0).notNull(),
+  createdBy: varchar("created_by", { length: 128 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type AutoTrigger = typeof autoTriggers.$inferSelect;
+export type InsertAutoTrigger = typeof autoTriggers.$inferInsert;
+
+/**
+ * Webhook Events - Outbound webhook delivery tracking
+ */
+export const outboundWebhookEvents = pgTable("outbound_webhook_events", {
+  id: serial("id").primaryKey(),
+  participantId: integer("participant_id").notNull(),
+  eventType: varchar("event_type", { length: 64 }).notNull(),
+  transferId: integer("transfer_id"),
+  payload: text("payload").notNull(),
+  targetUrl: varchar("target_url", { length: 512 }).notNull(),
+  status: webhookEventStatusEnum("status").default("pending").notNull(),
+  attempts: integer("attempts").default(0).notNull(),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  deliveredAt: timestamp("delivered_at"),
+  responseStatus: integer("response_status"),
+  responseBody: text("response_body"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type OutboundWebhookEvent = typeof outboundWebhookEvents.$inferSelect;
+export type InsertOutboundWebhookEvent = typeof outboundWebhookEvents.$inferInsert;
+
+/**
+ * Transfer Lifecycle Events - Audit trail for transfer state transitions
+ */
+export const transferLifecycleEvents = pgTable("transfer_lifecycle_events", {
+  id: serial("id").primaryKey(),
+  transferId: integer("transfer_id").notNull(),
+  fromStep: varchar("from_step", { length: 32 }).notNull(),
+  toStep: varchar("to_step", { length: 32 }).notNull(),
+  fromStatus: varchar("from_status", { length: 32 }).notNull(),
+  toStatus: varchar("to_status", { length: 32 }).notNull(),
+  details: text("details"),
+  triggeredBy: varchar("triggered_by", { length: 128 }),
+  durationMs: integer("duration_ms"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type TransferLifecycleEvent = typeof transferLifecycleEvents.$inferSelect;
+export type InsertTransferLifecycleEvent = typeof transferLifecycleEvents.$inferInsert;

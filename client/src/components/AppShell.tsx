@@ -73,7 +73,7 @@ function Breadcrumb({ pathname }: { pathname: string }) {
   });
 
   return (
-    <nav className="flex items-center gap-1.5 text-xs text-muted-foreground px-6 pt-3">
+    <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-xs text-muted-foreground px-6 pt-3">
       <Link href="/">
         <a className="hover:text-foreground transition-colors">Home</a>
       </Link>
@@ -179,6 +179,8 @@ export default function AppShell({ children }: AppShellProps) {
           onClick={() => isMobile ? setMobileOpen(false) : setCollapsed(!collapsed)}
           className="p-1 rounded hover:bg-accent text-muted-foreground flex-shrink-0"
           title={collapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!collapsed}
         >
           {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
         </button>
@@ -191,7 +193,9 @@ export default function AppShell({ children }: AppShellProps) {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <input
               id="sidebar-search"
-              type="text"
+              type="search"
+              role="searchbox"
+              aria-label="Search navigation"
               placeholder="Search... (Ctrl+K)"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
@@ -210,7 +214,7 @@ export default function AppShell({ children }: AppShellProps) {
       )}
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
+      <nav aria-label="Main navigation" role="navigation" className="flex-1 overflow-y-auto p-2 space-y-0.5">
         {Array.from(sections.entries()).map(([section, items]) => (
           <React.Fragment key={section || 'main'}>
             {section && !collapsed && (
@@ -227,6 +231,10 @@ export default function AppShell({ children }: AppShellProps) {
                 <Link key={item.id} href={item.href}>
                   <a
                     title={collapsed ? item.label : undefined}
+                    aria-label={item.label}
+                    aria-current={isActive ? 'page' : undefined}
+                    role="link"
+                    tabIndex={0}
                     className={cn(
                       'flex items-center gap-2.5 w-full rounded-md text-left text-[13px] font-medium transition-colors',
                       collapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2',
@@ -265,6 +273,13 @@ export default function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="flex min-h-screen bg-background font-sans">
+      {/* Skip to main content link for keyboard users */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2 focus:bg-blue-600 focus:text-white focus:px-4 focus:py-2 focus:rounded-md focus:text-sm"
+      >
+        Skip to main content
+      </a>
       {/* Mobile overlay */}
       {isMobile && mobileOpen && (
         <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setMobileOpen(false)} />
@@ -273,6 +288,8 @@ export default function AppShell({ children }: AppShellProps) {
       {/* Sidebar — desktop */}
       {!isMobile && (
         <aside
+          role="complementary"
+          aria-label="Sidebar navigation"
           className={cn(
             'flex flex-col flex-shrink-0 border-r border-border bg-muted/30 transition-all duration-200 sticky top-0 h-screen',
             collapsed ? 'w-16' : 'w-60'
@@ -284,7 +301,12 @@ export default function AppShell({ children }: AppShellProps) {
 
       {/* Sidebar — mobile drawer */}
       {isMobile && mobileOpen && (
-        <aside className="fixed left-0 top-0 z-50 flex flex-col w-72 h-screen border-r border-border bg-background shadow-xl">
+        <aside
+          role="dialog"
+          aria-modal="true"
+          aria-label="Navigation menu"
+          className="fixed left-0 top-0 z-50 flex flex-col w-72 h-screen border-r border-border bg-background shadow-xl"
+        >
           {sidebarContent}
         </aside>
       )}
@@ -294,8 +316,13 @@ export default function AppShell({ children }: AppShellProps) {
         {/* Mobile top bar */}
         {isMobile && (
           <header className="flex items-center gap-3 border-b border-border px-4 py-3 bg-background sticky top-0 z-30">
-            <button onClick={() => setMobileOpen(true)} className="p-1 rounded hover:bg-accent">
-              <PanelLeft className="h-5 w-5" />
+            <button
+              onClick={() => setMobileOpen(true)}
+              className="p-1 rounded hover:bg-accent"
+              aria-label="Open navigation menu"
+              aria-expanded={mobileOpen}
+            >
+              <PanelLeft className="h-5 w-5" aria-hidden="true" />
             </button>
             <span className="text-sm font-bold">Payment Switch</span>
           </header>
@@ -303,7 +330,7 @@ export default function AppShell({ children }: AppShellProps) {
 
         <Breadcrumb pathname={location} />
 
-        <main className="flex-1">
+        <main id="main-content" className="flex-1" role="main">
           {children}
         </main>
       </div>

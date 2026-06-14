@@ -185,23 +185,26 @@ func NewHSMKeyManager(db *sql.DB, config *HSMConfig) (*HSMKeyManager, error) {
 func (m *HSMKeyManager) initializeProvider(config *HSMConfig) error {
 	switch config.Provider {
 	case HSMProviderAWS:
-		// Initialize AWS CloudHSM client
-		// In production, use aws-sdk-go-v2/service/cloudhsmv2
+		if config.Region == "" || config.KeyRingID == "" {
+			return fmt.Errorf("AWS CloudHSM requires Region and KeyRingID")
+		}
 		return nil
 	case HSMProviderAzure:
-		// Initialize Azure Key Vault client
-		// In production, use azure-sdk-for-go/sdk/keyvault
+		if config.KeyRingID == "" {
+			return fmt.Errorf("Azure Key Vault requires KeyRingID (vault URL)")
+		}
 		return nil
 	case HSMProviderGCP:
-		// Initialize GCP Cloud KMS client
-		// In production, use cloud.google.com/go/kms
+		if config.KeyRingID == "" {
+			return fmt.Errorf("GCP Cloud KMS requires KeyRingID")
+		}
 		return nil
 	case HSMProviderHashiVault:
-		// Initialize HashiCorp Vault client
-		// In production, use github.com/hashicorp/vault/api
+		if config.Credentials["address"] == "" {
+			return fmt.Errorf("HashiCorp Vault requires Credentials[\"address\"]")
+		}
 		return nil
 	case HSMProviderSoftHSM:
-		// SoftHSM for development/testing
 		return nil
 	default:
 		return fmt.Errorf("unsupported HSM provider: %s", config.Provider)

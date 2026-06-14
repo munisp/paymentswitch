@@ -49,10 +49,10 @@ export async function shouldRetry(
     return { shouldRetry: false, reason: "Delivery log not found" };
   }
 
-  const log = logs[0];
+  const deliveryLog = logs[0];
 
   // Only retry failed deliveries
-  if (log.status !== "failed") {
+  if (deliveryLog.status !== "failed") {
     return { shouldRetry: false, reason: "Delivery not in failed state" };
   }
 
@@ -60,7 +60,7 @@ export async function shouldRetry(
   const webhooks = await db
     .select()
     .from(apiKeyWebhooks)
-    .where(eq(apiKeyWebhooks.id, log.webhookId))
+    .where(eq(apiKeyWebhooks.id, deliveryLog.webhookId))
     .limit(1);
 
   if (webhooks.length === 0) {
@@ -75,7 +75,7 @@ export async function shouldRetry(
   }
 
   // Check if max retries exceeded
-  if (log.attempts >= webhook.maxRetries) {
+  if (deliveryLog.attempts >= webhook.maxRetries) {
     return { shouldRetry: false, reason: "Max retry attempts exceeded" };
   }
 
@@ -103,19 +103,19 @@ export async function scheduleRetry(deliveryLogId: number): Promise<void> {
     .where(eq(webhookDeliveryLogs.id, deliveryLogId))
     .limit(1);
 
-  const log = logs[0];
+  const deliveryLog = logs[0];
 
   const webhooks = await db
     .select()
     .from(apiKeyWebhooks)
-    .where(eq(apiKeyWebhooks.id, log.webhookId))
+    .where(eq(apiKeyWebhooks.id, deliveryLog.webhookId))
     .limit(1);
 
   const webhook = webhooks[0];
 
   // Calculate next retry time
   const nextRetryAt = calculateNextRetryTime(
-    log.attempts + 1,
+    deliveryLog.attempts + 1,
     webhook.retryBackoffMs
   );
 
@@ -214,7 +214,7 @@ export async function sendFinalFailureNotification(
       const rendered = renderTemplate(webhook.finalFailureTemplate, templateData as any);
       notificationPayload = JSON.parse(rendered);
     } catch (error) {
-      log.error("[Retry] Failed to render final failure template, using default:", error);
+      log.error({ err: error }, "[Retry] Failed to render final failure template, using default:");
       // Fall back to default payload
     }
   }
@@ -242,8 +242,8 @@ export async function sendFinalFailureNotification(
     }
   } catch (error) {
     log.error(
-      `[Retry] Error sending final failure notification:`,
-      error instanceof Error ? error.message : "Unknown error"
+      { err: error },
+      `[Retry] Error sending final failure notification: ${error instanceof Error ? error.message : "Unknown error"}`
     );
   }
 }
@@ -302,13 +302,13 @@ export async function processRetryAttempt(
       return false;
     }
 
-    const log = logs[0];
+    const deliveryLog = logs[0];
 
     // Get webhook configuration
     const webhooks = await db
       .select()
       .from(apiKeyWebhooks)
-      .where(eq(apiKeyWebhooks.id, log.webhookId))
+      .where(eq(apiKeyWebhooks.id, deliveryLog.webhookId))
       .limit(1);
 
     if (webhooks.length === 0) {
@@ -319,7 +319,7 @@ export async function processRetryAttempt(
     const webhook = webhooks[0];
 
     // Attempt delivery
-    log.info(`[Retry] Attempting delivery ${deliveryLogId} (attempt ${log.attempts + 1}/${webhook.maxRetries})`);
+    log.info(`[Retry] Attempting delivery ${deliveryLogId} (attempt ${deliveryLog.attempts + 1}/${webhook.maxRetries})`);
 
     const response = await fetch(webhook.webhookUrl, {
       method: "POST",
@@ -327,7 +327,7 @@ export async function processRetryAttempt(
         "Content-Type": "application/json",
         "X-Webhook-Signature": webhook.secret,
       },
-      body: log.payload,
+      body: deliveryLog.payload,
       signal: AbortSignal.timeout(30000), // 30 second timeout
     });
 
@@ -344,13 +344,13 @@ export async function processRetryAttempt(
           statusCode: response.status,
           responseBody,
           deliveryDurationMs: duration,
-          attempts: log.attempts + 1,
+          attempts: deliveryLog.attempts + 1,
           lastAttemptAt: new Date(),
           nextRetryAt: null,
         })
         .where(eq(webhookDeliveryLogs.id, deliveryLogId));
 
-        log.info(`[Retry] Delivery ${deliveryLogId} succeeded on attempt ${log.attempts + 1}`);
+        log.info(`[Retry] Delivery ${deliveryLogId} succeeded on attempt ${deliveryLog.attempts + 1}`);
         
         // Reset consecutive failures counter on success
         await db
@@ -361,7 +361,7 @@ export async function processRetryAttempt(
         return true;
     } else {
       // Failed - schedule retry if attempts remaining
-      const newAttempts = log.attempts + 1;
+      const newAttempts = deliveryLog.attempts + 1;
       
       if (newAttempts >= webhook.maxRetries) {
         // Max retries exceeded
@@ -452,7 +452,7 @@ export async function processRetryAttempt(
         });
       }
     } catch (logError) {
-      log.error(`[Retry] Failed to log retry attempt:`, logError);
+      log.error({ err: logError }, `[Retry] Failed to log retry attempt`);
     }
 
     const logs = await db
@@ -462,16 +462,16 @@ export async function processRetryAttempt(
       .limit(1);
 
     if (logs.length > 0) {
-      const log = logs[0];
+      const deliveryLog = logs[0];
       const webhooks = await db
         .select()
         .from(apiKeyWebhooks)
-        .where(eq(apiKeyWebhooks.id, log.webhookId))
+        .where(eq(apiKeyWebhooks.id, deliveryLog.webhookId))
         .limit(1);
 
       if (webhooks.length > 0) {
         const webhook = webhooks[0];
-        const newAttempts = log.attempts + 1;
+        const newAttempts = deliveryLog.attempts + 1;
 
         if (newAttempts >= webhook.maxRetries) {
           await markAsPermanentlyFailed(

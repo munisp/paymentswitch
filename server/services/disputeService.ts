@@ -459,7 +459,7 @@ export class DisputeService extends EventEmitter {
     const breaches: Dispute[] = [];
     const now = new Date();
 
-    for (const dispute of this.disputes.values()) {
+    for (const dispute of Array.from(this.disputes.values())) {
       if (dispute.status === 'resolved' || dispute.status === 'closed') continue;
 
       const hoursOpen = (now.getTime() - dispute.createdAt.getTime()) / (1000 * 60 * 60);

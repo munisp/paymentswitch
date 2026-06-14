@@ -399,7 +399,7 @@ export function SavedComparisonsTab({ credentialId }: SavedComparisonsTabProps) 
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => handleView(comparison.executionId1, comparison.executionId2)}
+                    onClick={() => handleView(comparison.executionId1 ?? 0, comparison.executionId2 ?? 0)}
                   >
                     <Eye className="h-4 w-4 mr-1" />
                     View

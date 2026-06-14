@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useState, useCallback } from 'react';
 import { ScrollText, Search, Filter, Download, Eye, User, Clock } from 'lucide-react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
@@ -16,7 +17,7 @@ const riskColors: Record<string, string> = { low: 'text-gray-500', medium: 'text
 
 export function AuditLog() {
   const [search, setSearch] = useState('');
-  const fetcher = useCallback(() => lakehouseAPI.fetch<{ entries: typeof fallbackAuditEntries }>('/api/v1/audit/log').catch((err: unknown) => { console.error("API fallback:", err); return { entries: fallbackAuditEntries }; }), []);
+  const fetcher = useCallback(() => lakehouseAPI.fetch<{ entries: typeof fallbackAuditEntries }>('/api/v1/audit/log').catch((err: unknown) => { logger.error("API fallback:", err); return { entries: [] }; }), []);
   const { data } = useLakehouseData(fetcher, 15000);
   const auditEntries = data?.entries || fallbackAuditEntries;
   const filtered = auditEntries.filter(e => search === '' || e.action.includes(search.toLowerCase()) || e.actor.includes(search.toLowerCase()) || e.details.toLowerCase().includes(search.toLowerCase()));

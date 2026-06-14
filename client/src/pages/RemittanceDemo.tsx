@@ -907,7 +907,9 @@ function AgentCashDemo() {
   const [collectionCode, setCollectionCode] = useState('');
 
   const generateCode = () => {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const arr = new Uint32Array(1);
+    crypto.getRandomValues(arr);
+    const code = (100000 + (arr[0] % 900000)).toString();
     setCollectionCode(code);
     toast.success('Collection code generated! Valid for 72 hours.');
   };

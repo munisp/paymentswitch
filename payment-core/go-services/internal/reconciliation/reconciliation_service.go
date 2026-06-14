@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -131,6 +132,7 @@ type ExceptionQueue struct {
 	mu      sync.RWMutex
 	queue   []*Discrepancy
 	maxSize int
+	db      *sql.DB
 }
 
 func NewExceptionQueue(maxSize int) *ExceptionQueue {
@@ -163,6 +165,7 @@ func (q *ExceptionQueue) Add(discrepancy *Discrepancy) {
 	}
 
 	q.queue = append(q.queue, discrepancy)
+	go q.persistDiscrepancy(discrepancy)
 }
 
 func (q *ExceptionQueue) GetPending() []*Discrepancy {
@@ -214,6 +217,7 @@ func (q *ExceptionQueue) Resolve(id, resolution string) bool {
 			now := time.Now()
 			d.ResolvedAt = &now
 			d.Resolution = resolution
+			go q.persistDiscrepancy(d)
 			return true
 		}
 	}
@@ -228,6 +232,7 @@ func (q *ExceptionQueue) Escalate(id, assignedTo string) bool {
 		if d.ID == id {
 			d.Status = DiscrepancyStatusEscalated
 			d.AssignedTo = assignedTo
+			go q.persistDiscrepancy(d)
 			return true
 		}
 	}

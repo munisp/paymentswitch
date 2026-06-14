@@ -33,16 +33,26 @@ export async function createAlertRule(
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const result = await db.insert(monitoringAlertRules).values({
+  const metricMap: Record<string, "error_rate" | "latency" | "throughput" | "availability"> = {
+    error_rate: "error_rate", response_time: "latency", transaction_volume: "throughput",
+    uptime: "availability", failure_rate: "error_rate", peak_tps: "throughput",
+  };
+  const opMap: Record<string, "gt" | "lt" | "eq" | "ne" | "gte" | "lte"> = {
+    greater_than: "gt", less_than: "lt", equals: "eq", not_equals: "ne",
+  };
+  const [inserted] = await db.insert(monitoringAlertRules).values({
+    applicationId: 0,
     credentialId,
-    createdBy: userId,
-    ...rule,
+    name: rule.ruleName,
+    metricType: (metricMap[rule.metricType] ?? "error_rate") as any,
+    operator: (opMap[rule.operator] ?? "gt") as any,
+    threshold: rule.thresholdValue.toString(),
+    severity: (rule.severity === "info" ? "low" : rule.severity === "warning" ? "medium" : "critical") as any,
     enabled: rule.enabled ?? true,
     notifyEmail: rule.notifyEmail ?? true,
-    notifyInApp: rule.notifyInApp ?? true,
-  });
+  }).returning({ id: monitoringAlertRules.id });
 
-  return { id: result[0].insertId };
+  return { id: inserted.id };
 }
 
 /**
@@ -198,26 +208,26 @@ async function triggerAlert(
     return null;
   }
 
+  const thresholdNum = typeof rule.threshold === 'string' ? parseFloat(rule.threshold) : (rule.threshold ?? 0);
   const { title, message } = generateAlertMessage(
     rule,
     currentValue,
-    rule.thresholdValue
+    thresholdNum
   );
 
   // Create alert
-  const result = await db.insert(monitoringAlerts).values({
+  const [alertInserted] = await db.insert(monitoringAlerts).values({
     ruleId: rule.id,
+    applicationId: 0,
     credentialId: rule.credentialId,
-    metricType: rule.metricType,
-    currentValue,
-    thresholdValue: rule.thresholdValue,
+    metricValue: currentValue.toString(),
     severity: rule.severity,
     title,
     message,
     status: "active",
-  });
+  }).returning({ id: monitoringAlerts.id });
 
-  const alertId = result[0].insertId;
+  const alertId = alertInserted.id;
 
   // Send notifications
   if (rule.notifyInApp) {
@@ -238,7 +248,7 @@ async function triggerAlert(
         content: message,
       });
     } catch (error) {
-      log.error("Failed to notify owner:", error);
+      log.error({ err: error }, "Failed to notify owner:");
     }
   }
 
@@ -255,7 +265,7 @@ async function triggerAlert(
       triggeredAt: new Date(),
     });
   } catch (error) {
-    log.error("Failed to send Slack notification:", error);
+    log.error({ err: error }, "Failed to send Slack notification:");
   }
 
   return { id: alertId, title, message };
@@ -292,7 +302,7 @@ export async function evaluateMonitoringData(
     const shouldTrigger = evaluateRule(
       metricValue,
       rule.operator,
-      rule.thresholdValue
+      typeof rule.threshold === 'string' ? parseFloat(rule.threshold) : (rule.threshold ?? 0)
     );
 
     if (shouldTrigger) {
@@ -368,7 +378,6 @@ export async function resolveAlert(alertId: number, userId: number) {
     .update(monitoringAlerts)
     .set({
       status: "resolved",
-      resolvedBy: userId,
       resolvedAt: new Date(),
     })
     .where(eq(monitoringAlerts.id, alertId));
@@ -432,8 +441,8 @@ export async function detectAnomalies(
   const avgErrorRate =
     historicalData.reduce((sum, d) => {
       const rate =
-        d.totalTransactions > 0
-          ? (d.failedTransactions / d.totalTransactions) * 100
+        (d.totalTransactions ?? 0) > 0
+          ? ((d.failedTransactions ?? 0) / (d.totalTransactions ?? 1)) * 100
           : 0;
       return sum + rate;
     }, 0) / historicalData.length;

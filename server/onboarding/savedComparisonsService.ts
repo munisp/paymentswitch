@@ -5,19 +5,22 @@ import { savedComparisons, InsertSavedComparison } from "../../drizzle/schema";
 /**
  * Save a test comparison
  */
-export async function saveComparison(data: Omit<InsertSavedComparison, 'tags'> & { tags?: string[] }) {
+export async function saveComparison(data: Partial<InsertSavedComparison> & { name: string; tags?: string[] }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
   const insertData = {
+    userId: data.userId ?? 0,
+    fromCurrency: data.fromCurrency ?? 'USD',
+    toCurrency: data.toCurrency ?? 'NGN',
     ...data,
     tags: data.tags ? JSON.stringify(data.tags) : null,
   };
 
-  const result = await db.insert(savedComparisons).values(insertData);
+  const [inserted] = await db.insert(savedComparisons).values(insertData).returning({ id: savedComparisons.id });
 
   return {
-    id: Number(result[0].insertId),
+    id: inserted.id,
     success: true,
   };
 }

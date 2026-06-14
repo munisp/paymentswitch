@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import { Zap, Activity, Server, Globe, RefreshCw, Webhook, FileText, Shield, DollarSign } from 'lucide-react';
@@ -17,7 +18,7 @@ export function GoServices() {
   const fetcher = useCallback(() =>
     lakehouseAPI.fetch<{ services: typeof goServices }>('/api/v1/infrastructure/go-services')
       .then(d => d.services)
-      .catch((err: unknown) => { console.error("API fallback:", err); return goServices; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return goServices; }), []);
   const { data: services } = useLakehouseData(fetcher, 30000);
   const activeServices = services || goServices;
   return (

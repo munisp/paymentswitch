@@ -37,13 +37,13 @@ export async function getNotificationPreferences(userId: number): Promise<Notifi
     // Create default preferences if they don't exist
     const defaultPrefs: InsertNotificationPreference = {
       userId,
-      emailNotifications: 'true',
-      smsNotifications: 'false',
-      newDeviceAlerts: 'true',
-      suspiciousActivityAlerts: 'true',
-      loginAlerts: 'false',
-      passwordChangeAlerts: 'true',
-      twoFactorChangeAlerts: 'true',
+      emailNotifications: true,
+      smsNotifications: false,
+      newDeviceAlerts: true,
+      suspiciousActivityAlerts: true,
+      loginAlerts: false,
+      passwordChangeAlerts: true,
+      twoFactorChangeAlerts: true,
     };
 
     await db.insert(notificationPreferences).values(defaultPrefs);
@@ -57,7 +57,7 @@ export async function getNotificationPreferences(userId: number): Promise<Notifi
 
     return created || null;
   } catch (error) {
-    log.error('[NotificationPreferences] Error getting preferences:', error);
+    log.error({ err: error }, '[NotificationPreferences] Error getting preferences:');
     return null;
   }
 }
@@ -86,7 +86,7 @@ export async function updateNotificationPreferences(
 
     return { success: true };
   } catch (error) {
-    log.error('[NotificationPreferences] Error updating preferences:', error);
+    log.error({ err: error }, '[NotificationPreferences] Error updating preferences:');
     return { success: false, error: 'Failed to update preferences' };
   }
 }
@@ -102,13 +102,13 @@ export async function resetNotificationPreferences(userId: number): Promise<{ su
 
   try {
     const defaultPrefs = {
-      emailNotifications: 'true' as const,
-      smsNotifications: 'false' as const,
-      newDeviceAlerts: 'true' as const,
-      suspiciousActivityAlerts: 'true' as const,
-      loginAlerts: 'false' as const,
-      passwordChangeAlerts: 'true' as const,
-      twoFactorChangeAlerts: 'true' as const,
+      emailNotifications: true,
+      smsNotifications: false,
+      newDeviceAlerts: true,
+      suspiciousActivityAlerts: true,
+      loginAlerts: false,
+      passwordChangeAlerts: true,
+      twoFactorChangeAlerts: true,
     };
 
     await db
@@ -118,7 +118,7 @@ export async function resetNotificationPreferences(userId: number): Promise<{ su
 
     return { success: true };
   } catch (error) {
-    log.error('[NotificationPreferences] Error resetting preferences:', error);
+    log.error({ err: error }, '[NotificationPreferences] Error resetting preferences:');
     return { success: false, error: 'Failed to reset preferences' };
   }
 }
@@ -138,25 +138,25 @@ export async function shouldSendNotification(params: {
   }
 
   // Check if channel is enabled
-  if (params.channel === 'email' && prefs.emailNotifications !== 'true') {
+  if (params.channel === 'email' && !prefs.emailNotifications) {
     return false;
   }
-  if (params.channel === 'sms' && prefs.smsNotifications !== 'true') {
+  if (params.channel === 'sms' && !prefs.smsNotifications) {
     return false;
   }
 
   // Check if notification type is enabled
   switch (params.notificationType) {
     case 'newDevice':
-      return prefs.newDeviceAlerts === 'true';
+      return !!prefs.newDeviceAlerts;
     case 'suspiciousActivity':
-      return prefs.suspiciousActivityAlerts === 'true';
+      return !!prefs.suspiciousActivityAlerts;
     case 'login':
-      return prefs.loginAlerts === 'true';
+      return !!prefs.loginAlerts;
     case 'passwordChange':
-      return prefs.passwordChangeAlerts === 'true';
+      return !!prefs.passwordChangeAlerts;
     case 'twoFactorChange':
-      return prefs.twoFactorChangeAlerts === 'true';
+      return !!prefs.twoFactorChangeAlerts;
     default:
       return false;
   }

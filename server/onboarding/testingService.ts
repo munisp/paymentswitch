@@ -58,14 +58,15 @@ export async function executeTest(params: {
 
   // Create test execution record
   const executionData: InsertTestExecution = {
+    applicationId: 0,
     credentialId: params.credentialId,
     scenarioId: params.scenarioId,
     status: "running",
     startedAt: new Date(),
   };
 
-  const [execution] = await db.insert(testExecutions).values(executionData);
-  const executionId = execution.insertId;
+  const [execInserted] = await db.insert(testExecutions).values(executionData).returning({ id: testExecutions.id });
+  const executionId = execInserted.id;
 
   // Simulate test execution (in production, this would run actual tests)
   try {
@@ -118,7 +119,7 @@ async function runTestScenario(scenario: TestScenario, credentialId: number) {
   });
 
   // Parse test script
-  const testScript = JSON.parse(scenario.testScript);
+  const testScript = JSON.parse(scenario.testScript ?? '{}');
   
   // Simulate test execution based on category
   let passed = false;
@@ -280,8 +281,8 @@ export async function getTestSummary(credentialId: number) {
   const executions = await getTestExecutions(credentialId);
   const scenarios = await getTestScenarios();
 
-  const requiredScenarios = scenarios.filter(s => s.isRequired === 1);
-  const optionalScenarios = scenarios.filter(s => s.isRequired === 0);
+  const requiredScenarios = scenarios.filter(s => !!s.isRequired);
+  const optionalScenarios = scenarios.filter(s => !s.isRequired);
 
   const requiredPassed = executions.filter(
     e => e.status === "passed" && requiredScenarios.some(s => s.id === e.scenarioId)

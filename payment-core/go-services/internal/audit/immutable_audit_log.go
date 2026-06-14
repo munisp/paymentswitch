@@ -3,6 +3,7 @@ package audit
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -111,6 +112,7 @@ type ImmutableAuditLog struct {
 	sequenceNumber int64
 	signingKey     []byte
 	eventHandlers  map[string][]func(*AuditEntry)
+	db             *sql.DB
 }
 
 func NewImmutableAuditLog() *ImmutableAuditLog {
@@ -190,6 +192,7 @@ func (ial *ImmutableAuditLog) Log(params LogParams) (*AuditEntry, error) {
 
 	ial.entries = append(ial.entries, entry)
 
+	go ial.persistEntry(&entry)
 	go ial.emit("entryLogged", &entry)
 
 	if params.EventType == EventTypeSecurityEvent || params.Outcome == OutcomeFailure {

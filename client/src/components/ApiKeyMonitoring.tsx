@@ -137,8 +137,8 @@ export default function ApiKeyMonitoring({ credentialId }: ApiKeyMonitoringProps
                       className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
                     >
                       <div className="flex items-center gap-3 flex-1">
-                        <div className={getStatusColor(log.statusCode)}>
-                          {getStatusIcon(log.statusCode)}
+                        <div className={getStatusColor(log.statusCode ?? 0)}>
+                          {getStatusIcon(log.statusCode ?? 0)}
                         </div>
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
@@ -154,12 +154,12 @@ export default function ApiKeyMonitoring({ credentialId }: ApiKeyMonitoringProps
                       </div>
                       <div className="flex items-center gap-4 text-sm text-muted-foreground">
                         <Badge
-                          variant={log.statusCode < 400 ? "default" : "destructive"}
+                          variant={(log.statusCode ?? 0) < 400 ? "default" : "destructive"}
                           className="font-mono"
                         >
                           {log.statusCode}
                         </Badge>
-                        <span>{log.responseTime}ms</span>
+                        <span>{log.responseTimeMs}ms</span>
                         {log.ipAddress && (
                           <span className="text-xs font-mono">{log.ipAddress}</span>
                         )}

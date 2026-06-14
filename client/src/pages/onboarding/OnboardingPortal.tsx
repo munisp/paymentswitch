@@ -110,15 +110,15 @@ export default function OnboardingPortal() {
     preferredEnvironment: 'sandbox',
   });
 
-  const submitApplication = trpc.technicalOnboarding.submit.useMutation({
-    onSuccess: (data) => {
+  const submitApplication = trpc.technicalOnboarding.submitForReview.useMutation({
+    onSuccess: (data: any) => {
       setCaseId(data?.id?.toString() ?? `APP-${Date.now()}`);
       setIsSubmitted(true);
       setCurrentStep(5);
       toast.success('Application submitted successfully');
     },
-    onError: (err) => {
-      log.error('Submission failed', err);
+    onError: (err: any) => {
+      log.error(String(err));
       toast.error('Failed to submit application. Please try again.');
     },
   });
@@ -185,23 +185,6 @@ export default function OnboardingPortal() {
     setIsSubmitting(true);
     submitApplication.mutate({
       applicationId: 0,
-      endpoints: {
-        primaryUrl: formData.apiEndpoint,
-        callbackUrl: formData.callbackUrl,
-      },
-      security: {
-        ipWhitelist: formData.ipWhitelist.split(',').map((ip) => ip.trim()).filter(Boolean),
-        mtlsCertificate: '',
-      },
-      network: {
-        protocols: ['REST', 'ISO8583'],
-        encoding: 'UTF-8',
-        timezone: 'Africa/Lagos',
-      },
-      compliance: {
-        amlPolicyDoc: uploadedFiles[0] ?? '',
-        dpaPolicyDoc: uploadedFiles[1] ?? '',
-      },
     });
     setIsSubmitting(false);
   };

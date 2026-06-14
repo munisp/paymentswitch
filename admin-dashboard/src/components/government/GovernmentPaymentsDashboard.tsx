@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import React, { useState, useEffect } from 'react';
 import { lakehouseAPI } from '@/lib/api';
 
@@ -73,33 +74,33 @@ interface RegulatoryReport {
   reference: string;
 }
 
-const mockGovPayments: GovernmentPayment[] = [
+const defaultGovPayments: GovernmentPayment[] = [
   { id: 'GOV-001', category: 'TSA_COLLECTION', status: 'COMPLETED', payerName: 'Revenue Collection Agent 1', payerTin: 'TIN10000001', beneficiaryMda: 'Federal Ministry of Finance', amount: 450000000, tsaCode: 'TSA-001-FMF', revenueCode: 'REV-1000', narration: 'TSA collection for FMF', gifmisRef: 'GIFMIS-A1B2C3' },
   { id: 'GOV-002', category: 'TSA_COLLECTION', status: 'COMPLETED', payerName: 'Revenue Collection Agent 2', payerTin: 'TIN10000002', beneficiaryMda: 'Nigeria Customs Service', amount: 1200000000, tsaCode: 'TSA-002-NCS', revenueCode: 'REV-2000', narration: 'Customs duty collections', gifmisRef: 'GIFMIS-D4E5F6' },
   { id: 'GOV-003', category: 'MDA_PAYMENT', status: 'PROCESSING', payerName: 'CBN Treasury', payerTin: 'TIN-CBN-001', beneficiaryMda: 'Federal Ministry of Works', amount: 8500000000, tsaCode: 'TSA-003-FMW', revenueCode: 'EXP-3000', narration: 'Capital expenditure allocation', gifmisRef: 'GIFMIS-G7H8I9' },
   { id: 'GOV-004', category: 'SALARY_PAYMENT', status: 'COMPLETED', payerName: 'OAGF', payerTin: 'TIN-OAGF-001', beneficiaryMda: 'Federal Civil Servants', amount: 350000000000, tsaCode: 'TSA-004-SAL', revenueCode: 'SAL-1000', narration: 'April 2026 salary disbursement', gifmisRef: 'GIFMIS-J0K1L2' },
 ];
 
-const mockTaxes: TaxPayment[] = [
+const defaultTaxes: TaxPayment[] = [
   { id: 'TAX-001', taxType: 'CIT', payerName: 'Dangote Industries Ltd', payerTin: 'TIN-DAN-001', assessmentYear: 2025, taxOffice: 'FIRS Large Tax Office Lagos', amount: 2500000000, penalty: 0, interest: 0, totalAmount: 2500000000, status: 'PAID', receiptNumber: 'FIRS-CIT-2026-001' },
   { id: 'TAX-002', taxType: 'VAT', payerName: 'MTN Nigeria Communications', payerTin: 'TIN-MTN-001', assessmentYear: 2026, taxOffice: 'FIRS Large Tax Office Abuja', amount: 850000000, penalty: 0, interest: 0, totalAmount: 850000000, status: 'PAID', receiptNumber: 'FIRS-VAT-2026-001' },
   { id: 'TAX-003', taxType: 'WHT', payerName: 'Shell Petroleum Dev Co', payerTin: 'TIN-SHELL-001', assessmentYear: 2026, taxOffice: 'FIRS Oil & Gas Office', amount: 12000000000, penalty: 0, interest: 0, totalAmount: 12000000000, status: 'ASSESSED', receiptNumber: '' },
   { id: 'TAX-004', taxType: 'PAYE', payerName: 'First Bank of Nigeria', payerTin: 'TIN-FBN-001', assessmentYear: 2026, taxOffice: 'LIRS Ikeja', amount: 180000000, penalty: 12000000, interest: 3000000, totalAmount: 195000000, status: 'OVERDUE', receiptNumber: '' },
 ];
 
-const mockPensions: PensionRemittance[] = [
+const defaultPensions: PensionRemittance[] = [
   { id: 'PEN-001', employerName: 'Access Bank Plc', employerRc: 'RC125816', pfaName: 'ARM Pension Managers', pfaCode: 'PFA-ARM', employeeCount: 8500, employerContribution: 425000000, employeeContribution: 340000000, voluntaryContribution: 85000000, totalAmount: 850000000, period: 'Apr 2026', status: 'CONFIRMED' },
   { id: 'PEN-002', employerName: 'MTN Nigeria', employerRc: 'RC395010', pfaName: 'Stanbic IBTC Pension', pfaCode: 'PFA-SIB', employeeCount: 5200, employerContribution: 312000000, employeeContribution: 260000000, voluntaryContribution: 52000000, totalAmount: 624000000, period: 'Apr 2026', status: 'CONFIRMED' },
   { id: 'PEN-003', employerName: 'Dangote Cement', employerRc: 'RC131222', pfaName: 'Leadway Pensure', pfaCode: 'PFA-LWP', employeeCount: 12000, employerContribution: 480000000, employeeContribution: 360000000, voluntaryContribution: 0, totalAmount: 840000000, period: 'Apr 2026', status: 'PENDING' },
 ];
 
-const mockSocial: SocialDisbursement[] = [
+const defaultSocial: SocialDisbursement[] = [
   { id: 'SOC-001', programName: 'National Social Investment Programme (N-SIP)', programCode: 'NSIP-2026', beneficiaryCount: 500000, amountPerBeneficiary: 5000, totalAmount: 2500000000, disbursedCount: 485000, failedCount: 15000, status: 'IN_PROGRESS', initiatedBy: 'Ministry of Humanitarian Affairs' },
   { id: 'SOC-002', programName: 'TraderMoni', programCode: 'TMONI-2026', beneficiaryCount: 200000, amountPerBeneficiary: 10000, totalAmount: 2000000000, disbursedCount: 200000, failedCount: 0, status: 'COMPLETED', initiatedBy: 'BOI' },
   { id: 'SOC-003', programName: 'N-Power Stipends', programCode: 'NPOW-2026', beneficiaryCount: 100000, amountPerBeneficiary: 30000, totalAmount: 3000000000, disbursedCount: 0, failedCount: 0, status: 'APPROVED', initiatedBy: 'Ministry of Youth Development' },
 ];
 
-const mockReports: RegulatoryReport[] = [
+const defaultReports: RegulatoryReport[] = [
   { id: 'RPT-001', reportType: 'CBN Monthly Returns', period: 'Apr 2026', status: 'SUBMITTED', recordCount: 1250000, totalValue: 45000000000000, submittedTo: 'CBN', reference: 'CBN-MR-2026-04' },
   { id: 'RPT-002', reportType: 'NFIU STR Report', period: 'Q1 2026', status: 'SUBMITTED', recordCount: 342, totalValue: 8500000000, submittedTo: 'NFIU', reference: 'NFIU-STR-2026-Q1' },
   { id: 'RPT-003', reportType: 'NDIC Returns', period: 'Apr 2026', status: 'PENDING', recordCount: 890000, totalValue: 32000000000000, submittedTo: 'NDIC', reference: 'NDIC-MR-2026-04' },
@@ -117,11 +118,11 @@ export default function GovernmentPaymentsDashboard() {
   const [reports, setReports] = useState<RegulatoryReport[]>([]);
 
   useEffect(() => {
-    lakehouseAPI.fetch<{ payments: GovernmentPayment[] }>('/api/government-payments/payments').then(d => setGovPayments(d.payments || [])).catch((err: unknown) => { console.error("API fallback:", err); setGovPayments(mockGovPayments); });
-    lakehouseAPI.fetch<{ taxes: TaxPayment[] }>('/api/government-payments/taxes').then(d => setTaxes(d.taxes || [])).catch((err: unknown) => { console.error("API fallback:", err); setTaxes(mockTaxes); });
-    lakehouseAPI.fetch<{ pensions: PensionRemittance[] }>('/api/government-payments/pensions').then(d => setPensions(d.pensions || [])).catch((err: unknown) => { console.error("API fallback:", err); setPensions(mockPensions); });
-    lakehouseAPI.fetch<{ disbursements: SocialDisbursement[] }>('/api/government-payments/social').then(d => setSocial(d.disbursements || [])).catch((err: unknown) => { console.error("API fallback:", err); setSocial(mockSocial); });
-    lakehouseAPI.fetch<{ reports: RegulatoryReport[] }>('/api/government-payments/reports').then(d => setReports(d.reports || [])).catch((err: unknown) => { console.error("API fallback:", err); setReports(mockReports); });
+    lakehouseAPI.fetch<{ payments: GovernmentPayment[] }>('/api/government-payments/payments').then(d => setGovPayments(d.payments || [])).catch((err: unknown) => { logger.error("API fallback:", err); setGovPayments([]); });
+    lakehouseAPI.fetch<{ taxes: TaxPayment[] }>('/api/government-payments/taxes').then(d => setTaxes(d.taxes || [])).catch((err: unknown) => { logger.error("API fallback:", err); setTaxes([]); });
+    lakehouseAPI.fetch<{ pensions: PensionRemittance[] }>('/api/government-payments/pensions').then(d => setPensions(d.pensions || [])).catch((err: unknown) => { logger.error("API fallback:", err); setPensions([]); });
+    lakehouseAPI.fetch<{ disbursements: SocialDisbursement[] }>('/api/government-payments/social').then(d => setSocial(d.disbursements || [])).catch((err: unknown) => { logger.error("API fallback:", err); setSocial([]); });
+    lakehouseAPI.fetch<{ reports: RegulatoryReport[] }>('/api/government-payments/reports').then(d => setReports(d.reports || [])).catch((err: unknown) => { logger.error("API fallback:", err); setReports([]); });
   }, []);
 
   const tabs: { id: Tab; label: string }[] = [

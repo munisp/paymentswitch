@@ -1,27 +1,47 @@
-"""Main application for $service_name service."""
+"""Main application for vpa-service — Virtual Payment Address resolution."""
+import logging
+import sys
+import os
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import router
-import os
-# Initialize event integration for lakehouse
+
 try:
     from . import events_integration
 except ImportError:
-    import events_integration
-
-
+    logger.warning("Event integration not available for vpa-service")
 
 app = FastAPI(
-    title="$service_name Service",
-    description="$service_name microservice for Next-Generation Payment Switch",
+    title="VPA Service",
+    description="Virtual Payment Address lookup, registration, and resolution",
     version="1.0.0"
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.environ.get("CORS_ALLOWED_ORIGINS", "https://app.paymentswitch.ng,https://admin.paymentswitch.ng").split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(router, prefix="/api/v1/vpa", tags=["vpa"])
+
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Kubernetes probes"""
     return {"status": "healthy", "service": "vpa-service"}
+
 
 @app.get("/ready")
 async def readiness_check():
@@ -29,37 +49,11 @@ async def readiness_check():
     return {"status": "ready", "service": "vpa-service"}
 
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Include routers
-app.include_router(router, prefix="/api/v1/$service_name", tags=["$service_name"])
-
 @app.get("/")
 async def root():
     """Root endpoint."""
-import logging
-import sys
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger(__name__)
-
-
     return {
-        "service": "$service_name",
+        "service": "vpa-service",
         "version": "1.0.0",
         "status": "running"
     }

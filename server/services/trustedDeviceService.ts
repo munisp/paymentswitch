@@ -116,11 +116,11 @@ export async function trustDevice(params: {
       userAgent: params.userAgent,
       ipAddress: params.ipAddress,
       expiresAt,
-    });
+    }).returning();
 
-    return { success: true, deviceId: result.insertId };
+    return { success: true, deviceId: result.id };
   } catch (error) {
-    log.error('[TrustedDevice] Failed to trust device:', error);
+    log.error({ err: error }, '[TrustedDevice] Failed to trust device:');
     return { success: false, error: 'Failed to trust device' };
   }
 }
@@ -163,7 +163,7 @@ export async function verifyTrustedDevice(params: {
 
     return { trusted: true, deviceId: devices[0].id };
   } catch (error) {
-    log.error('[TrustedDevice] Failed to verify device:', error);
+    log.error({ err: error }, '[TrustedDevice] Failed to verify device:');
     return { trusted: false };
   }
 }
@@ -191,7 +191,7 @@ export async function getUserTrustedDevices(userId: number): Promise<TrustedDevi
 
     return devices;
   } catch (error) {
-    log.error('[TrustedDevice] Failed to get user devices:', error);
+    log.error({ err: error }, '[TrustedDevice] Failed to get user devices:');
     return [];
   }
 }
@@ -233,7 +233,7 @@ export async function revokeTrustedDevice(params: {
 
     return { success: true };
   } catch (error) {
-    log.error('[TrustedDevice] Failed to revoke device:', error);
+    log.error({ err: error }, '[TrustedDevice] Failed to revoke device:');
     return { success: false, error: 'Failed to revoke device' };
   }
 }
@@ -272,7 +272,7 @@ export async function revokeAllTrustedDevices(userId: number): Promise<{ success
 
     return { success: true, count: activeDevices.length };
   } catch (error) {
-    log.error('[TrustedDevice] Failed to revoke all devices:', error);
+    log.error({ err: error }, '[TrustedDevice] Failed to revoke all devices:');
     return { success: false, count: 0, error: 'Failed to revoke devices' };
   }
 }
@@ -312,7 +312,7 @@ export async function cleanupExpiredDevices(): Promise<number> {
 
     return expiredDevices.length;
   } catch (error) {
-    log.error('[TrustedDevice] Failed to cleanup expired devices:', error);
+    log.error({ err: error }, '[TrustedDevice] Failed to cleanup expired devices:');
     return 0;
   }
 }

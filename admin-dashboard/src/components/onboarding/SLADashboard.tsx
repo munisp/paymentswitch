@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import React, { useState, useEffect, useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import {
@@ -58,7 +59,7 @@ interface SLAMetrics {
 
 const API_BASE = process.env.NEXT_PUBLIC_ONBOARDING_API || 'http://localhost:8082';
 
-const mockSLAData: SLATracking[] = [
+const defaultSLAData: SLATracking[] = [
   {
     caseId: 'CASE-001',
     organizationName: 'First Bank Nigeria',
@@ -150,7 +151,7 @@ const mockSLAData: SLATracking[] = [
   },
 ];
 
-const mockMetrics: SLAMetrics = {
+const defaultMetrics: SLAMetrics = {
   totalCases: 45,
   onTrack: 38,
   atRisk: 4,
@@ -165,10 +166,10 @@ export function SLADashboard() {
   const slaFetcher = useCallback(() =>
     lakehouseAPI.fetch<{ data: SLATracking[]; metrics: SLAMetrics }>('/api/v1/onboarding/sla')
       .then(d => ({ data: d.data, metrics: d.metrics }))
-      .catch((err: unknown) => { console.error("API fallback:", err); return { data: mockSLAData, metrics: mockMetrics }; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return { data: defaultSLAData, metrics: defaultMetrics }; }), []);
   const { data: apiSla } = useLakehouseData(slaFetcher, 15000);
-  const [slaData, setSlaData] = useState<SLATracking[]>(mockSLAData);
-  const [metrics, setMetrics] = useState<SLAMetrics>(mockMetrics);
+  const [slaData, setSlaData] = useState<SLATracking[]>(defaultSLAData);
+  const [metrics, setMetrics] = useState<SLAMetrics>(defaultMetrics);
   useEffect(() => { if (apiSla) { setSlaData(apiSla.data); setMetrics(apiSla.metrics); } }, [apiSla]);
   const [filter, setFilter] = useState<'ALL' | 'ON_TRACK' | 'AT_RISK' | 'OVERDUE'>('ALL');
   const [selectedCase, setSelectedCase] = useState<SLATracking | null>(null);

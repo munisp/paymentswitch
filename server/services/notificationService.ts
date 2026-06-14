@@ -20,13 +20,14 @@ export async function createAdminNotification(input: CreateNotificationInput) {
   const db = await getDb();
   if (!db) throw new Error('Database not available');
 
-  const result = await db.execute(sql`
+  const result = await db.execute<{ id: number }>(sql`
     INSERT INTO admin_notifications (user_id, type, title, message, link)
     VALUES (${input.userId}, ${input.type}, ${input.title}, ${input.message}, ${input.link || null})
+    RETURNING id
   `);
 
   return {
-    id: Number(result[0].insertId),
+    id: Number(result.rows[0]?.id ?? 0),
     ...input,
     isRead: false,
     createdAt: new Date(),
@@ -46,7 +47,7 @@ export async function getUnreadNotifications(userId: number) {
     ORDER BY created_at DESC
   `);
 
-  return (result[0] as unknown) as any[];
+  return result.rows as any[];
 }
 
 /**
@@ -63,7 +64,7 @@ export async function getUserNotifications(userId: number, limit = 50, offset = 
     LIMIT ${limit} OFFSET ${offset}
   `);
 
-  return (result[0] as unknown) as any[];
+  return result.rows as any[];
 }
 
 /**
@@ -110,7 +111,7 @@ export async function getUnreadCount(userId: number): Promise<number> {
     WHERE user_id = ${userId} AND is_read = FALSE
   `);
 
-  const rows = (result[0] as unknown) as any[];
+  const rows = result.rows as any[];
   return rows[0]?.count || 0;
 }
 
@@ -128,7 +129,7 @@ async function getUserPreferences(userId: number, notificationType: string) {
     LIMIT 1
   `);
 
-  const rows = (result[0] as unknown) as any[];
+  const rows = result.rows as any[];
   if (rows.length === 0) {
     // No preference set, use defaults
     return { emailEnabled: true, inAppEnabled: true };
@@ -153,7 +154,7 @@ export async function notifyAdminsOfNewSubmission(applicationId: number, organiz
   const adminResult = await db.execute(sql`
     SELECT id FROM users WHERE role = 'admin'
   `);
-  const admins = (adminResult[0] as unknown) as any[];
+  const admins = adminResult.rows as any[];
 
   // Create in-app notifications for admins who have in-app enabled
   const notifications = [];
@@ -189,7 +190,7 @@ export async function notifyAdminsOfNewSubmission(applicationId: number, organiz
         content: `Organization: ${organizationName}\nApplication ID: ${applicationId}\n\nA new participant has submitted their technical onboarding and is ready for review.\n\nReview at: ${process.env.VITE_APP_URL || 'https://your-app.com'}/admin/technical-onboarding`,
       });
     } catch (error) {
-      log.error('Failed to send owner notification:', error);
+      log.error({ err: error }, 'Failed to send owner notification:');
       // Don't throw - in-app notifications were created successfully
     }
   }

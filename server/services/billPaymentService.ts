@@ -308,7 +308,7 @@ export async function validateBillDetails(params: {
   return {
     valid: true,
     customerName: nigerianNames[nameIdx],
-    dueAmount: Math.floor(Math.random() * 20000) + 2000,
+    dueAmount: 0,
   };
 }
 
@@ -323,7 +323,8 @@ export async function processBillPayment(params: {
   amount: number;
 }): Promise<BillPaymentResult> {
   // Generate reference
-  const reference = `BILL_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const { randomBytes } = await import('crypto');
+  const reference = `BILL_${Date.now()}_${randomBytes(5).toString('hex')}`;
 
   log.info(params, '[Bill Payment] Processing');
 
@@ -398,9 +399,10 @@ function calculateBillPaymentFee(amount: number, categoryId: string): number {
  * Generate electricity token (20-digit)
  */
 function generateElectricityToken(): string {
+  const { randomInt } = require('crypto');
   const parts = [];
   for (let i = 0; i < 4; i++) {
-    parts.push(Math.floor(10000 + Math.random() * 90000).toString());
+    parts.push(String(randomInt(10000, 99999)));
   }
   return parts.join('-');
 }

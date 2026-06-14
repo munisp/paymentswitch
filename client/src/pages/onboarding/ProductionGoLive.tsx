@@ -232,9 +232,9 @@ export default function ProductionGoLive({ applicationId = 1 }: ProductionGoLive
 
   const checklistItems = checklist ? [
     { key: 'certificationPassed', label: 'Certification Passed', value: checklist.certificationPassed, icon: Shield },
-    { key: 'securityAuditCompleted', label: 'Security Audit Completed', value: checklist.securityAuditCompleted, icon: Shield },
+    { key: 'securityAuditComplete', label: 'Security Audit Completed', value: checklist.securityAuditComplete, icon: Shield },
     { key: 'complianceVerified', label: 'Compliance Verified', value: checklist.complianceVerified, icon: FileCheck },
-    { key: 'integrationTested', label: 'Integration Tested', value: checklist.integrationTested, icon: Server },
+    { key: 'integrationTestsPassed', label: 'Integration Tested', value: checklist.integrationTestsPassed, icon: Server },
     { key: 'documentationReviewed', label: 'Documentation Reviewed', value: checklist.documentationReviewed, icon: FileCheck },
     { key: 'supportContactsProvided', label: 'Support Contacts Provided', value: checklist.supportContactsProvided, icon: CheckCircle2 },
     { key: 'disasterRecoveryPlanSubmitted', label: 'Disaster Recovery Plan Submitted', value: checklist.disasterRecoveryPlanSubmitted, icon: Shield },
@@ -513,11 +513,11 @@ export default function ProductionGoLive({ applicationId = 1 }: ProductionGoLive
             <div>
               <Label>API Key</Label>
               <div className="flex gap-2">
-                <Input value={credentials.productionApiKey} readOnly />
+                <Input value={credentials.productionApiKey ?? ''} readOnly />
                 <Button
                   variant="outline"
                   onClick={() => {
-                    navigator.clipboard.writeText(credentials.productionApiKey);
+                    navigator.clipboard.writeText(credentials.productionApiKey ?? '');
                     toast.success('API Key copied');
                   }}
                 >
@@ -529,11 +529,11 @@ export default function ProductionGoLive({ applicationId = 1 }: ProductionGoLive
             <div>
               <Label>API Secret</Label>
               <div className="flex gap-2">
-                <Input value={credentials.productionApiSecret} type="password" readOnly />
+                <Input value={credentials.productionApiSecret ?? ''} type="password" readOnly />
                 <Button
                   variant="outline"
                   onClick={() => {
-                    navigator.clipboard.writeText(credentials.productionApiSecret);
+                    navigator.clipboard.writeText(credentials.productionApiSecret ?? '');
                     toast.success('API Secret copied');
                   }}
                 >
@@ -565,7 +565,7 @@ export default function ProductionGoLive({ applicationId = 1 }: ProductionGoLive
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Daily Limit</Label>
-                <Input value={credentials.dailyTransactionLimit.toLocaleString()} readOnly />
+                <Input value={credentials.dailyTransactionLimit?.toLocaleString() ?? 'N/A'} readOnly />
               </div>
               <div>
                 <Label>Monthly Limit</Label>
@@ -621,7 +621,7 @@ export default function ProductionGoLive({ applicationId = 1 }: ProductionGoLive
                     {monitoring.map((metric) => (
                       <TableRow key={metric.id}>
                         <TableCell>
-                          {new Date(metric.date).toLocaleDateString()}
+                          {metric.date ? new Date(metric.date).toLocaleDateString() : 'N/A'}
                         </TableCell>
                         <TableCell>{metric.totalTransactions}</TableCell>
                         <TableCell className="text-green-600">
@@ -800,7 +800,7 @@ export default function ProductionGoLive({ applicationId = 1 }: ProductionGoLive
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {new Date(incident.occurredAt).toLocaleString()}
+                          {incident.occurredAt ? new Date(incident.occurredAt).toLocaleString() : 'N/A'}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1068,10 +1068,10 @@ export default function ProductionGoLive({ applicationId = 1 }: ProductionGoLive
                   <TableBody>
                     {alertRules.map((rule) => (
                       <TableRow key={rule.id}>
-                        <TableCell className="font-medium">{rule.ruleName}</TableCell>
+                        <TableCell className="font-medium">{rule.name}</TableCell>
                         <TableCell>{rule.metricType.replace(/_/g, ' ')}</TableCell>
                         <TableCell>
-                          {rule.operator.replace(/_/g, ' ')} {rule.thresholdValue}
+                          {rule.operator.replace(/_/g, ' ')} {rule.threshold}
                         </TableCell>
                         <TableCell>
                           <Badge

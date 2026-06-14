@@ -6,7 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -266,12 +266,12 @@ func (h *PerformanceTestHarness) executeTransaction(ctx context.Context, workerI
 	txType := h.selectTransactionType()
 
 	// Generate transaction details
-	payerFSP := fmt.Sprintf("FSP%03d", rand.Intn(h.config.ParticipantCount))
-	payeeFSP := fmt.Sprintf("FSP%03d", rand.Intn(h.config.ParticipantCount))
-	amount := h.config.AmountRange.MinAmount + rand.Int63n(h.config.AmountRange.MaxAmount-h.config.AmountRange.MinAmount)
+	payerFSP := fmt.Sprintf("FSP%03d", rand.IntN(h.config.ParticipantCount))
+	payeeFSP := fmt.Sprintf("FSP%03d", rand.IntN(h.config.ParticipantCount))
+	amount := h.config.AmountRange.MinAmount + rand.Int64N(h.config.AmountRange.MaxAmount-h.config.AmountRange.MinAmount)
 
 	result := &TransactionResult{
-		TransactionID:   fmt.Sprintf("TEST-%d-%d-%d", workerID, time.Now().UnixNano(), rand.Int63()),
+		TransactionID:   fmt.Sprintf("TEST-%d-%d-%d", workerID, time.Now().UnixNano(), rand.Int64()),
 		TransactionType: txType,
 		StartTime:       startTime,
 		Amount:          amount,
@@ -339,7 +339,7 @@ func (h *PerformanceTestHarness) selectTransactionType() string {
 // simulateTransaction simulates a transaction
 func (h *PerformanceTestHarness) simulateTransaction(ctx context.Context, result *TransactionResult) (bool, string, string) {
 	// Simulate processing time (5-50ms base)
-	baseLatency := 5 + rand.Intn(45)
+	baseLatency := 5 + rand.IntN(45)
 	time.Sleep(time.Duration(baseLatency) * time.Millisecond)
 
 	// Simulate various failure scenarios

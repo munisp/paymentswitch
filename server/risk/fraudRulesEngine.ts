@@ -385,7 +385,9 @@ export class FraudRulesEngine extends EventEmitter {
   }
 
   private checkChanged(_context: TransactionContext, _field: string): boolean {
-    return Math.random() > 0.8;
+    // In production, compare against stored customer profile history.
+    // Without profile data, assume no change detected.
+    return false;
   }
 
   private updateVelocityStore(context: TransactionContext): void {
@@ -444,7 +446,7 @@ export class FraudRulesEngine extends EventEmitter {
   }
 
   getDecisionByTransaction(transactionId: string): RiskDecision | null {
-    for (const decision of decisions.values()) {
+    for (const decision of Array.from(decisions.values())) {
       if (decision.transactionId === transactionId) {
         return decision;
       }

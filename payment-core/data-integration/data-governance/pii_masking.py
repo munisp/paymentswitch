@@ -304,7 +304,7 @@ class PIIMasker:
         if value in self._token_map:
             return self._token_map[value]
         
-        token = f"TOK_{hashlib.md5(f'{self.salt}{value}'.encode()).hexdigest()[:12]}"
+        token = f"TOK_{hashlib.sha256(f'{self.salt}{value}'.encode()).hexdigest()[:12]}"
         self._token_map[value] = token
         self._reverse_token_map[token] = value
         return token
@@ -392,7 +392,7 @@ class PIIMasker:
     
     def _pseudonymize(self, value: str) -> str:
         """Replace with a consistent pseudonym"""
-        hash_val = hashlib.md5(f"{self.salt}{value}".encode()).hexdigest()
+        hash_val = hashlib.sha256(f"{self.salt}{value}".encode()).hexdigest()
         return f"PSEUDO_{hash_val[:8]}"
 
 

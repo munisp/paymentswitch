@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -31,16 +32,23 @@ type KeycloakConfig struct {
 	Timeout time.Duration
 }
 
-// DefaultKeycloakConfig returns sensible defaults
+// DefaultKeycloakConfig returns sensible defaults — credentials MUST be set via environment variables
 func DefaultKeycloakConfig() *KeycloakConfig {
 	return &KeycloakConfig{
-		BaseURL:       "http://keycloak:8080",
-		Realm:         "payment-switch",
-		AdminUsername: "admin",
-		AdminPassword: "admin",
-		ClientID:      "admin-cli",
+		BaseURL:       keycloakEnvOrDefault("KEYCLOAK_URL", "http://keycloak:8080"),
+		Realm:         keycloakEnvOrDefault("KEYCLOAK_REALM", "payment-switch"),
+		AdminUsername: keycloakEnvOrDefault("KEYCLOAK_ADMIN_USER", ""),
+		AdminPassword: keycloakEnvOrDefault("KEYCLOAK_ADMIN_PASSWORD", ""),
+		ClientID:      keycloakEnvOrDefault("KEYCLOAK_CLIENT_ID", "admin-cli"),
 		Timeout:       30 * time.Second,
 	}
+}
+
+func keycloakEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 // ProductionKeycloakClient is a production-ready Keycloak Admin API client

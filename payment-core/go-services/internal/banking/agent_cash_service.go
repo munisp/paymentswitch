@@ -2,6 +2,7 @@ package banking
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"fmt"
 	"math"
 	"regexp"
@@ -62,6 +63,7 @@ type AgentCashService struct {
 	collectionCodes map[string]*CollectionCode
 	agents          []AgentLocation
 	providers       []AgentProvider
+	db              *sql.DB
 }
 
 func NewAgentCashService() *AgentCashService {
@@ -207,6 +209,7 @@ func (s *AgentCashService) GenerateCollectionCode(remittanceID string, amount fl
 	s.collectionCodes[code] = collectionCode
 	s.mu.Unlock()
 
+	go s.persistCollectionCode(collectionCode)
 	return collectionCode, nil
 }
 
@@ -239,6 +242,7 @@ func (s *AgentCashService) CancelCollectionCode(code string) bool {
 	}
 
 	cc.Status = CollectionCodeCancelled
+	go s.persistCollectionCode(cc)
 	return true
 }
 
@@ -255,6 +259,7 @@ func (s *AgentCashService) MarkCodeAsCollected(code, agentID string) bool {
 	cc.Status = CollectionCodeCollected
 	cc.CollectedAt = &now
 	cc.CollectedBy = agentID
+	go s.persistCollectionCode(cc)
 	return true
 }
 

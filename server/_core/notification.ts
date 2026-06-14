@@ -111,7 +111,7 @@ export async function notifyOwner(
 
     return true;
   } catch (error) {
-    log.warn("[Notification] Error calling notification service:", error);
+    log.warn({ err: error }, "[Notification] Error calling notification service");
     return false;
   }
 }

@@ -91,7 +91,7 @@ export async function checkRecoveryRateLimit(userId: number): Promise<{ allowed:
 
     return { allowed, remainingRequests };
   } catch (error) {
-    log.error('[AccountRecovery] Rate limit check failed:', error);
+    log.error({ err: error }, '[AccountRecovery] Rate limit check failed:');
     return { allowed: false, remainingRequests: 0 };
   }
 }
@@ -129,17 +129,18 @@ export async function initiateRecovery(params: {
     const expiresAt = new Date(Date.now() + RECOVERY_CODE_EXPIRATION_MS);
 
     // Create recovery request
-    const [result] = await db.insert(accountRecoveryRequests).values({
+    const [recInserted] = await db.insert(accountRecoveryRequests).values({
       userId: params.userId,
       recoveryMethod: params.recoveryMethod,
+      recoveryToken: `recovery_${Date.now()}_${require('crypto').randomBytes(12).toString('hex')}`,
       recoveryCode: hashedCode,
       status: params.recoveryMethod === 'admin' ? 'pending' : 'pending',
       expiresAt,
       ipAddress: params.ipAddress,
       userAgent: params.userAgent,
-    });
+    }).returning({ id: accountRecoveryRequests.id });
 
-    const requestId = result.insertId;
+    const requestId = recInserted.id;
 
     // Log audit event
     await logRecoveryAction({
@@ -169,7 +170,7 @@ export async function initiateRecovery(params: {
           });
 
           if (!emailResult.success) {
-            log.error('[AccountRecovery] Failed to send recovery email:', emailResult.error);
+            log.error({ err: emailResult.error }, '[AccountRecovery] Failed to send recovery email:');
             // Continue anyway - code is still valid, just not emailed
           }
         } else {
@@ -184,7 +185,7 @@ export async function initiateRecovery(params: {
           });
 
           if (!smsResult.success) {
-            log.error('[AccountRecovery] Failed to send recovery SMS:', smsResult.error);
+            log.error({ err: smsResult.error }, '[AccountRecovery] Failed to send recovery SMS:');
             // Continue anyway - code is still valid, just not sent
           }
         } else {
@@ -200,7 +201,7 @@ export async function initiateRecovery(params: {
       recoveryCode: params.recoveryMethod === 'admin' ? undefined : recoveryCode, // Don't return code for admin recovery
     };
   } catch (error) {
-    log.error('[AccountRecovery] Failed to initiate recovery:', error);
+    log.error({ err: error }, '[AccountRecovery] Failed to initiate recovery:');
     return { success: false, error: 'Failed to create recovery request' };
   }
 }
@@ -282,7 +283,7 @@ export async function verifyRecoveryCode(params: {
 
     return { success: false, error: 'Invalid recovery code' };
   } catch (error) {
-    log.error('[AccountRecovery] Failed to verify recovery code:', error);
+    log.error({ err: error }, '[AccountRecovery] Failed to verify recovery code:');
     return { success: false, error: 'Verification failed' };
   }
 }
@@ -345,7 +346,7 @@ export async function completeRecovery(params: {
 
     return { success: true };
   } catch (error) {
-    log.error('[AccountRecovery] Failed to complete recovery:', error);
+    log.error({ err: error }, '[AccountRecovery] Failed to complete recovery:');
     return { success: false, error: 'Failed to reset 2FA' };
   }
 }
@@ -368,7 +369,7 @@ export async function listPendingRecoveryRequests(): Promise<AccountRecoveryRequ
 
     return requests;
   } catch (error) {
-    log.error('[AccountRecovery] Failed to list pending requests:', error);
+    log.error({ err: error }, '[AccountRecovery] Failed to list pending requests:');
     return [];
   }
 }
@@ -417,7 +418,7 @@ export async function approveRecoveryRequest(params: {
 
     return { success: true };
   } catch (error) {
-    log.error('[AccountRecovery] Failed to approve request:', error);
+    log.error({ err: error }, '[AccountRecovery] Failed to approve request:');
     return { success: false, error: 'Failed to approve request' };
   }
 }
@@ -466,7 +467,7 @@ export async function rejectRecoveryRequest(params: {
 
     return { success: true };
   } catch (error) {
-    log.error('[AccountRecovery] Failed to reject request:', error);
+    log.error({ err: error }, '[AccountRecovery] Failed to reject request:');
     return { success: false, error: 'Failed to reject request' };
   }
 }
@@ -510,7 +511,7 @@ export async function cleanupExpiredRequests(): Promise<number> {
 
     return expiredRequests.length;
   } catch (error) {
-    log.error('[AccountRecovery] Failed to cleanup expired requests:', error);
+    log.error({ err: error }, '[AccountRecovery] Failed to cleanup expired requests:');
     return 0;
   }
 }
@@ -533,6 +534,6 @@ async function logRecoveryAction(params: Omit<InsertAccountRecoveryAuditLog, 'id
       details: params.details,
     });
   } catch (error) {
-    log.error('[AccountRecovery] Failed to log action:', error);
+    log.error({ err: error }, '[AccountRecovery] Failed to log action:');
   }
 }

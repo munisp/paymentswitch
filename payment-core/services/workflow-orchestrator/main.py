@@ -1,27 +1,47 @@
-"""Main application for $service_name service."""
+"""Main application for workflow-orchestrator service — Temporal payment processing."""
+import logging
+import sys
+import os
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import router
-import os
-# Initialize event integration for lakehouse
+
 try:
     from . import events_integration
 except ImportError:
-    import events_integration
-
-
+    logger.warning("Event integration not available for workflow-orchestrator")
 
 app = FastAPI(
-    title="$service_name Service",
-    description="$service_name microservice for Next-Generation Payment Switch",
+    title="Workflow Orchestrator Service",
+    description="Temporal-based payment processing orchestration for the payment switch",
     version="1.0.0"
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.environ.get("CORS_ALLOWED_ORIGINS", "https://app.paymentswitch.ng,https://admin.paymentswitch.ng").split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(router, prefix="/api/v1/orchestrator", tags=["orchestrator"])
+
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Kubernetes probes"""
     return {"status": "healthy", "service": "workflow-orchestrator"}
+
 
 @app.get("/ready")
 async def readiness_check():
@@ -29,37 +49,11 @@ async def readiness_check():
     return {"status": "ready", "service": "workflow-orchestrator"}
 
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Include routers
-app.include_router(router, prefix="/api/v1/$service_name", tags=["$service_name"])
-
 @app.get("/")
 async def root():
     """Root endpoint."""
-import logging
-import sys
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger(__name__)
-
-
     return {
-        "service": "$service_name",
+        "service": "workflow-orchestrator",
         "version": "1.0.0",
         "status": "running"
     }

@@ -60,7 +60,7 @@ async function processRetries() {
       );
     }
   } catch (error) {
-    log.error("[RetryScheduler] Error processing retries:", error);
+    log.error({ err: error }, "[RetryScheduler] Error processing retries:");
   } finally {
     isProcessing = false;
   }

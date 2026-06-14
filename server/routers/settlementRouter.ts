@@ -62,8 +62,8 @@ function generateSettlements(count: number): Settlement[] {
   return Array.from({ length: count }, (_, i) => {
     const bank = nigeriaBanks[i % nigeriaBanks.length];
     const channel = channels[i % channels.length];
-    const txnCount = Math.floor(Math.random() * 50000) + 1000;
-    const grossAmount = Math.round(txnCount * (Math.random() * 200000 + 10000));
+    const txnCount = 5000 + i * 1000;
+    const grossAmount = Math.round(txnCount * (50000 + i * 10000));
     const feeRate = channel === 'NIP' ? 0.005 : channel === 'RTGS' ? 0.002 : 0.0075;
     const fees = Math.round(grossAmount * feeRate);
     const statuses: Settlement['status'][] = ['settled', 'settled', 'settled', 'pending', 'processing'];
@@ -146,8 +146,8 @@ export const settlementRouter = router({
         breakdown: {
           debit: Math.round(settlement.totalTransactions * 0.6),
           credit: Math.round(settlement.totalTransactions * 0.4),
-          reversals: Math.floor(Math.random() * 50),
-          chargebacks: Math.floor(Math.random() * 10),
+          reversals: 0,
+          chargebacks: 0,
         },
         timeline: [
           { event: 'Batch received', timestamp: `${settlement.date}T09:00:00Z` },

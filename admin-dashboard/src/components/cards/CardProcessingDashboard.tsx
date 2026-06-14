@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import React, { useState, useEffect } from 'react';
 import { lakehouseAPI } from '@/lib/api';
 
@@ -65,7 +66,7 @@ interface MerchantTerminal {
   dailyVolume: number;
 }
 
-const mockCards: IssuedCard[] = [
+const defaultCards: IssuedCard[] = [
   { id: 'CRD-001', last4: '4532', scheme: 'VISA', type: 'DEBIT', issuerBankName: 'Access Bank', holderName: 'Adebayo Ogunlade', expiryMonth: 12, expiryYear: 2028, status: 'active', dailyLimit: 5000000, is3DSEnrolled: true },
   { id: 'CRD-002', last4: '8891', scheme: 'MASTERCARD', type: 'CREDIT', issuerBankName: 'GTBank', holderName: 'Chioma Okafor', expiryMonth: 8, expiryYear: 2027, status: 'active', dailyLimit: 10000000, is3DSEnrolled: true },
   { id: 'CRD-003', last4: '2245', scheme: 'VERVE', type: 'DEBIT', issuerBankName: 'Zenith Bank', holderName: 'Emeka Nwosu', expiryMonth: 3, expiryYear: 2029, status: 'active', dailyLimit: 2000000, is3DSEnrolled: true },
@@ -73,7 +74,7 @@ const mockCards: IssuedCard[] = [
   { id: 'CRD-005', last4: '1123', scheme: 'MASTERCARD', type: 'PREPAID', issuerBankName: 'First Bank', holderName: 'Grace Adeyemi', expiryMonth: 9, expiryYear: 2028, status: 'blocked', dailyLimit: 500000, is3DSEnrolled: false },
 ];
 
-const mockTransactions: CardTransaction[] = [
+const defaultTransactions: CardTransaction[] = [
   { id: 'CTX-001', authCode: 'A12345', rrn: '260501000001', type: 'PURCHASE', cardLast4: '4532', scheme: 'VISA', merchantName: 'Shoprite Ikeja', merchantCategory: 'Grocery', channel: 'POS', amount: 45000, feeAmount: 100, status: 'approved', declineReason: '', is3DSVerified: true, riskScore: 12, processedAt: '2026-05-01T10:00:00Z' },
   { id: 'CTX-002', authCode: 'B67890', rrn: '260501000002', type: 'PURCHASE', cardLast4: '8891', scheme: 'MASTERCARD', merchantName: 'Amazon.com', merchantCategory: 'E-Commerce', channel: 'WEB', amount: 250000, feeAmount: 250, status: 'approved', declineReason: '', is3DSVerified: true, riskScore: 25, processedAt: '2026-05-01T11:00:00Z' },
   { id: 'CTX-003', authCode: '', rrn: '260501000003', type: 'PURCHASE', cardLast4: '2245', scheme: 'VERVE', merchantName: 'Total Filling Station', merchantCategory: 'Fuel', channel: 'POS', amount: 30000, feeAmount: 75, status: 'declined', declineReason: 'Insufficient funds', is3DSVerified: false, riskScore: 8, processedAt: '2026-05-01T12:00:00Z' },
@@ -81,13 +82,13 @@ const mockTransactions: CardTransaction[] = [
   { id: 'CTX-005', authCode: 'D22222', rrn: '260501000005', type: 'PURCHASE', cardLast4: '6678', scheme: 'VISA', merchantName: 'Netflix', merchantCategory: 'Streaming', channel: 'WEB', amount: 6500, feeAmount: 50, status: 'approved', declineReason: '', is3DSVerified: true, riskScore: 3, processedAt: '2026-05-01T14:00:00Z' },
 ];
 
-const mockChargebacks: Chargeback[] = [
+const defaultChargebacks: Chargeback[] = [
   { id: 'CB-001', transactionId: 'CTX-100', originalAmount: 150000, disputeAmount: 150000, reasonCode: '4837', reasonDesc: 'No Cardholder Authorization', cardholderName: 'Adebayo Ogunlade', merchantName: 'QuickMart Online', status: 'under_review', filedAt: '2026-04-28', dueDate: '2026-05-28' },
   { id: 'CB-002', transactionId: 'CTX-101', originalAmount: 85000, disputeAmount: 85000, reasonCode: '4853', reasonDesc: 'Goods Not Received', cardholderName: 'Chioma Okafor', merchantName: 'Lagos Electronics', status: 'escalated', filedAt: '2026-04-25', dueDate: '2026-05-25' },
   { id: 'CB-003', transactionId: 'CTX-102', originalAmount: 500000, disputeAmount: 250000, reasonCode: '4855', reasonDesc: 'Defective Merchandise', cardholderName: 'Emeka Nwosu', merchantName: 'AutoParts NG', status: 'resolved_merchant', filedAt: '2026-04-20', dueDate: '2026-05-20' },
 ];
 
-const mockTerminals: MerchantTerminal[] = [
+const defaultTerminals: MerchantTerminal[] = [
   { id: 'TRM-001', terminalId: '2044ACCS0001', merchantName: 'Shoprite Ikeja City Mall', mcc: '5411', mccDescription: 'Grocery Stores', location: 'Ikeja, Lagos', type: 'POS', acquirerBank: 'Access Bank', status: 'active', dailyVolume: 450 },
   { id: 'TRM-002', terminalId: '2058GTB00002', merchantName: 'Chicken Republic V/I', mcc: '5812', mccDescription: 'Eating Places/Restaurants', location: 'Victoria Island, Lagos', type: 'POS', acquirerBank: 'GTBank', status: 'active', dailyVolume: 320 },
   { id: 'TRM-003', terminalId: '2057ZEN00003', merchantName: 'NNPC Retail Station Lekki', mcc: '5541', mccDescription: 'Service Stations', location: 'Lekki, Lagos', type: 'POS', acquirerBank: 'Zenith Bank', status: 'active', dailyVolume: 280 },
@@ -105,10 +106,10 @@ export default function CardProcessingDashboard() {
   const [terminals, setTerminals] = useState<MerchantTerminal[]>([]);
 
   useEffect(() => {
-    lakehouseAPI.fetch<{ cards: IssuedCard[] }>('/api/card-processing/cards').then(d => setCards(d.cards || [])).catch((err: unknown) => { console.error("API fallback:", err); setCards(mockCards); });
-    lakehouseAPI.fetch<{ transactions: CardTransaction[] }>('/api/card-processing/transactions').then(d => setTransactions(d.transactions || [])).catch((err: unknown) => { console.error("API fallback:", err); setTransactions(mockTransactions); });
-    lakehouseAPI.fetch<{ chargebacks: Chargeback[] }>('/api/card-processing/chargebacks').then(d => setChargebacks(d.chargebacks || [])).catch((err: unknown) => { console.error("API fallback:", err); setChargebacks(mockChargebacks); });
-    lakehouseAPI.fetch<{ terminals: MerchantTerminal[] }>('/api/card-processing/terminals').then(d => setTerminals(d.terminals || [])).catch((err: unknown) => { console.error("API fallback:", err); setTerminals(mockTerminals); });
+    lakehouseAPI.fetch<{ cards: IssuedCard[] }>('/api/card-processing/cards').then(d => setCards(d.cards || [])).catch((err: unknown) => { logger.error("API fallback:", err); setCards([]); });
+    lakehouseAPI.fetch<{ transactions: CardTransaction[] }>('/api/card-processing/transactions').then(d => setTransactions(d.transactions || [])).catch((err: unknown) => { logger.error("API fallback:", err); setTransactions([]); });
+    lakehouseAPI.fetch<{ chargebacks: Chargeback[] }>('/api/card-processing/chargebacks').then(d => setChargebacks(d.chargebacks || [])).catch((err: unknown) => { logger.error("API fallback:", err); setChargebacks([]); });
+    lakehouseAPI.fetch<{ terminals: MerchantTerminal[] }>('/api/card-processing/terminals').then(d => setTerminals(d.terminals || [])).catch((err: unknown) => { logger.error("API fallback:", err); setTerminals([]); });
   }, []);
 
   const tabs: { id: Tab; label: string }[] = [

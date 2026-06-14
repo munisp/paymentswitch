@@ -21,6 +21,11 @@ async function callAIService(path: string, method: 'GET' | 'POST' = 'GET', body?
   }
 }
 
+// Monotonic counters for deterministic ID generation
+let mandateCounter = 0;
+let qrCounter = 0;
+let ussdCounter = 1000;
+
 // --- Types & Seed Data ---
 
 type DomesticPayment = {
@@ -491,7 +496,7 @@ export const domesticPaymentsRouter = router({
     .mutation(async ({ input }) => {
       const mandate: DirectDebitMandate = {
         id: `MND-${Date.now()}`,
-        mandateRef: `NDD-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+        mandateRef: `NDD-${Date.now()}-${(++mandateCounter).toString(16).toUpperCase().padStart(4, '0')}`,
         ...input,
         startDate: new Date(input.startDate),
         endDate: new Date(input.endDate),
@@ -652,7 +657,7 @@ export const domesticPaymentsRouter = router({
     .mutation(async ({ input }) => {
       const merchant = seedMerchants.find(m => m.merchantCode === input.merchantCode);
       if (!merchant) throw new TRPCError({ code: 'NOT_FOUND', message: 'Merchant not found' });
-      const qrRef = `NQR-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+      const qrRef = `NQR-${Date.now()}-${(++qrCounter).toString(16).toUpperCase().padStart(6, '0')}`;
       const qrData = {
         id: qrRef,
         version: '01',
@@ -809,9 +814,9 @@ export const domesticPaymentsRouter = router({
       if (!input.deviceId) riskFactors.push({ factor: 'UNKNOWN_DEVICE', score: 60, weight: 0.20 });
       else riskFactors.push({ factor: 'KNOWN_DEVICE', score: 5, weight: 0.05 });
 
-      riskFactors.push({ factor: 'VELOCITY_CHECK', score: Math.floor(Math.random() * 30), weight: 0.15 });
-      riskFactors.push({ factor: 'BEHAVIORAL_PATTERN', score: Math.floor(Math.random() * 25), weight: 0.15 });
-      riskFactors.push({ factor: 'NETWORK_ANALYSIS', score: Math.floor(Math.random() * 20), weight: 0.10 });
+      riskFactors.push({ factor: 'VELOCITY_CHECK', score: 15, weight: 0.15 });
+      riskFactors.push({ factor: 'BEHAVIORAL_PATTERN', score: 12, weight: 0.15 });
+      riskFactors.push({ factor: 'NETWORK_ANALYSIS', score: 10, weight: 0.10 });
 
       const compositeScore = Math.round(riskFactors.reduce((s, f) => s + f.score * f.weight, 0));
       const action = compositeScore >= 70 ? 'BLOCKED' : compositeScore >= 50 ? 'FLAGGED' : compositeScore >= 30 ? 'REVIEW' : 'ALLOWED';
@@ -827,7 +832,7 @@ export const domesticPaymentsRouter = router({
           : 'Transaction cleared — proceed normally',
         scoredAt: new Date(),
         modelVersion: 'pluto-ng-v2.4',
-        processingTimeMs: Math.floor(Math.random() * 5) + 1,
+        processingTimeMs: 2,
       };
     }),
 
@@ -933,7 +938,7 @@ export const domesticPaymentsRouter = router({
     }))
     .mutation(async ({ input }) => {
       const merchantCode = `MCH-${Date.now().toString(36).toUpperCase()}`;
-      const ussdCode = input.requestUssd ? `*714*${Math.floor(1000 + Math.random() * 9000)}#` : null;
+      const ussdCode = input.requestUssd ? `*714*${(++ussdCounter).toString().padStart(4, '0')}#` : null;
       const merchant: MerchantRecord = {
         id: `MERCH-${Date.now()}`,
         merchantName: input.merchantName,

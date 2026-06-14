@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useState, useEffect, useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import { Shield, Lock, Eye, AlertTriangle, Users, Key, Globe, Activity } from 'lucide-react';
@@ -24,7 +25,7 @@ export function SecurityDashboard() {
   const eventsFetcher = useCallback(() =>
     lakehouseAPI.fetch<{ events: typeof securityEvents }>('/api/v1/security/events')
       .then(d => d.events)
-      .catch((err: unknown) => { console.error("API fallback:", err); return securityEvents; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return securityEvents; }), []);
   const { data: apiEvents } = useLakehouseData(eventsFetcher, 15000);
   const events = apiEvents || securityEvents;
   const [tab, setTab] = useState<'events' | 'pbac' | 'ip_blocklist' | 'rate_limits'>('events');

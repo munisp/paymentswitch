@@ -37,6 +37,13 @@ export async function getDb() {
   return _db;
 }
 
+/** Like getDb() but throws instead of returning null — use in tRPC routers. */
+export async function requireDb() {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  return db;
+}
+
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.sub) {
     throw new Error("User sub is required for upsert");

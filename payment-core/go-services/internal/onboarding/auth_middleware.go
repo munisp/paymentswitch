@@ -116,16 +116,15 @@ func (m *AuthMiddleware) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Skip auth if not required (dev mode)
+		// Skip auth if not required (dev mode with limited permissions)
 		if !m.config.RequireAuth {
-			// Create a mock user for development
-			mockUser := &UserContext{
+			devUser := &UserContext{
 				UserID:   "dev-user",
 				Username: "developer",
 				Email:    "dev@payment-switch.local",
-				Roles:    []OnboardingRole{RoleAdmin, RoleReviewer, RoleTechReviewer, RoleGovernance},
+				Roles:    []OnboardingRole{RoleReviewer},
 			}
-			ctx := context.WithValue(r.Context(), userContextKey, mockUser)
+			ctx := context.WithValue(r.Context(), userContextKey, devUser)
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}

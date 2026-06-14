@@ -45,7 +45,7 @@ export async function runRateAlertMonitor(): Promise<void> {
       log.info(`[RateAlertMonitor] 🔔 ${result.triggered} alert(s) triggered!`);
     }
   } catch (error) {
-    log.error('[RateAlertMonitor] Error:', error);
+    log.error({ err: error }, '[RateAlertMonitor] Error:');
   } finally {
     isRunning = false;
   }

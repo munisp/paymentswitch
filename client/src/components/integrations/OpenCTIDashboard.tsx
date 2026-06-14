@@ -131,7 +131,7 @@ export default function OpenCTIDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {maliciousIPs.slice(0, 10).map((ip, idx) => (
+                  {maliciousIPs.slice(0, 10).map((ip: any, idx: number) => (
                     <TableRow key={idx}>
                       <TableCell className="font-mono">{ip.ip}</TableCell>
                       <TableCell>
@@ -175,7 +175,7 @@ export default function OpenCTIDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {fraudIndicators.slice(0, 10).map((indicator, idx) => (
+                  {fraudIndicators.slice(0, 10).map((indicator: any, idx: number) => (
                     <TableRow key={idx}>
                       <TableCell>{indicator.type}</TableCell>
                       <TableCell>{indicator.category}</TableCell>

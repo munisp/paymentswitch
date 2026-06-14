@@ -30,15 +30,15 @@ export const accountActivityRouter = router({
         since: input?.since,
       });
 
-      // Convert string enums to booleans for frontend
+      // Ensure boolean fields for frontend
       return history.map(record => ({
         ...record,
-        success: record.success === 'true',
-        isTrustedDevice: record.isTrustedDevice === 'true',
-        isSuspicious: record.isSuspicious === 'true',
-        requiresTwoFactor: record.requiresTwoFactor === 'true',
-        twoFactorCompleted: record.twoFactorCompleted === 'true',
-        sessionActive: record.sessionActive === 'true',
+        success: !!record.success,
+        isTrustedDevice: !!record.isTrustedDevice,
+        isSuspicious: !!record.isSuspicious,
+        requiresTwoFactor: !!record.requiresTwoFactor,
+        twoFactorCompleted: !!record.twoFactorCompleted,
+        sessionActive: !!record.sessionActive,
       }));
     }),
 
@@ -50,12 +50,12 @@ export const accountActivityRouter = router({
 
     return sessions.map(session => ({
       ...session,
-      success: session.success === 'true',
-      isTrustedDevice: session.isTrustedDevice === 'true',
-      isSuspicious: session.isSuspicious === 'true',
-      requiresTwoFactor: session.requiresTwoFactor === 'true',
-      twoFactorCompleted: session.twoFactorCompleted === 'true',
-      sessionActive: session.sessionActive === 'true',
+      success: !!session.success,
+      isTrustedDevice: !!session.isTrustedDevice,
+      isSuspicious: !!session.isSuspicious,
+      requiresTwoFactor: !!session.requiresTwoFactor,
+      twoFactorCompleted: !!session.twoFactorCompleted,
+      sessionActive: !!session.sessionActive,
     }));
   }),
 

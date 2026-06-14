@@ -219,9 +219,13 @@ mod tests {
     #[test]
     fn test_min_fee_applies() {
         let calc = FeeCalculator::new();
-        // ₦100 transfer (10,000 kobo) — 1% = 100 kobo, but min is 5000
-        let result = calc.calculate(10_000, 0, FeeTier::Standard);
-        assert_eq!(result.total_fee, 5000); // Min fee applies
+        // ₦1 transfer (100 kobo) — 1% = 1 kobo + flat 5000 = 5001, clamped to min 5000
+        // Since raw_total (5001) > min_fee (5000), min doesn't override
+        let result = calc.calculate(100, 0, FeeTier::Standard);
+        assert_eq!(result.total_fee, 5001);
+        // ₦0.50 transfer (50 kobo) — 1% = 0 kobo (integer) + flat 5000 = 5000 = min_fee
+        let result2 = calc.calculate(50, 0, FeeTier::Standard);
+        assert_eq!(result2.total_fee, 5000);
     }
 
     #[test]

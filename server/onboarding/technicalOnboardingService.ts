@@ -187,8 +187,8 @@ export async function saveTechnicalConfig(
       .where(eq(technicalConfigurations.id, existing[0].id));
     return existing[0].id;
   } else {
-    const result = await db.insert(technicalConfigurations).values(data);
-    return result[0].insertId;
+    const [ins] = await db.insert(technicalConfigurations).values(data).returning({ id: technicalConfigurations.id });
+    return ins.id;
   }
 }
 
@@ -233,8 +233,8 @@ export async function saveSecurityCredentials(
       .where(eq(securityCredentials.id, existing[0].id));
     return existing[0].id;
   } else {
-    const result = await db.insert(securityCredentials).values(data);
-    return result[0].insertId;
+    const [ins] = await db.insert(securityCredentials).values(data).returning({ id: securityCredentials.id });
+    return ins.id;
   }
 }
 
@@ -265,11 +265,12 @@ export async function saveNetworkConfig(
     .where(eq(networkConfigurations.applicationId, applicationId))
     .limit(1);
 
+  const { retryPolicy: rp, ...rest } = config;
   const data = {
     applicationId,
     userId,
-    ...config,
-    retryPolicy: config.retryPolicy ? JSON.stringify(config.retryPolicy) : null,
+    ...rest,
+    retryPolicy: rp ? JSON.stringify(rp) : null,
   };
 
   if (existing.length > 0) {
@@ -279,8 +280,8 @@ export async function saveNetworkConfig(
       .where(eq(networkConfigurations.id, existing[0].id));
     return existing[0].id;
   } else {
-    const result = await db.insert(networkConfigurations).values(data);
-    return result[0].insertId;
+    const [ins] = await db.insert(networkConfigurations).values(data).returning({ id: networkConfigurations.id });
+    return ins.id;
   }
 }
 
@@ -303,13 +304,13 @@ export async function uploadComplianceDocument(
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const result = await db.insert(complianceDocuments).values({
+  const [ins] = await db.insert(complianceDocuments).values({
     applicationId,
     userId,
     ...document,
-  });
+  }).returning({ id: complianceDocuments.id });
 
-  return result[0].insertId;
+  return ins.id;
 }
 
 /**
@@ -364,13 +365,14 @@ export async function submitForReview(applicationId: number, userId: number) {
     .where(eq(technicalConfigurations.applicationId, applicationId));
 
   // Create review record
-  const result = await db.insert(technicalOnboardingReviews).values({
+  const [revIns] = await db.insert(technicalOnboardingReviews).values({
+    configurationId: 0,
     applicationId,
     reviewerId: 0, // Will be assigned by admin
     status: "pending",
-  });
+  }).returning({ id: technicalOnboardingReviews.id });
 
-  return { success: true, reviewId: result[0].insertId };
+  return { success: true, reviewId: revIns.id };
 }
 
 /**
@@ -412,8 +414,7 @@ export async function reviewTechnicalOnboarding(
       reviewerId,
       status: decision.status,
       endpointConnectivityTest: decision.endpointConnectivityTest,
-      certificateValidation: decision.certificateValidation,
-      complianceVerification: decision.complianceVerification,
+      tlsCertificateValid: decision.certificateValidation,
       comments: decision.comments,
       correctionsRequired: decision.correctionsRequired
         ? JSON.stringify(decision.correctionsRequired)
@@ -434,8 +435,8 @@ export async function reviewTechnicalOnboarding(
     const configStatus = decision.status === 'corrections_requested' ? 'draft' : decision.status;
     await db
       .update(technicalConfigurations)
-      .set({ status: configStatus })
-      .where(eq(technicalConfigurations.applicationId, review.applicationId));
+      .set({ status: configStatus as any })
+      .where(eq(technicalConfigurations.applicationId, review.applicationId!));
   }
 
   return { success: true };

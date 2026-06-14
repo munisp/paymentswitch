@@ -90,7 +90,7 @@ export const trustedDeviceRouter = router({
         deviceName: device.deviceName,
         deviceFingerprint: device.deviceFingerprint,
         lastUsedAt: device.lastUsedAt,
-        trustedAt: device.trustedAt,
+        trustedAt: device.createdAt,
         expiresAt: device.expiresAt,
         isActive: device.isActive === 'true',
         ipAddress: device.ipAddress,

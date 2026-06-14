@@ -18,7 +18,7 @@ export const webhookConfigRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const secret = `whsec_${randomBytes(32).toString("hex")}`;
-      const [config] = await db.getDb().insert(webhookConfigurations).values({
+      const [config] = await (await db.requireDb()).insert(webhookConfigurations).values({
         userId: ctx.user.id,
         url: input.url,
         secret,
@@ -33,7 +33,7 @@ export const webhookConfigRouter = router({
 
   list: protectedProcedure
     .query(async ({ ctx }) => {
-      return await db.getDb().select().from(webhookConfigurations)
+      return await (await db.requireDb()).select().from(webhookConfigurations)
         .where(eq(webhookConfigurations.userId, ctx.user.id))
         .orderBy(desc(webhookConfigurations.createdAt));
     }),
@@ -58,7 +58,7 @@ export const webhookConfigRouter = router({
       if (input.backoffMultiplier !== undefined) updateData.backoffMultiplier = input.backoffMultiplier;
       if (input.timeoutSeconds !== undefined) updateData.timeoutSeconds = input.timeoutSeconds;
       if (input.isActive !== undefined) updateData.isActive = input.isActive;
-      const [updated] = await db.getDb().update(webhookConfigurations)
+      const [updated] = await (await db.requireDb()).update(webhookConfigurations)
         .set(updateData)
         .where(and(eq(webhookConfigurations.id, input.id), eq(webhookConfigurations.userId, ctx.user.id)))
         .returning();
@@ -68,7 +68,7 @@ export const webhookConfigRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      await db.getDb().delete(webhookConfigurations)
+      await (await db.requireDb()).delete(webhookConfigurations)
         .where(and(eq(webhookConfigurations.id, input.id), eq(webhookConfigurations.userId, ctx.user.id)));
       return { success: true };
     }),
@@ -76,7 +76,7 @@ export const webhookConfigRouter = router({
   test: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const [config] = await db.getDb().select().from(webhookConfigurations)
+      const [config] = await (await db.requireDb()).select().from(webhookConfigurations)
         .where(and(eq(webhookConfigurations.id, input.id), eq(webhookConfigurations.userId, ctx.user.id)));
       if (!config) throw new TRPCError({ code: "NOT_FOUND" });
       return { success: true, message: "Test webhook sent successfully", url: config.url, statusCode: 200 };
@@ -86,7 +86,7 @@ export const webhookConfigRouter = router({
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
       const newSecret = `whsec_${randomBytes(32).toString("hex")}`;
-      const [updated] = await db.getDb().update(webhookConfigurations)
+      const [updated] = await (await db.requireDb()).update(webhookConfigurations)
         .set({ secret: newSecret, updatedAt: new Date() })
         .where(and(eq(webhookConfigurations.id, input.id), eq(webhookConfigurations.userId, ctx.user.id)))
         .returning();

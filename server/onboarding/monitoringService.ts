@@ -6,8 +6,8 @@ export interface UsageLog {
   credentialId: number;
   endpoint: string;
   method: string;
-  statusCode: number;
-  responseTime: number;
+  statusCode: number | null;
+  responseTimeMs: number | null;
   ipAddress?: string;
   userAgent?: string;
   errorMessage?: string;
@@ -15,10 +15,10 @@ export interface UsageLog {
 
 export interface UsageStats {
   date: Date;
-  requestCount: number;
-  errorCount: number;
-  avgResponseTime: number;
-  peakRequestsPerHour: number;
+  requestCount: number | null;
+  errorCount: number | null;
+  avgResponseTimeMs: number | null;
+  peakRequestsPerHour: number | null;
 }
 
 /**
@@ -29,11 +29,12 @@ export async function logApiRequest(log: UsageLog): Promise<void> {
   if (!db) throw new Error("Database not available");
 
   await db.insert(apiKeyUsageLogs).values({
+    apiKeyId: log.credentialId,
     credentialId: log.credentialId,
     endpoint: log.endpoint,
     method: log.method,
     statusCode: log.statusCode,
-    responseTime: log.responseTime,
+    responseTimeMs: log.responseTimeMs,
     ipAddress: log.ipAddress,
     userAgent: log.userAgent,
     errorMessage: log.errorMessage,
@@ -70,7 +71,7 @@ export async function getUsageStats(params: {
     date: s.date,
     requestCount: s.requestCount,
     errorCount: s.errorCount,
-    avgResponseTime: s.avgResponseTime,
+    avgResponseTimeMs: s.avgResponseTimeMs,
     peakRequestsPerHour: s.peakRequestsPerHour,
   }));
 }
@@ -93,11 +94,11 @@ export async function getRecentActivity(params: {
     .limit(params.limit || 100);
 
   return logs.map((log) => ({
-    credentialId: log.credentialId,
+    credentialId: log.credentialId ?? 0,
     endpoint: log.endpoint,
     method: log.method,
     statusCode: log.statusCode,
-    responseTime: log.responseTime,
+    responseTimeMs: log.responseTimeMs,
     ipAddress: log.ipAddress || undefined,
     userAgent: log.userAgent || undefined,
     errorMessage: log.errorMessage || undefined,
@@ -131,9 +132,9 @@ export async function getUsageTrends(params: {
 
   return {
     labels: stats.map((s) => s.date.toISOString().split("T")[0]),
-    requests: stats.map((s) => s.requestCount),
-    errors: stats.map((s) => s.errorCount),
-    avgResponseTimes: stats.map((s) => s.avgResponseTime),
+    requests: stats.map((s) => s.requestCount ?? 0),
+    errors: stats.map((s) => s.errorCount ?? 0),
+    avgResponseTimes: stats.map((s) => s.avgResponseTimeMs ?? 0),
   };
 }
 
@@ -161,8 +162,8 @@ export async function getErrorRate(params: {
     endDate,
   });
 
-  const totalRequests = stats.reduce((sum, s) => sum + s.requestCount, 0);
-  const totalErrors = stats.reduce((sum, s) => sum + s.errorCount, 0);
+  const totalRequests = stats.reduce((sum, s) => sum + (s.requestCount ?? 0), 0);
+  const totalErrors = stats.reduce((sum, s) => sum + (s.errorCount ?? 0), 0);
   const errorRate = totalRequests > 0 ? (totalErrors / totalRequests) * 100 : 0;
 
   return {
@@ -209,8 +210,9 @@ export async function aggregateDailyStats(date: Date): Promise<void> {
   >();
 
   for (const log of logs) {
-    if (!statsByCredential.has(log.credentialId)) {
-      statsByCredential.set(log.credentialId, {
+    const credId = log.credentialId ?? 0;
+    if (!statsByCredential.has(credId)) {
+      statsByCredential.set(credId, {
         requestCount: 0,
         errorCount: 0,
         totalResponseTime: 0,
@@ -218,11 +220,11 @@ export async function aggregateDailyStats(date: Date): Promise<void> {
       });
     }
 
-    const stats = statsByCredential.get(log.credentialId)!;
+    const stats = statsByCredential.get(credId)!;
     stats.requestCount++;
-    stats.totalResponseTime += log.responseTime;
+    stats.totalResponseTime += (log.responseTimeMs ?? 0);
 
-    if (log.statusCode >= 400) {
+    if ((log.statusCode ?? 0) >= 400) {
       stats.errorCount++;
     }
 
@@ -256,18 +258,19 @@ export async function aggregateDailyStats(date: Date): Promise<void> {
         .set({
           requestCount: stats.requestCount,
           errorCount: stats.errorCount,
-          avgResponseTime,
+          avgResponseTimeMs: avgResponseTime,
           peakRequestsPerHour,
         })
         .where(eq(apiKeyUsageStats.id, existing.id));
     } else {
       // Insert new stats
       await db.insert(apiKeyUsageStats).values({
+        apiKeyId: credentialId,
         credentialId,
         date: startOfDay,
         requestCount: stats.requestCount,
         errorCount: stats.errorCount,
-        avgResponseTime,
+        avgResponseTimeMs: avgResponseTime,
         peakRequestsPerHour,
       });
     }
@@ -319,16 +322,16 @@ export async function getRealTimeStats(credentialId: number): Promise<{
 
   const stats24h = {
     requests: logs24h.length,
-    errors: logs24h.filter((l) => l.statusCode >= 400).length,
+    errors: logs24h.filter((l) => (l.statusCode ?? 0) >= 400).length,
     avgResponseTime:
       logs24h.length > 0
-        ? Math.round(logs24h.reduce((sum, l) => sum + l.responseTime, 0) / logs24h.length)
+        ? Math.round(logs24h.reduce((sum, l) => sum + (l.responseTimeMs ?? 0), 0) / logs24h.length)
         : 0,
   };
 
   const stats1h = {
     requests: logs1h.length,
-    errors: logs1h.filter((l) => l.statusCode >= 400).length,
+    errors: logs1h.filter((l) => (l.statusCode ?? 0) >= 400).length,
   };
 
   return {

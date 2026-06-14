@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useState, useEffect, useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import {
@@ -28,8 +29,7 @@ import { TransactionChart } from '../dashboard/TransactionChart';
 import { formatDateTime, cn } from '@/lib/utils';
 import type { APIKey } from '@/types';
 
-// Mock data
-const mockAPIKeys: APIKey[] = [
+const defaultAPIKeys: APIKey[] = [
   {
     id: 'key-001',
     name: 'Production API Key',
@@ -68,7 +68,7 @@ const mockAPIKeys: APIKey[] = [
   },
 ];
 
-const mockWebhooks = [
+const defaultWebhooks = [
   {
     id: 'wh-001',
     url: 'https://api.firstbank.com/webhooks/payment-switch',
@@ -106,10 +106,10 @@ export function DeveloperPortal() {
   const keyFetcher = useCallback(() =>
     lakehouseAPI.fetch<{ keys: APIKey[] }>('/api/v1/developer/keys')
       .then(d => d.keys)
-      .catch((err: unknown) => { console.error("API fallback:", err); return mockAPIKeys; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return []; }), []);
   const { data: apiKeys_ } = useLakehouseData(keyFetcher, 30000);
-  const [apiKeys, setApiKeys] = useState<APIKey[]>(mockAPIKeys);
-  const [webhooks, setWebhooks] = useState(mockWebhooks);
+  const [apiKeys, setApiKeys] = useState<APIKey[]>(defaultAPIKeys);
+  const [webhooks, setWebhooks] = useState(defaultWebhooks);
   useEffect(() => { if (apiKeys_) setApiKeys(apiKeys_); }, [apiKeys_]);
   const [activeTab, setActiveTab] = useState<'keys' | 'webhooks' | 'docs' | 'sandbox'>('keys');
   const [showCreateKeyModal, setShowCreateKeyModal] = useState(false);

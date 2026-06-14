@@ -15,7 +15,7 @@ export const supportTicketRouter = router({
       transactionId: z.number().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const [ticket] = await db.getDb().insert(supportTickets).values({
+      const [ticket] = await (await db.requireDb()).insert(supportTickets).values({
         userId: ctx.user.id,
         subject: input.subject,
         description: input.description,
@@ -41,11 +41,11 @@ export const supportTicketRouter = router({
       if (!isAdmin) conditions.push(eq(supportTickets.userId, ctx.user.id));
       if (input?.status) conditions.push(sql`${supportTickets.status} = ${input.status}`);
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-      const items = await db.getDb().select().from(supportTickets)
+      const items = await (await db.requireDb()).select().from(supportTickets)
         .where(whereClause)
         .orderBy(desc(supportTickets.createdAt))
         .limit(limit).offset(offset);
-      const [{ count }] = await db.getDb().select({ count: sql<number>`count(*)` })
+      const [{ count }] = await (await db.requireDb()).select({ count: sql<number>`count(*)` })
         .from(supportTickets).where(whereClause);
       return { items, total: Number(count), page, limit };
     }),
@@ -55,10 +55,10 @@ export const supportTicketRouter = router({
     .query(async ({ ctx, input }) => {
       const conditions = [eq(supportTickets.id, input.id)];
       if (ctx.user.role !== "admin") conditions.push(eq(supportTickets.userId, ctx.user.id));
-      const [ticket] = await db.getDb().select().from(supportTickets)
+      const [ticket] = await (await db.requireDb()).select().from(supportTickets)
         .where(and(...conditions));
       if (!ticket) throw new TRPCError({ code: "NOT_FOUND", message: "Ticket not found" });
-      const messages = await db.getDb().select().from(supportMessages)
+      const messages = await (await db.requireDb()).select().from(supportMessages)
         .where(eq(supportMessages.ticketId, input.id))
         .orderBy(supportMessages.createdAt);
       return { ...ticket, messages };
@@ -72,7 +72,7 @@ export const supportTicketRouter = router({
       attachments: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const [msg] = await db.getDb().insert(supportMessages).values({
+      const [msg] = await (await db.requireDb()).insert(supportMessages).values({
         ticketId: input.ticketId,
         senderId: ctx.user.id,
         senderRole: ctx.user.role ?? "user",
@@ -81,7 +81,7 @@ export const supportTicketRouter = router({
         attachments: input.attachments,
       }).returning();
       const newStatus = ctx.user.role === "admin" ? "waiting_customer" : "waiting_agent";
-      await db.getDb().update(supportTickets)
+      await (await db.requireDb()).update(supportTickets)
         .set({ status: newStatus, updatedAt: new Date() })
         .where(eq(supportTickets.id, input.ticketId));
       return msg;
@@ -96,7 +96,7 @@ export const supportTicketRouter = router({
       const updateData: Record<string, unknown> = { status: input.status, updatedAt: new Date() };
       if (input.status === "resolved") updateData.resolvedAt = new Date();
       if (input.status === "closed") updateData.closedAt = new Date();
-      const [updated] = await db.getDb().update(supportTickets)
+      const [updated] = await (await db.requireDb()).update(supportTickets)
         .set(updateData)
         .where(eq(supportTickets.id, input.id))
         .returning();
@@ -109,7 +109,7 @@ export const supportTicketRouter = router({
       if (ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
       }
-      const [updated] = await db.getDb().update(supportTickets)
+      const [updated] = await (await db.requireDb()).update(supportTickets)
         .set({ assignedAgent: input.agentId, status: "in_progress", updatedAt: new Date() })
         .where(eq(supportTickets.id, input.id))
         .returning();

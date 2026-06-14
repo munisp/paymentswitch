@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import { Gauge, Edit, Plus } from 'lucide-react';
@@ -14,7 +15,7 @@ export function TransactionLimits() {
   const fetcher = useCallback(() =>
     lakehouseAPI.fetch<{ limits: typeof limits }>('/api/v1/limits')
       .then(d => d.limits)
-      .catch((err: unknown) => { console.error("API fallback:", err); return limits; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return limits; }), []);
   const { data: apiLimits } = useLakehouseData(fetcher, 60000);
   const activeLimits = apiLimits || limits;
   return (

@@ -19,7 +19,7 @@ export const batchTransferRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const totalAmount = input.recipients.reduce((sum, r) => sum + parseFloat(r.amount), 0).toFixed(2);
-      const [batch] = await db.getDb().insert(batchTransfers).values({
+      const [batch] = await (await db.requireDb()).insert(batchTransfers).values({
         userId: ctx.user.id,
         batchName: input.batchName,
         totalAmount,
@@ -34,7 +34,7 @@ export const batchTransferRouter = router({
         recipientBank: r.recipientBank,
         amount: r.amount,
       }));
-      await db.getDb().insert(batchTransferRecipients).values(recipientRows);
+      await (await db.requireDb()).insert(batchTransferRecipients).values(recipientRows);
       return batch;
     }),
 
@@ -47,11 +47,11 @@ export const batchTransferRouter = router({
       const page = input?.page ?? 1;
       const limit = input?.limit ?? 20;
       const offset = (page - 1) * limit;
-      const items = await db.getDb().select().from(batchTransfers)
+      const items = await (await db.requireDb()).select().from(batchTransfers)
         .where(eq(batchTransfers.userId, ctx.user.id))
         .orderBy(desc(batchTransfers.createdAt))
         .limit(limit).offset(offset);
-      const [{ count }] = await db.getDb().select({ count: sql<number>`count(*)` })
+      const [{ count }] = await (await db.requireDb()).select({ count: sql<number>`count(*)` })
         .from(batchTransfers).where(eq(batchTransfers.userId, ctx.user.id));
       return { items, total: Number(count), page, limit };
     }),
@@ -59,10 +59,10 @@ export const batchTransferRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
-      const [batch] = await db.getDb().select().from(batchTransfers)
+      const [batch] = await (await db.requireDb()).select().from(batchTransfers)
         .where(and(eq(batchTransfers.id, input.id), eq(batchTransfers.userId, ctx.user.id)));
       if (!batch) throw new TRPCError({ code: "NOT_FOUND", message: "Batch not found" });
-      const recipients = await db.getDb().select().from(batchTransferRecipients)
+      const recipients = await (await db.requireDb()).select().from(batchTransferRecipients)
         .where(eq(batchTransferRecipients.batchId, input.id));
       return { ...batch, recipients };
     }),
@@ -70,15 +70,15 @@ export const batchTransferRouter = router({
   process: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const [batch] = await db.getDb().select().from(batchTransfers)
+      const [batch] = await (await db.requireDb()).select().from(batchTransfers)
         .where(and(eq(batchTransfers.id, input.id), eq(batchTransfers.userId, ctx.user.id)));
       if (!batch) throw new TRPCError({ code: "NOT_FOUND", message: "Batch not found" });
 
-      await db.getDb().update(batchTransfers)
+      await (await db.requireDb()).update(batchTransfers)
         .set({ status: "processing", updatedAt: new Date() })
         .where(eq(batchTransfers.id, input.id));
 
-      const recipients = await db.getDb().select().from(batchTransferRecipients)
+      const recipients = await (await db.requireDb()).select().from(batchTransferRecipients)
         .where(eq(batchTransferRecipients.batchId, input.id));
 
       let completed = 0;
@@ -86,12 +86,12 @@ export const batchTransferRouter = router({
       for (const recipient of recipients) {
         try {
           const txRef = `BTX-${Date.now()}-${recipient.id}`;
-          await db.getDb().update(batchTransferRecipients)
+          await (await db.requireDb()).update(batchTransferRecipients)
             .set({ status: "completed", transactionRef: txRef, processedAt: new Date() })
             .where(eq(batchTransferRecipients.id, recipient.id));
           completed++;
         } catch {
-          await db.getDb().update(batchTransferRecipients)
+          await (await db.requireDb()).update(batchTransferRecipients)
             .set({ status: "failed", failureReason: "Processing error" })
             .where(eq(batchTransferRecipients.id, recipient.id));
           failed++;
@@ -99,7 +99,7 @@ export const batchTransferRouter = router({
       }
 
       const finalStatus = failed === recipients.length ? "failed" : completed === recipients.length ? "completed" : "partially_completed";
-      const [updated] = await db.getDb().update(batchTransfers)
+      const [updated] = await (await db.requireDb()).update(batchTransfers)
         .set({ status: finalStatus, completedCount: completed, failedCount: failed, updatedAt: new Date() })
         .where(eq(batchTransfers.id, input.id))
         .returning();

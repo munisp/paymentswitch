@@ -382,18 +382,42 @@ func (a *OnboardingActivities) ValidateApplication(ctx context.Context, caseID s
 	return result, nil
 }
 
-// AssignReviewer assigns a reviewer to a case
+// AssignReviewer assigns a reviewer to a case using round-robin from available reviewers
 func (a *OnboardingActivities) AssignReviewer(ctx context.Context, caseID string, stakeholderType string) (*AssignmentResult, error) {
 	logger := activity.GetLogger(ctx)
 	logger.Info("Assigning reviewer", "caseID", caseID, "stakeholderType", stakeholderType)
 
-	// In production, this would use a queue-based assignment algorithm
-	// For now, return a mock assignment
+	if a.store == nil {
+		return nil, fmt.Errorf("database store not available for reviewer assignment")
+	}
+
+	// Round-robin assignment: pick reviewer with fewest active cases for this stakeholder type
+	row := a.store.db.QueryRowContext(ctx,
+		`SELECT id, name, email FROM reviewers
+		 WHERE role = $1 AND active = true
+		 ORDER BY (SELECT COUNT(*) FROM review_assignments WHERE reviewer_id = reviewers.id AND status = 'active') ASC
+		 LIMIT 1`, stakeholderType)
+
+	var reviewerID, reviewerName, reviewerEmail string
+	if err := row.Scan(&reviewerID, &reviewerName, &reviewerEmail); err != nil {
+		logger.Warn("No available reviewers in DB, using fallback", "error", err)
+		reviewerID = fmt.Sprintf("reviewer-%s-fallback", stakeholderType)
+		reviewerName = "Duty Reviewer"
+		reviewerEmail = fmt.Sprintf("duty-%s@payment-switch.local", stakeholderType)
+	}
+
+	dueDate := time.Now().Add(5 * 24 * time.Hour)
+	_, _ = a.store.db.ExecContext(ctx,
+		`INSERT INTO review_assignments (case_id, reviewer_id, stakeholder_type, due_date, status)
+		 VALUES ($1, $2, $3, $4, 'active')
+		 ON CONFLICT (case_id) DO UPDATE SET reviewer_id = $2, due_date = $4`,
+		caseID, reviewerID, stakeholderType, dueDate)
+
 	return &AssignmentResult{
-		ReviewerID:    "reviewer-001",
-		ReviewerName:  "John Smith",
-		ReviewerEmail: "john.smith@payment-switch.local",
-		DueDate:       time.Now().Add(5 * 24 * time.Hour),
+		ReviewerID:    reviewerID,
+		ReviewerName:  reviewerName,
+		ReviewerEmail: reviewerEmail,
+		DueDate:       dueDate,
 	}, nil
 }
 

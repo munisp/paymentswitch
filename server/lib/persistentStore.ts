@@ -161,7 +161,7 @@ export class PersistentStore {
 
     const now = Date.now();
     const entries: T[] = [];
-    for (const [, entry] of this.memoryFallback) {
+    for (const [, entry] of Array.from(this.memoryFallback)) {
       if (entry.expiresAt && now > entry.expiresAt) continue;
       entries.push(entry.data as T);
     }
@@ -235,7 +235,7 @@ export class PersistentStore {
 
     const now = Date.now();
     let cleaned = 0;
-    for (const [key, entry] of this.memoryFallback) {
+    for (const [key, entry] of Array.from(this.memoryFallback)) {
       if (entry.expiresAt && now > entry.expiresAt) {
         this.memoryFallback.delete(key);
         cleaned++;

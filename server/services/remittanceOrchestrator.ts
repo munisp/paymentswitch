@@ -18,6 +18,9 @@ import * as nibssService from './nibssService';
 import * as kycService from './kycService';
 import * as exchangeRateService from './exchangeRateService';
 import { createChildLogger } from '../lib/logger';
+import { getDb } from '../db';
+import { remittances } from '../../drizzle/remittance-schema';
+import { eq } from 'drizzle-orm';
 
 const log = createChildLogger('remittanceOrchestrator');
 
@@ -83,7 +86,21 @@ export async function startRemittanceWorkflow(params: {
   };
 
   // Store initial state in database
-  // await db.createRemittanceWorkflow(state);
+  try {
+    const db = await getDb();
+    if (db) {
+      await (db as any).insert(remittances).values({
+        senderCurrency: state.senderCurrency,
+        senderAmount: state.senderAmount.toString(),
+        recipientCurrency: state.recipientCurrency,
+        recipientPhone: state.recipientPhone,
+        deliveryOption: state.deliveryOption,
+        status: state.currentStep,
+      }).onConflictDoNothing();
+    }
+  } catch (err) {
+    log.warn({ err }, 'Failed to persist workflow state to DB');
+  }
 
   return state;
 }
@@ -123,7 +140,17 @@ export async function processWorkflowStep(
     state.lastUpdated = new Date();
     
     // Store updated state
-    // await db.updateRemittanceWorkflow(state);
+    try {
+      const db = await getDb();
+      if (db) {
+        await (db as any).update(remittances).set({
+          status: state.currentStep,
+          updatedAt: new Date(),
+        }).where(eq(remittances.id, parseInt(state.remittanceId, 10) || 0));
+      }
+    } catch (dbErr) {
+      log.warn({ dbErr }, 'Failed to persist failed workflow state to DB');
+    }
     
     return state;
   }
@@ -447,7 +474,7 @@ async function sendWebhook(
   event: string,
   data: Record<string, any>
 ): Promise<void> {
-  log.info(`[Webhook] ${event} for ${remittanceId}:`, data);
+  log.info({ data }, `[Webhook] ${event} for ${remittanceId}`);
   
   // In production, send to registered webhook URL
   // Store in database for tracking and retry

@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import React, { useState, useEffect } from 'react';
 import { lakehouseAPI } from '@/lib/api';
 
@@ -54,7 +55,7 @@ interface BulkDisbursement {
   submittedAt: string;
 }
 
-const mockPayments: Payment[] = [
+const defaultPayments: Payment[] = [
   { id: 'NIP-2026-000001', type: 'NIP', status: 'completed', senderName: 'Adebayo Ogunlade', senderBank: 'Access Bank', receiverName: 'Chioma Okafor', receiverBank: 'GTBank', amount: 250000, fee: 10.75, nipRef: 'NIP260501060001', channel: 'MOBILE', narration: 'May rent payment', initiatedAt: '2026-05-01T06:00:00Z' },
   { id: 'NIP-2026-000002', type: 'NIP', status: 'completed', senderName: 'Emeka Nwosu', senderBank: 'Zenith Bank', receiverName: 'Fatima Bello', receiverBank: 'UBA', amount: 5000000, fee: 26.88, nipRef: 'NIP260501060002', channel: 'INTERNET_BANKING', narration: 'Contract payment', initiatedAt: '2026-05-01T06:30:00Z' },
   { id: 'NIP-2026-000003', type: 'NEFT', status: 'processing', senderName: 'Grace Adeyemi', senderBank: 'First Bank', receiverName: 'Ibrahim Hassan', receiverBank: 'Stanbic IBTC', amount: 15000000, fee: 53.75, nipRef: 'NEFT260501070001', channel: 'BRANCH', narration: 'Equipment purchase', initiatedAt: '2026-05-01T07:00:00Z' },
@@ -62,7 +63,7 @@ const mockPayments: Payment[] = [
   { id: 'NIP-2026-000005', type: 'NIP', status: 'completed', senderName: 'Musa Danjuma', senderBank: 'Union Bank', receiverName: 'Ngozi Eze', receiverBank: 'Keystone Bank', amount: 1500000, fee: 10.75, nipRef: 'NIP260501090001', channel: 'POS', narration: 'Supplier payment', initiatedAt: '2026-05-01T09:00:00Z' },
 ];
 
-const mockBillProviders: BillProvider[] = [
+const defaultBillProviders: BillProvider[] = [
   { id: 'BILL-001', name: 'IKEDC', category: 'Electricity', services: ['Prepaid', 'Postpaid'], isActive: true, avgProcessMs: 1200 },
   { id: 'BILL-002', name: 'MTN Nigeria', category: 'Airtime/Data', services: ['Airtime', 'Data Bundle', 'SME Data'], isActive: true, avgProcessMs: 800 },
   { id: 'BILL-003', name: 'DSTV/GOtv', category: 'Cable TV', services: ['DSTV', 'GOtv', 'Showmax'], isActive: true, avgProcessMs: 1500 },
@@ -72,14 +73,14 @@ const mockBillProviders: BillProvider[] = [
   { id: 'BILL-007', name: 'EKEDC', category: 'Electricity', services: ['Prepaid'], isActive: false, avgProcessMs: 1800 },
 ];
 
-const mockStandingOrders: StandingOrder[] = [
+const defaultStandingOrders: StandingOrder[] = [
   { id: 'SO-001', payerBank: 'Access Bank', payeeBank: 'GTBank', payeeName: 'Chioma Okafor', amount: 250000, frequency: 'monthly', nextExecDate: '2026-06-01', status: 'active', executions: 12 },
   { id: 'SO-002', payerBank: 'Zenith Bank', payeeBank: 'UBA', payeeName: 'Fatima Bello', amount: 50000, frequency: 'weekly', nextExecDate: '2026-05-08', status: 'active', executions: 48 },
   { id: 'SO-003', payerBank: 'First Bank', payeeBank: 'Stanbic IBTC', payeeName: 'Grace Adeyemi', amount: 1000000, frequency: 'quarterly', nextExecDate: '2026-07-01', status: 'active', executions: 4 },
   { id: 'SO-004', payerBank: 'GTBank', payeeBank: 'Access Bank', payeeName: 'Emeka Nwosu', amount: 150000, frequency: 'monthly', nextExecDate: '2026-06-01', status: 'paused', executions: 6 },
 ];
 
-const mockBulk: BulkDisbursement[] = [
+const defaultBulk: BulkDisbursement[] = [
   { id: 'BULK-001', initiatorName: 'Dangote Industries', totalItems: 12500, processedItems: 12500, successCount: 12340, failedCount: 160, totalAmount: 2_500_000_000, status: 'completed', submittedAt: '2026-04-30T10:00:00Z' },
   { id: 'BULK-002', initiatorName: 'MTN Nigeria', totalItems: 8000, processedItems: 5600, successCount: 5580, failedCount: 20, totalAmount: 1_200_000_000, status: 'processing', submittedAt: '2026-05-01T08:00:00Z' },
   { id: 'BULK-003', initiatorName: 'Federal Ministry of Finance', totalItems: 45000, processedItems: 0, successCount: 0, failedCount: 0, totalAmount: 9_000_000_000, status: 'queued', submittedAt: '2026-05-02T06:00:00Z' },
@@ -95,10 +96,10 @@ export default function DomesticPaymentsDashboard() {
   const [bulk, setBulk] = useState<BulkDisbursement[]>([]);
 
   useEffect(() => {
-    lakehouseAPI.fetch<{ payments: Payment[] }>('/api/domestic-payments/payments').then(d => setPayments(d.payments || [])).catch((err: unknown) => { console.error("API fallback:", err); setPayments(mockPayments); });
-    lakehouseAPI.fetch<{ providers: BillProvider[] }>('/api/domestic-payments/bill-providers').then(d => setBillProviders(d.providers || [])).catch((err: unknown) => { console.error("API fallback:", err); setBillProviders(mockBillProviders); });
-    lakehouseAPI.fetch<{ orders: StandingOrder[] }>('/api/domestic-payments/standing-orders').then(d => setStandingOrders(d.orders || [])).catch((err: unknown) => { console.error("API fallback:", err); setStandingOrders(mockStandingOrders); });
-    lakehouseAPI.fetch<{ disbursements: BulkDisbursement[] }>('/api/domestic-payments/bulk').then(d => setBulk(d.disbursements || [])).catch((err: unknown) => { console.error("API fallback:", err); setBulk(mockBulk); });
+    lakehouseAPI.fetch<{ payments: Payment[] }>('/api/domestic-payments/payments').then(d => setPayments(d.payments || [])).catch((err: unknown) => { logger.error("API fallback:", err); setPayments([]); });
+    lakehouseAPI.fetch<{ providers: BillProvider[] }>('/api/domestic-payments/bill-providers').then(d => setBillProviders(d.providers || [])).catch((err: unknown) => { logger.error("API fallback:", err); setBillProviders([]); });
+    lakehouseAPI.fetch<{ orders: StandingOrder[] }>('/api/domestic-payments/standing-orders').then(d => setStandingOrders(d.orders || [])).catch((err: unknown) => { logger.error("API fallback:", err); setStandingOrders([]); });
+    lakehouseAPI.fetch<{ disbursements: BulkDisbursement[] }>('/api/domestic-payments/bulk').then(d => setBulk(d.disbursements || [])).catch((err: unknown) => { logger.error("API fallback:", err); setBulk([]); });
   }, []);
 
   const tabs: { id: Tab; label: string }[] = [

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import { Database, Activity, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
@@ -27,7 +28,7 @@ export function MiddlewareDashboard() {
   const fetcher = useCallback(() =>
     lakehouseAPI.fetch<{ services: typeof middleware }>('/api/v1/infrastructure/middleware')
       .then(d => d.services)
-      .catch((err: unknown) => { console.error("API fallback:", err); return middleware; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return middleware; }), []);
   const { data: services } = useLakehouseData(fetcher, 15000);
   const activeMiddleware = services || middleware;
   return (

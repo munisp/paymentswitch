@@ -46,7 +46,7 @@ export const integrationRouter = router({
       const environment = await getIntegrationEnvironment(input.applicationId, input.environmentType);
       
       if (environment) {
-        const credentials = await getApiCredentials(environment.id);
+        const credentials = await getApiCredentials(Number(environment.id));
         return {
           ...environment,
           credentials,

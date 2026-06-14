@@ -31,14 +31,13 @@ export function registerOAuthRoutes(app: Express) {
       const openId = userInfo.openId ?? (userInfo as any).sub;
       
       if (!openId) {
-        log.error("[OAuth] Missing user identifier - neither openId nor sub found in userInfo:", 
-          Object.keys(userInfo));
+        log.error({ keys: Object.keys(userInfo) }, "[OAuth] Missing user identifier - neither openId nor sub found in userInfo");
         res.status(400).json({ error: "User identifier (openId/sub) missing from user info" });
         return;
       }
 
       await db.upsertUser({
-        openId,
+        sub: openId,
         name: userInfo.name || null,
         email: userInfo.email ?? null,
         loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
@@ -120,7 +119,7 @@ export function registerOAuthRoutes(app: Express) {
             isNewDevice,
             isSuspicious: suspicious,
           }).catch(error => {
-            log.error('[OAuth] Failed to send login notification:', error);
+            log.error({ err: error }, '[OAuth] Failed to send login notification:');
           });
         }
       }
@@ -160,7 +159,7 @@ export function registerOAuthRoutes(app: Express) {
         res.redirect(302, "/");
       }
     } catch (error) {
-      log.error("[OAuth] Callback failed", error);
+      log.error({ err: error }, "[OAuth] Callback failed");
       res.status(500).json({ error: "OAuth callback failed" });
     }
   });

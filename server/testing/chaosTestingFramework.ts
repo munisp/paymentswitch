@@ -228,7 +228,7 @@ export class ChaosMonkey extends EventEmitter {
    * Abort all running experiments
    */
   abortAllExperiments(): void {
-    for (const experimentId of this.activeExperiments) {
+    for (const experimentId of Array.from(this.activeExperiments)) {
       this.abortExperiment(experimentId);
     }
   }
@@ -239,7 +239,7 @@ export class ChaosMonkey extends EventEmitter {
   shouldAffectRequest(service: string, endpoint?: string): ChaosEffect | null {
     if (!this.enabled) return null;
 
-    for (const [, interceptor] of this.interceptors) {
+    for (const [, interceptor] of Array.from(this.interceptors)) {
       const effect = interceptor.shouldAffect(service, endpoint);
       if (effect) return effect;
     }

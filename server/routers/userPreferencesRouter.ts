@@ -7,10 +7,10 @@ import { eq } from "drizzle-orm";
 export const userPreferencesRouter = router({
   get: protectedProcedure
     .query(async ({ ctx }) => {
-      const [prefs] = await db.getDb().select().from(userPreferences)
+      const [prefs] = await (await db.requireDb()).select().from(userPreferences)
         .where(eq(userPreferences.userId, ctx.user.id));
       if (!prefs) {
-        const [created] = await db.getDb().insert(userPreferences).values({
+        const [created] = await (await db.requireDb()).insert(userPreferences).values({
           userId: ctx.user.id,
         }).returning();
         return created;
@@ -32,10 +32,10 @@ export const userPreferencesRouter = router({
       dateFormat: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const [existing] = await db.getDb().select().from(userPreferences)
+      const [existing] = await (await db.requireDb()).select().from(userPreferences)
         .where(eq(userPreferences.userId, ctx.user.id));
       if (!existing) {
-        const [created] = await db.getDb().insert(userPreferences).values({
+        const [created] = await (await db.requireDb()).insert(userPreferences).values({
           userId: ctx.user.id,
           ...input,
         }).returning();
@@ -52,7 +52,7 @@ export const userPreferencesRouter = router({
       if (input.emailDigestFrequency !== undefined) updateData.emailDigestFrequency = input.emailDigestFrequency;
       if (input.timezone !== undefined) updateData.timezone = input.timezone;
       if (input.dateFormat !== undefined) updateData.dateFormat = input.dateFormat;
-      const [updated] = await db.getDb().update(userPreferences)
+      const [updated] = await (await db.requireDb()).update(userPreferences)
         .set(updateData)
         .where(eq(userPreferences.userId, ctx.user.id))
         .returning();

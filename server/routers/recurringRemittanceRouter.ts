@@ -20,7 +20,7 @@ export const recurringRemittanceRouter = router({
       notes: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const [schedule] = await db.getDb().insert(recurringRemittances).values({
+      const [schedule] = await (await db.requireDb()).insert(recurringRemittances).values({
         userId: ctx.user.id,
         recipientName: input.recipientName,
         recipientAccount: input.recipientAccount,
@@ -50,11 +50,11 @@ export const recurringRemittanceRouter = router({
       if (input?.status) {
         conditions.push(sql`${recurringRemittances.status} = ${input.status}`);
       }
-      const items = await db.getDb().select().from(recurringRemittances)
+      const items = await (await db.requireDb()).select().from(recurringRemittances)
         .where(and(...conditions))
         .orderBy(desc(recurringRemittances.createdAt))
         .limit(limit).offset(offset);
-      const [{ count }] = await db.getDb().select({ count: sql<number>`count(*)` })
+      const [{ count }] = await (await db.requireDb()).select({ count: sql<number>`count(*)` })
         .from(recurringRemittances).where(and(...conditions));
       return { items, total: Number(count), page, limit };
     }),
@@ -62,7 +62,7 @@ export const recurringRemittanceRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
-      const [schedule] = await db.getDb().select().from(recurringRemittances)
+      const [schedule] = await (await db.requireDb()).select().from(recurringRemittances)
         .where(and(eq(recurringRemittances.id, input.id), eq(recurringRemittances.userId, ctx.user.id)));
       if (!schedule) throw new TRPCError({ code: "NOT_FOUND", message: "Schedule not found" });
       return schedule;
@@ -84,7 +84,7 @@ export const recurringRemittanceRouter = router({
       if (input.nextExecutionDate) updateData.nextExecutionDate = new Date(input.nextExecutionDate);
       if (input.maxExecutions !== undefined) updateData.maxExecutions = input.maxExecutions;
       if (input.notes !== undefined) updateData.notes = input.notes;
-      const [updated] = await db.getDb().update(recurringRemittances)
+      const [updated] = await (await db.requireDb()).update(recurringRemittances)
         .set(updateData)
         .where(and(eq(recurringRemittances.id, input.id), eq(recurringRemittances.userId, ctx.user.id)))
         .returning();
@@ -94,7 +94,7 @@ export const recurringRemittanceRouter = router({
   pause: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const [updated] = await db.getDb().update(recurringRemittances)
+      const [updated] = await (await db.requireDb()).update(recurringRemittances)
         .set({ status: "paused", updatedAt: new Date() })
         .where(and(eq(recurringRemittances.id, input.id), eq(recurringRemittances.userId, ctx.user.id)))
         .returning();
@@ -104,7 +104,7 @@ export const recurringRemittanceRouter = router({
   resume: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const [updated] = await db.getDb().update(recurringRemittances)
+      const [updated] = await (await db.requireDb()).update(recurringRemittances)
         .set({ status: "active", updatedAt: new Date() })
         .where(and(eq(recurringRemittances.id, input.id), eq(recurringRemittances.userId, ctx.user.id)))
         .returning();
@@ -114,7 +114,7 @@ export const recurringRemittanceRouter = router({
   cancel: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      const [updated] = await db.getDb().update(recurringRemittances)
+      const [updated] = await (await db.requireDb()).update(recurringRemittances)
         .set({ status: "cancelled", updatedAt: new Date() })
         .where(and(eq(recurringRemittances.id, input.id), eq(recurringRemittances.userId, ctx.user.id)))
         .returning();

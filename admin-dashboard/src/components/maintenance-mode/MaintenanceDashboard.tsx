@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import { Wrench, Calendar, Clock, AlertTriangle, CheckCircle } from 'lucide-react';
@@ -16,7 +17,7 @@ export function MaintenanceDashboard() {
   const fetcher = useCallback(() =>
     lakehouseAPI.fetch<{ windows: typeof windows }>('/api/v1/maintenance/windows')
       .then(d => d.windows)
-      .catch((err: unknown) => { console.error("API fallback:", err); return windows; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return windows; }), []);
   const { data: apiWindows } = useLakehouseData(fetcher, 30000);
   const activeWindows = apiWindows || windows;
   return (

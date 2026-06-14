@@ -74,7 +74,7 @@ export async function generateApiKey(params: {
   const keyVersion = (maxVersion?.maxVersion || 0) + 1;
 
   // Insert new credential
-  const [result] = await db.insert(apiCredentials).values({
+  const [inserted] = await db.insert(apiCredentials).values({
     environmentId: params.environmentId,
     apiKey,
     apiSecret,
@@ -82,16 +82,16 @@ export async function generateApiKey(params: {
     isActive: true,
     expiresAt,
     createdBy: params.createdBy,
-  });
+  }).returning({ id: apiCredentials.id });
 
-  const credentialId = result.insertId;
+  const credentialId = inserted.id;
 
   // Log to history
   await db.insert(apiKeyHistory).values({
+    apiKeyId: credentialId,
     credentialId,
     action: "created",
     performedBy: params.createdBy,
-    newKeyVersion: keyVersion,
     reason: "Initial key generation",
   });
 
@@ -153,11 +153,10 @@ export async function rotateApiKey(params: {
 
   // Log rotation
   await db.insert(apiKeyHistory).values({
+    apiKeyId: params.credentialId,
     credentialId: params.credentialId,
     action: "rotated",
     performedBy: params.performedBy,
-    oldKeyVersion: oldCredential.keyVersion,
-    newKeyVersion: oldCredential.keyVersion + 1,
     reason: params.reason || "Key rotation",
   });
 
@@ -207,10 +206,10 @@ export async function revokeApiKey(params: {
 
   // Log revocation
   await db.insert(apiKeyHistory).values({
+    apiKeyId: params.credentialId,
     credentialId: params.credentialId,
     action: "revoked",
     performedBy: params.performedBy,
-    oldKeyVersion: credential.keyVersion,
     reason: params.reason,
   });
 }
@@ -252,9 +251,9 @@ export async function validateApiKey(apiKey: string): Promise<{
       .where(eq(apiCredentials.id, credential.id));
 
     await db.insert(apiKeyHistory).values({
+      apiKeyId: credential.id,
       credentialId: credential.id,
       action: "expired",
-      performedBy: credential.createdBy,
       reason: "Key expired",
     });
 
@@ -320,5 +319,5 @@ export async function getApiKeyHistory(credentialId: number) {
     .select()
     .from(apiKeyHistory)
     .where(eq(apiKeyHistory.credentialId, credentialId))
-    .orderBy(apiKeyHistory.performedAt);
+    .orderBy(apiKeyHistory.createdAt);
 }

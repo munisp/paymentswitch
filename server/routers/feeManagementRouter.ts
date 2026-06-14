@@ -24,7 +24,7 @@ export const feeManagementRouter = router({
       if (ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
       }
-      const [fee] = await db.getDb().insert(feeConfigurations).values({
+      const [fee] = await (await db.requireDb()).insert(feeConfigurations).values({
         name: input.name,
         tier: input.tier,
         transactionType: input.transactionType,
@@ -56,7 +56,7 @@ export const feeManagementRouter = router({
       if (input?.tier) conditions.push(sql`${feeConfigurations.tier} = ${input.tier}`);
       if (input?.transactionType) conditions.push(eq(feeConfigurations.transactionType, input.transactionType));
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-      const items = await db.getDb().select().from(feeConfigurations)
+      const items = await (await db.requireDb()).select().from(feeConfigurations)
         .where(whereClause)
         .orderBy(desc(feeConfigurations.createdAt))
         .limit(limit).offset(offset);
@@ -77,7 +77,7 @@ export const feeManagementRouter = router({
       if (ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
       }
-      const [current] = await db.getDb().select().from(feeConfigurations)
+      const [current] = await (await db.requireDb()).select().from(feeConfigurations)
         .where(eq(feeConfigurations.id, input.id));
       if (!current) throw new TRPCError({ code: "NOT_FOUND" });
 
@@ -88,7 +88,7 @@ export const feeManagementRouter = router({
       if (input.maxFee !== undefined) updateData.maxFee = input.maxFee;
       if (input.isActive !== undefined) updateData.isActive = input.isActive;
 
-      await db.getDb().insert(feeHistory).values({
+      await (await db.requireDb()).insert(feeHistory).values({
         feeConfigId: input.id,
         previousValue: JSON.stringify(current),
         newValue: JSON.stringify(updateData),
@@ -96,7 +96,7 @@ export const feeManagementRouter = router({
         changeReason: input.changeReason,
       });
 
-      const [updated] = await db.getDb().update(feeConfigurations)
+      const [updated] = await (await db.requireDb()).update(feeConfigurations)
         .set(updateData)
         .where(eq(feeConfigurations.id, input.id))
         .returning();
@@ -109,7 +109,7 @@ export const feeManagementRouter = router({
       if (ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
       }
-      return await db.getDb().select().from(feeHistory)
+      return await (await db.requireDb()).select().from(feeHistory)
         .where(eq(feeHistory.feeConfigId, input.feeConfigId))
         .orderBy(desc(feeHistory.createdAt));
     }),
@@ -121,7 +121,7 @@ export const feeManagementRouter = router({
       tier: z.string().default("standard"),
     }))
     .query(async ({ ctx, input }) => {
-      const [config] = await db.getDb().select().from(feeConfigurations)
+      const [config] = await (await db.requireDb()).select().from(feeConfigurations)
         .where(and(
           eq(feeConfigurations.transactionType, input.transactionType),
           sql`${feeConfigurations.tier} = ${input.tier}`,

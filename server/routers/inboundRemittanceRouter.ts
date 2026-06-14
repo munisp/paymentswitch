@@ -268,7 +268,7 @@ export const inboundRemittanceRouter = router({
   getInboundFalkorDB: protectedProcedure.query(async () => ({
     connection: { host: 'localhost', port: 6379, graphName: 'inbound_remittance_graph', status: 'connected', protocol: 'RESP3' },
     stats: { totalNodes: 5_200_000, totalEdges: 18_400_000, avgQueryMs: 0.62, queriesPerSec: 45_000, cacheHitRate: 0.94, memoryMb: 4_120 },
-    corridorGraph: seedInboundCorridors.map(c => ({ corridor: c.id, nodes: Math.floor(Math.random() * 80000) + 20000, edges: Math.floor(Math.random() * 300000) + 80000, avgDegree: +(Math.random() * 4 + 4).toFixed(2), riskScore: +(Math.random() * 0.2 + 0.03).toFixed(3) })),
+    corridorGraph: seedInboundCorridors.map((c, i) => ({ corridor: c.id, nodes: 25000 + i * 8000, edges: 90000 + i * 25000, avgDegree: +(4.2 + i * 0.3).toFixed(2), riskScore: +(0.05 + i * 0.015).toFixed(3) })),
     recentQueries: [
       { query: "GRAPH.QUERY inbound_remittance_graph \"MATCH (s)-[r:SENT_FROM]->(d) WHERE r.corridor='US-NG' RETURN count(r)\"", result: '28,400 transfers', latencyUs: 520 },
       { query: "GRAPH.QUERY inbound_remittance_graph \"MATCH (b:Beneficiary)<-[:CREDITED_TO]-(t) WITH b, count(t) AS cnt WHERE cnt > 50 RETURN b.acct, cnt\"", result: '3 high-frequency beneficiary accounts', latencyUs: 980 },

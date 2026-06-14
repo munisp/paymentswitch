@@ -48,7 +48,7 @@ export async function sendEmail(params: SendEmailParams): Promise<{ success: boo
 
       if (!response.ok) {
         const error = await response.text();
-        log.error('[Email] Failed to send email:', error);
+        log.error({ err: error }, '[Email] Failed to send email:');
         return { success: false, error: 'Failed to send email' };
       }
 
@@ -56,7 +56,7 @@ export async function sendEmail(params: SendEmailParams): Promise<{ success: boo
       log.info('[Email] Email sent successfully:', data.id);
       return { success: true };
     } catch (error) {
-      log.error('[Email] Error sending email:', error);
+      log.error({ err: error }, '[Email] Error sending email:');
       return { success: false, error: 'Email service error' };
     }
   }
@@ -107,7 +107,7 @@ export async function sendEmail(params: SendEmailParams): Promise<{ success: boo
     await fs.writeFile(filepath, emailContent, 'utf-8');
     log.info(`[Email] Saved to: ${filepath}`);
   } catch (error) {
-    log.error('[Email] Failed to save email to file:', error);
+    log.error({ err: error }, '[Email] Failed to save email to file:');
   }
 
   return { success: true };

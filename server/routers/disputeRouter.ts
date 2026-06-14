@@ -15,7 +15,7 @@ export const disputeRouter = router({
       currency: z.string().default("NGN"),
     }))
     .mutation(async ({ ctx, input }) => {
-      const [dispute] = await db.getDb().insert(disputes).values({
+      const [dispute] = await (await db.requireDb()).insert(disputes).values({
         transactionId: input.transactionId,
         userId: ctx.user.id,
         reason: input.reason,
@@ -40,11 +40,11 @@ export const disputeRouter = router({
       if (input?.status) {
         conditions.push(sql`${disputes.status} = ${input.status}`);
       }
-      const items = await db.getDb().select().from(disputes)
+      const items = await (await db.requireDb()).select().from(disputes)
         .where(and(...conditions))
         .orderBy(desc(disputes.createdAt))
         .limit(limit).offset(offset);
-      const [{ count }] = await db.getDb().select({ count: sql<number>`count(*)` })
+      const [{ count }] = await (await db.requireDb()).select({ count: sql<number>`count(*)` })
         .from(disputes).where(and(...conditions));
       return { items, total: Number(count), page, limit };
     }),
@@ -52,10 +52,10 @@ export const disputeRouter = router({
   getById: protectedProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ ctx, input }) => {
-      const [dispute] = await db.getDb().select().from(disputes)
+      const [dispute] = await (await db.requireDb()).select().from(disputes)
         .where(and(eq(disputes.id, input.id), eq(disputes.userId, ctx.user.id)));
       if (!dispute) throw new TRPCError({ code: "NOT_FOUND", message: "Dispute not found" });
-      const evidence = await db.getDb().select().from(disputeEvidence)
+      const evidence = await (await db.requireDb()).select().from(disputeEvidence)
         .where(eq(disputeEvidence.disputeId, input.id));
       return { ...dispute, evidence };
     }),
@@ -69,7 +69,7 @@ export const disputeRouter = router({
       description: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const [evidence] = await db.getDb().insert(disputeEvidence).values({
+      const [evidence] = await (await db.requireDb()).insert(disputeEvidence).values({
         disputeId: input.disputeId,
         uploadedBy: ctx.user.id,
         fileUrl: input.fileUrl,
@@ -100,7 +100,7 @@ export const disputeRouter = router({
       if (input.status === "resolved_merchant" || input.status === "resolved_customer" || input.status === "closed") {
         updateData.resolvedAt = new Date();
       }
-      const [updated] = await db.getDb().update(disputes)
+      const [updated] = await (await db.requireDb()).update(disputes)
         .set(updateData)
         .where(eq(disputes.id, input.id))
         .returning();
@@ -125,11 +125,11 @@ export const disputeRouter = router({
         conditions.push(sql`${disputes.status} = ${input.status}`);
       }
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-      const items = await db.getDb().select().from(disputes)
+      const items = await (await db.requireDb()).select().from(disputes)
         .where(whereClause)
         .orderBy(desc(disputes.createdAt))
         .limit(limit).offset(offset);
-      const [{ count }] = await db.getDb().select({ count: sql<number>`count(*)` })
+      const [{ count }] = await (await db.requireDb()).select({ count: sql<number>`count(*)` })
         .from(disputes).where(whereClause);
       return { items, total: Number(count), page, limit };
     }),

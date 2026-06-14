@@ -2,12 +2,16 @@
 package national
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/xml"
 	"fmt"
+	"math"
+	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -354,8 +358,23 @@ func (a *RTGSSettlementAdapter) SubmitToRTGS(ctx context.Context, instruction *S
 		}
 	}
 
-	// In production, send to RTGS endpoint
-	// resp, err := http.Post(a.config.RTGSEndpoint, "application/xml", bytes.NewReader(xmlData))
+	// Send to RTGS endpoint
+	if a.config.RTGSEndpoint != "" {
+		req, rErr := http.NewRequestWithContext(ctx, http.MethodPost, a.config.RTGSEndpoint, bytes.NewReader(xmlData))
+		if rErr != nil {
+			return fmt.Errorf("failed to create RTGS request: %w", rErr)
+		}
+		req.Header.Set("Content-Type", "application/xml")
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, rErr := client.Do(req)
+		if rErr != nil {
+			return fmt.Errorf("RTGS endpoint unreachable: %w", rErr)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+			return fmt.Errorf("RTGS returned status %d", resp.StatusCode)
+		}
+	}
 
 	// Update instruction status
 	now := time.Now()
@@ -725,9 +744,12 @@ func (a *RTGSSettlementAdapter) saveNotification(ctx context.Context, notificati
 }
 
 func parseAmount(s string) int64 {
-	// Parse amount string to minor units (cents)
-	// In production, use proper decimal parsing
-	return 0
+	// Parse amount string like "1234.56" to minor units (cents: 123456)
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return int64(math.Round(f * 100))
 }
 
 func parseDate(s string) time.Time {

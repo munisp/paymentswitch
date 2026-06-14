@@ -44,7 +44,8 @@ export async function registerWebhook(config: WebhookConfig): Promise<{
 
   const secret = config.secret || generateWebhookSecret();
 
-  const [result] = await db.insert(apiKeyWebhooks).values({
+  const [whInserted] = await db.insert(apiKeyWebhooks).values({
+    apiKeyId: config.credentialId,
     credentialId: config.credentialId,
     webhookUrl: config.webhookUrl,
     secret,
@@ -52,10 +53,10 @@ export async function registerWebhook(config: WebhookConfig): Promise<{
     isActive: true,
     finalFailureNotificationUrl: config.finalFailureNotificationUrl || null,
     consecutiveFailureThreshold: config.consecutiveFailureThreshold || 10,
-  });
+  }).returning({ id: apiKeyWebhooks.id });
 
   return {
-    webhookId: result.insertId,
+    webhookId: whInserted.id,
     secret,
   };
 }
@@ -157,15 +158,16 @@ export async function sendWebhook(params: {
   }
 
   // Create delivery log
-  const [logResult] = await db.insert(webhookDeliveryLogs).values({
+  const [logInserted] = await db.insert(webhookDeliveryLogs).values({
     webhookId: params.webhookId,
     event: params.event,
+    eventType: params.event,
     payload: JSON.stringify(params.payload),
     status: "pending",
     attempts: 0,
-  });
+  }).returning({ id: webhookDeliveryLogs.id });
 
-  const logId = logResult.insertId;
+  const logId = logInserted.id;
 
   try {
     // Prepare payload
@@ -251,7 +253,7 @@ export async function triggerWebhooks(event: WebhookEvent): Promise<void> {
       event: event.event,
       payload: event.data,
     }).catch((error) => {
-      log.error(`Failed to send webhook ${webhook.id}:`, error);
+      log.error({ err: error }, `Failed to send webhook ${webhook.id}:`);
     });
   }
 }
@@ -299,7 +301,7 @@ export async function retryFailedWebhooks(maxRetries: number = 3): Promise<void>
         headers: {
           "Content-Type": "application/json",
           "X-Webhook-Signature": signature,
-          "X-Webhook-Event": log.event,
+          "X-Webhook-Event": log.event ?? '',
         },
         body: payloadString,
       });

@@ -3,6 +3,7 @@ package monetization
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -121,6 +122,7 @@ type APITokenService struct {
 	apiKeys       map[string]*APIKey
 	keyHashIndex  map[string]string
 	plans         map[string]*Plan
+	db            *sql.DB
 }
 
 func NewAPITokenService() *APITokenService {
@@ -288,6 +290,7 @@ func (s *APITokenService) CreateOrganization(name string, segment CustomerSegmen
 	}
 
 	s.organizations[org.ID] = org
+	go s.persistOrganization(org)
 	return org, nil
 }
 
@@ -339,6 +342,7 @@ func (s *APITokenService) CreateAPIKey(orgID string, env Environment, name strin
 	s.apiKeys[apiKey.ID] = apiKey
 	s.keyHashIndex[keyHash] = apiKey.ID
 
+	go s.persistAPIKey(apiKey)
 	return apiKey, rawKey, nil
 }
 
@@ -372,6 +376,7 @@ func (s *APITokenService) ValidateAPIKey(rawKey string) *TokenValidationResult {
 
 	now := time.Now()
 	apiKey.LastUsedAt = &now
+	go s.persistAPIKey(apiKey)
 
 	return &TokenValidationResult{
 		Valid:          true,
@@ -394,6 +399,7 @@ func (s *APITokenService) RevokeAPIKey(keyID string) error {
 
 	apiKey.Status = "revoked"
 	delete(s.keyHashIndex, apiKey.KeyHash)
+	go s.persistAPIKey(apiKey)
 	return nil
 }
 
@@ -431,6 +437,8 @@ func (s *APITokenService) RotateAPIKey(keyID, createdBy string) (*APIKey, string
 	s.apiKeys[newKey.ID] = newKey
 	s.keyHashIndex[keyHash] = newKey.ID
 
+	go s.persistAPIKey(oldKey)
+	go s.persistAPIKey(newKey)
 	return newKey, rawKey, nil
 }
 

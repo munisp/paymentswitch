@@ -28,15 +28,14 @@ export const notificationPreferencesRouter = router({
       };
     }
 
-    // Convert string enums to booleans for frontend
     return {
-      emailNotifications: prefs.emailNotifications === 'true',
-      smsNotifications: prefs.smsNotifications === 'true',
-      newDeviceAlerts: prefs.newDeviceAlerts === 'true',
-      suspiciousActivityAlerts: prefs.suspiciousActivityAlerts === 'true',
-      loginAlerts: prefs.loginAlerts === 'true',
-      passwordChangeAlerts: prefs.passwordChangeAlerts === 'true',
-      twoFactorChangeAlerts: prefs.twoFactorChangeAlerts === 'true',
+      emailNotifications: prefs.emailNotifications,
+      smsNotifications: prefs.smsNotifications,
+      newDeviceAlerts: prefs.newDeviceAlerts,
+      suspiciousActivityAlerts: prefs.suspiciousActivityAlerts,
+      loginAlerts: prefs.loginAlerts,
+      passwordChangeAlerts: prefs.passwordChangeAlerts,
+      twoFactorChangeAlerts: prefs.twoFactorChangeAlerts,
     };
   }),
 
@@ -57,28 +56,28 @@ export const notificationPreferencesRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       // Convert booleans to string enums for database
-      const updates: Record<string, 'true' | 'false'> = {};
+      const updates: Record<string, boolean> = {};
       
       if (input.emailNotifications !== undefined) {
-        updates.emailNotifications = input.emailNotifications ? 'true' : 'false';
+        updates.emailNotifications = input.emailNotifications;
       }
       if (input.smsNotifications !== undefined) {
-        updates.smsNotifications = input.smsNotifications ? 'true' : 'false';
+        updates.smsNotifications = input.smsNotifications;
       }
       if (input.newDeviceAlerts !== undefined) {
-        updates.newDeviceAlerts = input.newDeviceAlerts ? 'true' : 'false';
+        updates.newDeviceAlerts = input.newDeviceAlerts;
       }
       if (input.suspiciousActivityAlerts !== undefined) {
-        updates.suspiciousActivityAlerts = input.suspiciousActivityAlerts ? 'true' : 'false';
+        updates.suspiciousActivityAlerts = input.suspiciousActivityAlerts;
       }
       if (input.loginAlerts !== undefined) {
-        updates.loginAlerts = input.loginAlerts ? 'true' : 'false';
+        updates.loginAlerts = input.loginAlerts;
       }
       if (input.passwordChangeAlerts !== undefined) {
-        updates.passwordChangeAlerts = input.passwordChangeAlerts ? 'true' : 'false';
+        updates.passwordChangeAlerts = input.passwordChangeAlerts;
       }
       if (input.twoFactorChangeAlerts !== undefined) {
-        updates.twoFactorChangeAlerts = input.twoFactorChangeAlerts ? 'true' : 'false';
+        updates.twoFactorChangeAlerts = input.twoFactorChangeAlerts;
       }
 
       const result = await notificationPreferencesService.updateNotificationPreferences(

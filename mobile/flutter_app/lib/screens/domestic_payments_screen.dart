@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../services/api_service.dart';
+import '../utils/validators.dart';
 
 class DomesticPaymentsScreen extends StatefulWidget {
   const DomesticPaymentsScreen({super.key});
@@ -16,6 +18,7 @@ class _DomesticPaymentsScreenState extends State<DomesticPaymentsScreen>
   List<Map<String, dynamic>> _payments = [];
   String? _error;
 
+  final _formKey = GlobalKey<FormState>();
   final _amountController = TextEditingController();
   final _recipientController = TextEditingController();
   final _narrationController = TextEditingController();
@@ -42,7 +45,7 @@ class _DomesticPaymentsScreenState extends State<DomesticPaymentsScreen>
   }
 
   Future<void> _submitPayment() async {
-    if (_amountController.text.isEmpty || _recipientController.text.isEmpty) return;
+    if (!_formKey.currentState!.validate()) return;
     setState(() { _isLoading = true; });
     try {
       await _api.post('/api/trpc/domesticPayments.createPayment', {
@@ -114,40 +117,50 @@ class _DomesticPaymentsScreenState extends State<DomesticPaymentsScreen>
   Widget _buildSendPayment() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          DropdownButtonFormField<String>(
-            value: _selectedType,
-            decoration: const InputDecoration(labelText: 'Payment Type'),
-            items: ['NIP', 'NEFT', 'Direct Debit'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-            onChanged: (v) => setState(() { _selectedType = v!; }),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _amountController,
-            decoration: const InputDecoration(labelText: 'Amount (NGN)', prefixText: '₦'),
-            keyboardType: TextInputType.number,
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _recipientController,
-            decoration: const InputDecoration(labelText: 'Recipient Account'),
-            keyboardType: TextInputType.number,
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _narrationController,
-            decoration: const InputDecoration(labelText: 'Narration'),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: _isLoading ? null : _submitPayment,
-            child: _isLoading
-              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('Send Payment'),
-          ),
-        ],
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DropdownButtonFormField<String>(
+              value: _selectedType,
+              decoration: const InputDecoration(labelText: 'Payment Type'),
+              items: ['NIP', 'NEFT', 'Direct Debit'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+              onChanged: (v) => setState(() { _selectedType = v!; }),
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _amountController,
+              decoration: const InputDecoration(labelText: 'Amount (NGN)', prefixText: '\u20A6 ', border: OutlineInputBorder()),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              validator: (v) => Validators.amount(v, min: 1, max: 10000000),
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))],
+              textInputAction: TextInputAction.next,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _recipientController,
+              decoration: const InputDecoration(labelText: 'Recipient Account', border: OutlineInputBorder()),
+              keyboardType: TextInputType.number,
+              validator: Validators.accountNumber,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(10)],
+              textInputAction: TextInputAction.next,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _narrationController,
+              decoration: const InputDecoration(labelText: 'Narration', border: OutlineInputBorder()),
+              validator: Validators.narration,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: _isLoading ? null : _submitPayment,
+              child: _isLoading
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('Send Payment'),
+            ),
+          ],
+        ),
       ),
     );
   }

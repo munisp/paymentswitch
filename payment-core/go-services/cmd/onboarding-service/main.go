@@ -14,6 +14,7 @@ import (
 	"time"
 
 	. "github.com/payment-switch/go-services/internal/onboarding"
+	"github.com/payment-switch/go-services/pkg/middleware"
 )
 
 // OnboardingServer is the main HTTP server
@@ -55,8 +56,16 @@ func (s *OnboardingServer) Start() error {
 	// Stats
 	mux.HandleFunc("/api/v1/onboarding/stats", s.handleStats)
 
-	// CORS middleware
-	handler := corsMiddleware(mux)
+	// RBAC auth middleware — skips health/ready endpoints
+	rbac := middleware.NewRBACMiddleware(&middleware.RBACConfig{
+		JWTSecret:          os.Getenv("JWT_SECRET"),
+		JWTIssuer:          "payment-switch",
+		SkipPaths:          []string{"/health", "/ready"},
+		EnableAuditLogging: true,
+	})
+
+	// CORS + Auth middleware
+	handler := corsMiddleware(rbac.Authenticate(mux))
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.port),
@@ -83,12 +92,30 @@ func (s *OnboardingServer) Start() error {
 	return server.ListenAndServe()
 }
 
-// CORS middleware
+// allowedOrigins returns the CORS allowed origins from environment or defaults
+func allowedOrigins() []string {
+	if origins := os.Getenv("CORS_ALLOWED_ORIGINS"); origins != "" {
+		return strings.Split(origins, ",")
+	}
+	return []string{"https://app.paymentswitch.ng", "https://admin.paymentswitch.ng"}
+}
+
+// CORS middleware — restricted to configured origins (no wildcard)
 func corsMiddleware(next http.Handler) http.Handler {
+	allowed := allowedOrigins()
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, o := range allowed {
+		allowedSet[strings.TrimSpace(o)] = true
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if allowedSet[origin] {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 
 		if r.Method == "OPTIONS" {

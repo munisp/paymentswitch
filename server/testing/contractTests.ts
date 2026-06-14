@@ -291,7 +291,7 @@ export class ContractTestRunner {
   async runAllTests(): Promise<ContractTestResult[]> {
     const results: ContractTestResult[] = [];
 
-    for (const contract of this.contracts.values()) {
+    for (const contract of Array.from(this.contracts.values())) {
       for (const interaction of contract.interactions) {
         const result = await this.runInteractionTest(contract, interaction);
         results.push(result);
@@ -383,7 +383,7 @@ export class ContractTestRunner {
     interaction: ContractInteraction
   ): Promise<{ status: number; body?: Record<string, any> }> {
     const baseUrl = process.env.CONTRACT_TEST_BASE_URL || 'http://localhost:3001';
-    const url = `${baseUrl}${interaction.request.path}`;
+    const url = `${baseUrl}/${interaction.request.service}`;
 
     try {
       const response = await fetch(url, {
@@ -440,7 +440,7 @@ export class ContractTestRunner {
       byContract.set(result.contractId, existing);
     }
 
-    for (const [contractId, results] of byContract) {
+    for (const [contractId, results] of Array.from(byContract)) {
       const contract = this.contracts.get(contractId);
       lines.push('-'.repeat(60));
       lines.push(`Contract: ${contract?.name || contractId}`);

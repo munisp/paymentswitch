@@ -30,7 +30,7 @@ export interface ParticipantProgress {
   userEmail: string;
   merchantId: number;
   organizationName: string;
-  businessType: string;
+  businessType: string | null;
   registrationStatus: string;
   technicalStatus: string | null;
   integrationStatus: string | null;

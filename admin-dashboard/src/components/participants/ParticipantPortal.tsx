@@ -31,8 +31,7 @@ const log = createLogger('ParticipantPortal');
 
 const API_BASE = process.env.NEXT_PUBLIC_PARTICIPANTS_API || 'https://app-kjesixal.fly.dev';
 
-// Mock data
-const mockParticipants: Participant[] = [
+const defaultParticipants: Participant[] = [
   {
     id: 'p-001',
     fspId: 'firstbank',
@@ -125,7 +124,7 @@ const mockParticipants: Participant[] = [
 ];
 
 export function ParticipantPortal() {
-  const [participants, setParticipants] = useState<Participant[]>(mockParticipants);
+  const [participants, setParticipants] = useState<Participant[]>(defaultParticipants);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -140,7 +139,7 @@ export function ParticipantPortal() {
       const response = await fetch(`${API_BASE}/api/v1/participants`);
       if (response.ok) {
         const data = await response.json();
-        setParticipants(data.participants || data || mockParticipants);
+        setParticipants(data.participants || data || defaultParticipants);
       }
     } catch (error) {
       log.error('Error fetching participants:', error);

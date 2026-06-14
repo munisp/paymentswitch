@@ -116,7 +116,7 @@ class FraudScoreIngestionService:
         try:
             self.spark.read.format("delta").load(delta_path)
             logger.info(f"Delta table already exists at {delta_path}")
-        except:
+        except Exception:
             # Create empty DataFrame with schema
             empty_df = self.spark.createDataFrame([], schema)
             empty_df.write.format("delta").save(delta_path)

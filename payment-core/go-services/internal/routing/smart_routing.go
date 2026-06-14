@@ -2,6 +2,7 @@ package routing
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"math"
 	"sort"
@@ -121,6 +122,7 @@ type SmartRouter struct {
 	roundRobinIdx  int
 	eventHandlers  map[string][]func(interface{})
 	latencyHistory map[string][]float64
+	db             *sql.DB
 }
 
 func NewSmartRouter(config *RoutingConfig) *SmartRouter {
@@ -340,6 +342,7 @@ func (sr *SmartRouter) Route(ctx context.Context, req RoutingRequest) (*RoutingD
 	}
 
 	sr.decisions = append(sr.decisions, *decision)
+	go sr.persistDecision(decision)
 	sr.emit("routingDecision", decision)
 
 	return decision, nil
@@ -619,6 +622,7 @@ func (sr *SmartRouter) RecordResult(providerID string, success bool, latencyMs f
 	}
 
 	metrics.UpdatedAt = time.Now()
+	go sr.persistMetrics(metrics)
 
 	if metrics.ConsecutiveFailures >= sr.config.FailoverThreshold {
 		if provider, ok := sr.providers[providerID]; ok {
@@ -639,12 +643,14 @@ func (sr *SmartRouter) AddProvider(provider *Provider) error {
 	provider.UpdatedAt = time.Now()
 
 	sr.providers[provider.ID] = provider
-	sr.metrics[provider.ID] = &ProviderMetrics{
+	metrics := &ProviderMetrics{
 		ProviderID:  provider.ID,
 		SuccessRate: 100,
 		UpdatedAt:   time.Now(),
 	}
-
+	sr.metrics[provider.ID] = metrics
+	go sr.persistProvider(provider)
+	go sr.persistMetrics(metrics)
 	sr.emit("providerAdded", provider)
 	return nil
 }
@@ -669,6 +675,7 @@ func (sr *SmartRouter) UpdateProvider(providerID string, updates map[string]inte
 	}
 
 	provider.UpdatedAt = time.Now()
+	go sr.persistProvider(provider)
 	sr.emit("providerUpdated", provider)
 	return nil
 }

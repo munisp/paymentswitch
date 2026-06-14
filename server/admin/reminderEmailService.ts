@@ -121,7 +121,7 @@ export async function getStuckParticipants(stage?: Stage): Promise<StuckParticip
       contactEmail: participantApplications.contactEmail,
       contactName: participantApplications.contactName,
       status: participantApplications.status,
-      currentStep: participantApplications.currentStep,
+      currentStage: participantApplications.currentStage,
       createdAt: participantApplications.createdAt,
       updatedAt: participantApplications.updatedAt,
     })
@@ -131,7 +131,7 @@ export async function getStuckParticipants(stage?: Stage): Promise<StuckParticip
   const stuckParticipants: StuckParticipant[] = [];
 
   for (const participant of participants) {
-    const participantStage = mapStepToStage(participant.currentStep);
+    const participantStage = mapStepToStage(participant.currentStage);
     
     // Skip if filtering by stage and doesn't match
     if (stage && participantStage !== stage) continue;
@@ -188,9 +188,9 @@ export async function getStuckParticipants(stage?: Stage): Promise<StuckParticip
 
     stuckParticipants.push({
       applicationId: participant.id,
-      organizationName: participant.organizationName,
-      contactEmail: participant.contactEmail,
-      contactName: participant.contactName,
+      organizationName: participant.organizationName ?? '',
+      contactEmail: participant.contactEmail ?? '',
+      contactName: participant.contactName ?? '',
       stage: participantStage,
       daysSinceLastActivity,
       remindersSent,
@@ -245,8 +245,8 @@ export async function sendReminderEmail(applicationId: number, stage: Stage, man
 
   // Render email template
   const emailBody = renderEmailTemplate(config.emailTemplate, {
-    organizationName: participant.organizationName,
-    contactName: participant.contactName,
+    organizationName: participant.organizationName ?? '',
+    contactName: participant.contactName ?? '',
     stage,
     reminderNumber: remindersSent + 1,
   });
@@ -254,16 +254,13 @@ export async function sendReminderEmail(applicationId: number, stage: Stage, man
   try {
     // In a real implementation, you would send the email here using an email service
     // For now, we'll just log it and notify the owner
-    log.info(`[ReminderEmail] Sending to ${participant.contactEmail}:`, {
-      subject: config.emailSubject,
-      body: emailBody,
-    });
+    log.info({ subject: config.emailSubject, body: emailBody }, `[ReminderEmail] Sending to ${participant.contactEmail}`);
 
     // Log the reminder
     await db.insert(reminderEmailLog).values({
       applicationId,
       stage,
-      recipientEmail: participant.contactEmail,
+      recipientEmail: participant.contactEmail ?? '',
       subject: config.emailSubject,
       status: 'sent',
       reminderCount: remindersSent + 1,
@@ -281,7 +278,7 @@ export async function sendReminderEmail(applicationId: number, stage: Stage, man
     await db.insert(reminderEmailLog).values({
       applicationId,
       stage,
-      recipientEmail: participant.contactEmail,
+      recipientEmail: participant.contactEmail ?? '',
       subject: config.emailSubject,
       status: 'failed',
       errorMessage: error instanceof Error ? error.message : 'Unknown error',
@@ -330,8 +327,8 @@ export async function processAutomatedReminders() {
     } catch (error) {
       failedCount++;
       log.error(
-        `[ReminderJob] Failed to send reminder to ${participant.organizationName}:`,
-        error
+        { err: error },
+        `[ReminderJob] Failed to send reminder to ${participant.organizationName}`
       );
     }
   }
@@ -344,7 +341,15 @@ export async function processAutomatedReminders() {
 /**
  * Helper: Map current step to stage
  */
-function mapStepToStage(step: number): Stage {
+function mapStepToStage(step: number | string): Stage {
+  if (typeof step === 'string') {
+    const stageMap: Record<string, Stage> = {
+      kyc: 'registration', registration: 'registration',
+      technical: 'technical', integration: 'integration',
+      testing: 'testing', production: 'production',
+    };
+    return stageMap[step] || 'registration';
+  }
   switch (step) {
     case 1:
       return 'registration';

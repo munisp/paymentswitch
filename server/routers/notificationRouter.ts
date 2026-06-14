@@ -60,7 +60,7 @@ export const notificationRouter = router({
         WHERE user_id = ${ctx.user.id}
       `);
 
-      const prefs = (result[0] as unknown) as any[];
+      const prefs = result.rows as any[];
       
       // Return preferences with defaults for missing types
       const notificationTypes = ['technical_onboarding_submission', 'application_approved', 'application_rejected'];

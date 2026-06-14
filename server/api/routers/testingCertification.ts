@@ -448,7 +448,7 @@ export const testingCertificationRouter = router({
     )
     .mutation(async ({ input }) => {
       try {
-        return await savedComparisonsService.saveComparison(input);
+        return await savedComparisonsService.saveComparison(input as any);
       } catch (error) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",

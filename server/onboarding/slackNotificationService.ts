@@ -161,7 +161,7 @@ export async function configureSlackWebhook(
       .set({
         channelName,
         config,
-        isActive: 1,
+        isActive: true,
         updatedAt: new Date(),
       })
       .where(eq(notificationChannels.id, existing[0].id));
@@ -169,15 +169,17 @@ export async function configureSlackWebhook(
     return { id: existing[0].id, updated: true };
   } else {
     // Create new
-    const result = await db.insert(notificationChannels).values({
+    const [inserted] = await db.insert(notificationChannels).values({
+      userId: 0,
       credentialId,
       channelType: "slack",
       channelName,
+      destination: channelName,
       config,
-      isActive: 1,
-    });
+      isActive: true,
+    }).returning({ id: notificationChannels.id });
 
-    return { id: result[0].insertId, updated: false };
+    return { id: inserted.id, updated: false };
   }
 }
 
@@ -204,13 +206,13 @@ export async function getSlackConfiguration(credentialId: number) {
   }
 
   const channel = channels[0];
-  const config = JSON.parse(channel.config);
+  const config = JSON.parse(channel.config ?? '{}');
 
   return {
     id: channel.id,
     channelName: channel.channelName,
     webhookUrl: config.webhookUrl,
-    isActive: channel.isActive === 1,
+    isActive: !!channel.isActive,
   };
 }
 
@@ -288,7 +290,7 @@ export async function sendAlertToSlack(
   await db.insert(alertNotifications).values({
     alertId: alert.id,
     notificationType: "slack",
-    recipient: slackConfig.channelName,
+    recipient: slackConfig.channelName ?? '',
     status: result.success ? "sent" : "failed",
     failureReason: result.error,
     sentAt: new Date(),
@@ -310,7 +312,7 @@ export async function disableSlackNotifications(credentialId: number) {
 
   await db
     .update(notificationChannels)
-    .set({ isActive: 0 })
+    .set({ isActive: false })
     .where(
       and(
         eq(notificationChannels.credentialId, credentialId),
@@ -330,7 +332,7 @@ export async function enableSlackNotifications(credentialId: number) {
 
   await db
     .update(notificationChannels)
-    .set({ isActive: 1 })
+    .set({ isActive: true })
     .where(
       and(
         eq(notificationChannels.credentialId, credentialId),

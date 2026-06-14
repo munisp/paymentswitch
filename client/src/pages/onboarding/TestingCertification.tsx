@@ -295,7 +295,7 @@ export default function TestingCertification({ credentialId = 1 }: TestingCertif
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
                           <h4 className="font-semibold">{scenario.name}</h4>
-                          {scenario.isRequired === 1 && (
+                          {!!scenario.isRequired && (
                             <Badge variant="destructive" className="text-xs">
                               Required
                             </Badge>
@@ -360,7 +360,7 @@ export default function TestingCertification({ credentialId = 1 }: TestingCertif
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-2">
                             <h4 className="font-semibold">{scenario.name}</h4>
-                            {scenario.isRequired === 1 && (
+                            {!!scenario.isRequired && (
                               <Badge variant="destructive" className="text-xs">
                                 Required
                               </Badge>

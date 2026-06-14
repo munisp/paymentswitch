@@ -216,6 +216,7 @@ export class RedisIdempotencyStore {
   private redisClient: RedisClient;
   private keyPrefix: string;
   private ttlSeconds: number;
+  private fallbackStore = new Map<string, IdempotencyRecord>();
 
   constructor(redisClient: RedisClient, options: { keyPrefix?: string; ttlSeconds?: number } = {}) {
     this.redisClient = redisClient;
@@ -244,7 +245,7 @@ export class RedisIdempotencyStore {
         JSON.stringify(record)
       );
     } catch {
-      idempotencyStore.set(key, record);
+      this.fallbackStore.set(key, record);
     }
   }
 
@@ -252,7 +253,7 @@ export class RedisIdempotencyStore {
     try {
       await this.redisClient.del(this.keyPrefix + key);
     } catch {
-      idempotencyStore.delete(key);
+      this.fallbackStore.delete(key);
     }
   }
 }

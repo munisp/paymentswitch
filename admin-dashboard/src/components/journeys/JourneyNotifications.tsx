@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import React, { useState, useEffect, useCallback } from 'react';
 
 interface Notification {
@@ -12,7 +13,7 @@ interface Notification {
   read: boolean;
 }
 
-const mockNotifications: Notification[] = [
+const defaultNotifications: Notification[] = [
   {
     id: '1',
     type: 'success',
@@ -105,11 +106,11 @@ interface JourneyNotificationsProps {
 }
 
 export default function JourneyNotifications({ onClose, isPanel = false }: JourneyNotificationsProps) {
-  const [notifications, setNotifications] = useState(mockNotifications);
+  const [notifications, setNotifications] = useState(defaultNotifications);
   useEffect(() => {
     fetch('http://localhost:8080/api/v1/notifications')
       .then(r => r.json()).then(d => { if (d.notifications) setNotifications(d.notifications); })
-      .catch((err: unknown) => { console.error('API fallback:', err); });
+      .catch((err: unknown) => { logger.error('API fallback:', err); });
   }, []);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
 

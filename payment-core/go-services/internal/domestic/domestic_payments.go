@@ -6,6 +6,7 @@ package domestic
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -140,6 +141,7 @@ type DomesticPaymentEngine struct {
 	bulkOps         map[string]*BulkDisbursement
 	billProviders   []BillPaymentProvider
 	metrics         *DomesticMetrics
+	db              *sql.DB
 }
 
 func genID(prefix string) string {
@@ -183,6 +185,7 @@ func (e *DomesticPaymentEngine) ProcessPayment(ctx context.Context, payment *Dom
 	now := time.Now()
 	payment.Status = PayStatusCompleted
 	payment.CompletedAt = &now
+	go e.persistPayment(payment)
 
 	e.metrics.mu.Lock()
 	e.metrics.TotalPayments++

@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -300,60 +302,58 @@ func (drm *DisasterRecoveryManager) checkRegionHealth(ctx context.Context, regio
 }
 
 func (drm *DisasterRecoveryManager) checkDatabaseHealth(ctx context.Context, region *Region) bool {
-	// In production, connect to region's database and run health check
 	if region.DatabaseDSN == "" {
-		return true // Assume healthy if not configured
+		return true
 	}
-
-	// db, err := sql.Open("postgres", region.DatabaseDSN)
-	// if err != nil { return false }
-	// defer db.Close()
-	// return db.PingContext(ctx) == nil
-
-	return true
+	db, err := sql.Open("postgres", region.DatabaseDSN)
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	return db.PingContext(ctx) == nil
 }
 
-func (drm *DisasterRecoveryManager) checkTigerBeetleHealth(ctx context.Context, region *Region) bool {
-	// In production, connect to TigerBeetle and run health check
+func (drm *DisasterRecoveryManager) checkTigerBeetleHealth(_ context.Context, region *Region) bool {
 	if region.TigerBeetleAddr == "" {
 		return true
 	}
-
-	// client, err := tigerbeetle.NewClient(region.TigerBeetleAddr)
-	// if err != nil { return false }
-	// defer client.Close()
-	// return client.Ping() == nil
-
+	conn, err := net.DialTimeout("tcp", region.TigerBeetleAddr, 3*time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
 	return true
 }
 
-func (drm *DisasterRecoveryManager) checkKafkaHealth(ctx context.Context, region *Region) bool {
-	// In production, connect to Kafka and check broker health
+func (drm *DisasterRecoveryManager) checkKafkaHealth(_ context.Context, region *Region) bool {
 	if len(region.KafkaBrokers) == 0 {
 		return true
 	}
-
-	// admin, err := kafka.NewAdminClient(region.KafkaBrokers)
-	// if err != nil { return false }
-	// defer admin.Close()
-	// _, err = admin.GetMetadata(nil, true, 5000)
-	// return err == nil
-
+	for _, broker := range region.KafkaBrokers {
+		conn, err := net.DialTimeout("tcp", broker, 3*time.Second)
+		if err != nil {
+			return false
+		}
+		conn.Close()
+	}
 	return true
 }
 
 func (drm *DisasterRecoveryManager) checkAPIHealth(ctx context.Context, region *Region) bool {
-	// In production, call region's health endpoint
 	if region.Endpoint == "" {
 		return true
 	}
-
-	// resp, err := http.Get(region.Endpoint + "/health")
-	// if err != nil { return false }
-	// defer resp.Body.Close()
-	// return resp.StatusCode == 200
-
-	return true
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, region.Endpoint+"/health", nil)
+	if err != nil {
+		return false
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 func (drm *DisasterRecoveryManager) measureReplicationLag(ctx context.Context, region *Region) time.Duration {
@@ -524,10 +524,13 @@ func (drm *DisasterRecoveryManager) executeFailover(ctx context.Context, event *
 }
 
 func (drm *DisasterRecoveryManager) stopWritesToPrimary(ctx context.Context) error {
-	// In production:
-	// 1. Set database to read-only mode
-	// 2. Drain in-flight transactions
-	// 3. Close write connections
+	if drm.db == nil {
+		return fmt.Errorf("no database connection to set read-only")
+	}
+	_, err := drm.db.ExecContext(ctx, "ALTER DATABASE CURRENT SET default_transaction_read_only = true")
+	if err != nil {
+		return fmt.Errorf("failed to set database to read-only: %w", err)
+	}
 	return nil
 }
 
@@ -553,26 +556,47 @@ func (drm *DisasterRecoveryManager) waitForReplicationSync(ctx context.Context, 
 }
 
 func (drm *DisasterRecoveryManager) promoteSecondary(ctx context.Context, target *Region) error {
-	// In production:
-	// 1. Promote PostgreSQL replica: SELECT pg_promote()
-	// 2. Reconfigure TigerBeetle cluster
-	// 3. Update Kafka consumer groups
+	if target.DatabaseDSN == "" {
+		return fmt.Errorf("no database DSN for target region %s", target.RegionID)
+	}
+	db, err := sql.Open("postgres", target.DatabaseDSN)
+	if err != nil {
+		return fmt.Errorf("cannot connect to target region DB: %w", err)
+	}
+	defer db.Close()
+	if _, err := db.ExecContext(ctx, "SELECT pg_promote()"); err != nil {
+		return fmt.Errorf("pg_promote failed for region %s: %w", target.RegionID, err)
+	}
+	target.Role = RegionRolePrimary
 	return nil
 }
 
 func (drm *DisasterRecoveryManager) updateRouting(ctx context.Context, target *Region) error {
-	// In production:
-	// 1. Update DNS records (Route53, CloudFlare, etc.)
-	// 2. Update load balancer targets
-	// 3. Update service mesh routing
+	if target.Endpoint == "" {
+		return fmt.Errorf("no endpoint configured for target region %s", target.RegionID)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.Endpoint+"/routing/activate", nil)
+	if err != nil {
+		return fmt.Errorf("failed to create routing update request: %w", err)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("routing update failed for %s: %w", target.RegionID, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("routing update returned %d for %s", resp.StatusCode, target.RegionID)
+	}
 	return nil
 }
 
-func (drm *DisasterRecoveryManager) demotePrimary(ctx context.Context, oldPrimary *Region) error {
-	// In production:
-	// 1. Convert to standby/secondary
-	// 2. Configure replication from new primary
+func (drm *DisasterRecoveryManager) demotePrimary(_ context.Context, oldPrimary *Region) error {
 	oldPrimary.Role = RegionRoleStandby
+	// Re-enable writes on the old primary (it's now a standby that should accept replication writes)
+	if drm.db != nil {
+		drm.db.Exec("ALTER DATABASE CURRENT SET default_transaction_read_only = false")
+	}
 	return nil
 }
 
@@ -721,7 +745,14 @@ func (drm *DisasterRecoveryManager) getDataChecksums(ctx context.Context, region
 		"settlement_windows",
 	}
 
+	allowedTables := map[string]bool{
+		"transfers": true, "accounts": true, "settlements": true,
+		"participants": true, "positions": true, "settlement_windows": true,
+	}
 	for _, table := range tables {
+		if !allowedTables[table] {
+			continue
+		}
 		if drm.db != nil {
 			var checksum sql.NullString
 			query := fmt.Sprintf("SELECT MD5(STRING_AGG(t::text, '' ORDER BY id)) FROM %s t", table)

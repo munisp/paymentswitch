@@ -23,7 +23,7 @@ export async function enableSharing(id: number, credentialId: number) {
     .update(savedComparisons)
     .set({
       shareToken,
-      isPublic: "1",
+      isPublic: true,
       sharedAt: new Date(),
     })
     .where(eq(savedComparisons.id, id));
@@ -42,7 +42,7 @@ export async function disableSharing(id: number, credentialId: number) {
     .update(savedComparisons)
     .set({
       shareToken: null,
-      isPublic: "0",
+      isPublic: false,
       sharedAt: null,
     })
     .where(eq(savedComparisons.id, id));
@@ -63,7 +63,7 @@ export async function getSharedComparison(shareToken: string) {
     .where(eq(savedComparisons.shareToken, shareToken))
     .limit(1);
 
-  if (result.length === 0 || result[0].isPublic !== "1") {
+  if (result.length === 0 || !result[0].isPublic) {
     throw new Error("Shared comparison not found or not public");
   }
 

@@ -4,7 +4,7 @@ package chaos
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -500,5 +500,5 @@ func generateExperimentID() string {
 }
 
 func generateFaultID() string {
-	return fmt.Sprintf("fault-%d-%d", time.Now().UnixNano(), rand.Intn(1000))
+	return fmt.Sprintf("fault-%d-%d", time.Now().UnixNano(), rand.IntN(1000))
 }

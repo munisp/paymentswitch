@@ -199,7 +199,7 @@ export const correctionRouter = router({
       );
 
     const settingsMap = settings.reduce((acc, setting) => {
-      acc[setting.settingKey] = setting.settingValue;
+      if (setting.settingKey) acc[setting.settingKey] = setting.settingValue ?? '';
       return acc;
     }, {} as Record<string, string>);
 
@@ -231,7 +231,6 @@ export const correctionRouter = router({
         updates.push({
           settingKey: 'global_min_confidence',
           settingValue: input.globalMinConfidence.toString(),
-          updatedBy: ctx.user.id,
         });
       }
 
@@ -239,7 +238,6 @@ export const correctionRouter = router({
         updates.push({
           settingKey: 'suggestion_threshold',
           settingValue: input.suggestionThreshold.toString(),
-          updatedBy: ctx.user.id,
         });
       }
 
@@ -247,21 +245,29 @@ export const correctionRouter = router({
         updates.push({
           settingKey: 'auto_apply_enabled',
           settingValue: input.autoApplyEnabled.toString(),
-          updatedBy: ctx.user.id,
         });
       }
 
       for (const update of updates) {
-        await db
-          .insert(ocrCorrectionSettings)
-          .values(update)
-          .onDuplicateKeyUpdate({
-            set: {
+        const existing = await db
+          .select()
+          .from(ocrCorrectionSettings)
+          .where(eq(ocrCorrectionSettings.settingKey, update.settingKey ?? ''))
+          .limit(1);
+        if (existing.length > 0) {
+          await db
+            .update(ocrCorrectionSettings)
+            .set({
               settingValue: update.settingValue,
-              updatedBy: update.updatedBy,
               updatedAt: new Date(),
-            },
+            })
+            .where(eq(ocrCorrectionSettings.id, existing[0].id));
+        } else {
+          await db.insert(ocrCorrectionSettings).values({
+            fieldName: update.settingKey ?? 'unknown',
+            ...update,
           });
+        }
       }
 
       return { success: true };

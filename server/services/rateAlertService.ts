@@ -51,8 +51,8 @@ export async function createRateAlert(params: CreateRateAlertParams): Promise<Ra
     status: "active",
   };
 
-  const result = await db.insert(rateAlerts).values(alertData);
-  const alertId = result[0].insertId;
+  const [inserted] = await db.insert(rateAlerts).values(alertData).returning({ id: rateAlerts.id });
+  const alertId = inserted.id;
 
   const [alert] = await db.select().from(rateAlerts).where(eq(rateAlerts.id, alertId));
   return alert;
@@ -105,7 +105,7 @@ export async function getUserRateAlerts(userId: number): Promise<RateAlertWithPr
           distanceFromTarget,
         };
       } catch (error) {
-        log.error(`Failed to fetch rate for alert ${alert.id}:`, error);
+        log.error({ err: error }, `Failed to fetch rate for alert ${alert.id}:`);
         return { ...alert };
       }
     })
@@ -235,7 +235,7 @@ export async function checkAndTriggerAlerts(): Promise<{ checked: number; trigge
         triggeredCount++;
       }
     } catch (error) {
-      log.error(`Error checking alert ${alert.id}:`, error);
+      log.error({ err: error }, `Error checking alert ${alert.id}:`);
     }
   }
 
@@ -302,7 +302,7 @@ async function triggerAlert(alert: RateAlert, triggeredRate: number): Promise<vo
       triggeredAt: new Date(),
     });
   } catch (error) {
-    log.error(`Failed to trigger alert ${alert.id}:`, error);
+    log.error({ err: error }, `Failed to trigger alert ${alert.id}:`);
 
     // Record failed notification in history
     await db.insert(rateAlertHistory).values({
@@ -419,7 +419,7 @@ async function sendEmailNotification(alert: RateAlert, triggeredRate: number): P
       log.info(`[Email] Rate alert saved to storage/emails/${filename}`);
     }
   } catch (error) {
-    log.error('[Email] Failed to send rate alert:', error);
+    log.error({ err: error }, '[Email] Failed to send rate alert:');
   }
 }
 
@@ -474,7 +474,7 @@ async function sendSmsNotification(alert: RateAlert, triggeredRate: number): Pro
       log.info(`[SMS] Rate alert saved to storage/sms/${filename}`);
     }
   } catch (error) {
-    log.error('[SMS] Failed to send rate alert:', error);
+    log.error({ err: error }, '[SMS] Failed to send rate alert:');
   }
 }
 
@@ -508,7 +508,7 @@ async function sendPushNotification(alert: RateAlert, triggeredRate: number): Pr
     
     log.info('[Push] Rate alert notification sent');
   } catch (error) {
-    log.error('[Push] Failed to send rate alert:', error);
+    log.error({ err: error }, '[Push] Failed to send rate alert:');
     
     // Development mode: save to file
     const fs = await import('fs/promises');

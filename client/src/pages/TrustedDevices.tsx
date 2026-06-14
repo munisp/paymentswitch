@@ -196,11 +196,11 @@ export default function TrustedDevices() {
                         </TableCell>
                         <TableCell className="text-sm">
                           <div className="flex items-center gap-2">
-                            {isExpiringSoon(device.expiresAt) && (
+                            {device.expiresAt && isExpiringSoon(device.expiresAt) && (
                               <AlertTriangle className="h-4 w-4 text-orange-500" />
                             )}
-                            <span className={isExpiringSoon(device.expiresAt) ? 'text-orange-600 font-medium' : 'text-muted-foreground'}>
-                              {formatDistanceToNow(new Date(device.expiresAt), { addSuffix: true })}
+                            <span className={device.expiresAt && isExpiringSoon(device.expiresAt) ? 'text-orange-600 font-medium' : 'text-muted-foreground'}>
+                              {device.expiresAt ? formatDistanceToNow(new Date(device.expiresAt), { addSuffix: true }) : 'N/A'}
                             </span>
                           </div>
                         </TableCell>

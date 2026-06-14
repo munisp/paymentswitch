@@ -106,8 +106,8 @@ def verify_email():
             return jsonify({"error": "Invalid or expired token"}), 400
         
         # Parse token data
-        import ast
-        token_info = ast.literal_eval(token_data)
+        import json
+        token_info = json.loads(token_data if isinstance(token_data, str) else token_data.decode('utf-8'))
         
         email = token_info.get("email")
         user_id = token_info.get("user_id")

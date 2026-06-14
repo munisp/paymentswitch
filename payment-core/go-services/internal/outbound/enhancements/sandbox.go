@@ -3,7 +3,7 @@ package enhancements
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"time"
 )
@@ -85,7 +85,7 @@ func NewParticipantSandbox() *ParticipantSandbox {
 	return &ParticipantSandbox{
 		configs:   make(map[int]*SandboxConfig),
 		transfers: make(map[int][]SandboxTransfer),
-		rng:       rand.New(rand.NewSource(time.Now().UnixNano())),
+		rng:       rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 0)),
 	}
 }
 
@@ -196,7 +196,7 @@ func (ps *ParticipantSandbox) determineOutcome(config *SandboxConfig, corridor s
 			OutcomeNetworkError,
 			OutcomeFXRateExpired,
 		}
-		return failures[ps.rng.Intn(len(failures))]
+		return failures[ps.rng.IntN(len(failures))]
 	}
 
 	return OutcomeSuccess

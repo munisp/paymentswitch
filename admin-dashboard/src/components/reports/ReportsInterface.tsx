@@ -25,8 +25,7 @@ import type { Report, ReportType, ReportStatus } from '@/types';
 import { createLogger } from '@/lib/logger';
 const log = createLogger('ReportsInterface');
 
-// Mock data
-const mockReports: Report[] = [
+const defaultReports: Report[] = [
   {
     id: 'rpt-001',
     name: 'Daily Transaction Summary',
@@ -93,9 +92,9 @@ export function ReportsInterface() {
   const reportsFetcher = useCallback(() =>
     lakehouseAPI.fetch<{ reports: Report[] }>('/api/v1/reports')
       .then(d => d.reports)
-      .catch((err: unknown) => { console.error("API fallback:", err); return mockReports; }), []);
+      .catch((err: unknown) => { log.error("API fallback:", err); return []; }), []);
   const { data: apiReports } = useLakehouseData(reportsFetcher, 30000);
-  const [reports, setReports] = useState<Report[]>(mockReports);
+  const [reports, setReports] = useState<Report[]>(defaultReports);
   useEffect(() => { if (apiReports) setReports(apiReports); }, [apiReports]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);

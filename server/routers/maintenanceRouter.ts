@@ -9,7 +9,7 @@ export const maintenanceRouter = router({
   getStatus: publicProcedure
     .query(async () => {
       const now = new Date();
-      const [active] = await db.getDb().select().from(maintenanceWindows)
+      const [active] = await (await db.requireDb()).select().from(maintenanceWindows)
         .where(and(
           sql`${maintenanceWindows.mode} = 'active'`,
           lte(maintenanceWindows.scheduledStart, now),
@@ -19,7 +19,7 @@ export const maintenanceRouter = router({
       if (active) {
         return { isMaintenanceMode: true, window: active };
       }
-      const [upcoming] = await db.getDb().select().from(maintenanceWindows)
+      const [upcoming] = await (await db.requireDb()).select().from(maintenanceWindows)
         .where(and(
           sql`${maintenanceWindows.mode} = 'scheduled'`,
           gte(maintenanceWindows.scheduledStart, now),
@@ -43,7 +43,7 @@ export const maintenanceRouter = router({
       if (ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
       }
-      const [window] = await db.getDb().insert(maintenanceWindows).values({
+      const [window] = await (await db.requireDb()).insert(maintenanceWindows).values({
         title: input.title,
         description: input.description,
         scheduledStart: new Date(input.scheduledStart),
@@ -68,7 +68,7 @@ export const maintenanceRouter = router({
       const page = input?.page ?? 1;
       const limit = input?.limit ?? 20;
       const offset = (page - 1) * limit;
-      const items = await db.getDb().select().from(maintenanceWindows)
+      const items = await (await db.requireDb()).select().from(maintenanceWindows)
         .orderBy(desc(maintenanceWindows.createdAt))
         .limit(limit).offset(offset);
       return items;
@@ -80,7 +80,7 @@ export const maintenanceRouter = router({
       if (ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
       }
-      const [updated] = await db.getDb().update(maintenanceWindows)
+      const [updated] = await (await db.requireDb()).update(maintenanceWindows)
         .set({ mode: "active", actualStart: new Date(), updatedAt: new Date() })
         .where(eq(maintenanceWindows.id, input.id))
         .returning();
@@ -93,7 +93,7 @@ export const maintenanceRouter = router({
       if (ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
       }
-      const [updated] = await db.getDb().update(maintenanceWindows)
+      const [updated] = await (await db.requireDb()).update(maintenanceWindows)
         .set({ mode: "off", actualEnd: new Date(), updatedAt: new Date() })
         .where(eq(maintenanceWindows.id, input.id))
         .returning();
@@ -106,7 +106,7 @@ export const maintenanceRouter = router({
       if (ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
       }
-      await db.getDb().delete(maintenanceWindows).where(eq(maintenanceWindows.id, input.id));
+      await (await db.requireDb()).delete(maintenanceWindows).where(eq(maintenanceWindows.id, input.id));
       return { success: true };
     }),
 });

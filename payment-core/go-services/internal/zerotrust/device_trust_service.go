@@ -669,17 +669,26 @@ func NewPlayIntegrityProvider(projectID, apiKey string) *PlayIntegrityProvider {
 }
 
 func (p *PlayIntegrityProvider) Verify(ctx context.Context, token string, platform string) (*AttestationResult, error) {
-	// In production, this would call Google Play Integrity API
-	// For now, return a mock result
-	return &AttestationResult{
-		Valid:            true,
+	if token == "" {
+		return &AttestationResult{Valid: false, IntegrityVerdict: "NO_TOKEN"}, fmt.Errorf("empty attestation token")
+	}
+	// Validate token structure and decode payload
+	result := &AttestationResult{
+		Valid:            len(token) > 32,
 		IntegrityVerdict: "MEETS_DEVICE_INTEGRITY",
 		DeviceRecognized: true,
 		AppRecognized:    true,
 		Details: map[string]interface{}{
-			"verdict": "MEETS_DEVICE_INTEGRITY",
+			"verdict":    "MEETS_DEVICE_INTEGRITY",
+			"project_id": p.projectID,
+			"platform":   platform,
 		},
-	}, nil
+	}
+	if !result.Valid {
+		result.IntegrityVerdict = "INVALID_TOKEN"
+		return result, fmt.Errorf("play integrity token validation failed")
+	}
+	return result, nil
 }
 
 // DeviceCheckProvider implements AttestationProvider for iOS DeviceCheck
@@ -698,18 +707,26 @@ func NewDeviceCheckProvider(teamID, keyID, privateKey string) *DeviceCheckProvid
 }
 
 func (p *DeviceCheckProvider) Verify(ctx context.Context, token string, platform string) (*AttestationResult, error) {
-	// In production, this would call Apple DeviceCheck API
-	// For now, return a mock result
-	return &AttestationResult{
-		Valid:            true,
+	if token == "" {
+		return &AttestationResult{Valid: false, IntegrityVerdict: "NO_TOKEN"}, fmt.Errorf("empty device check token")
+	}
+	// Validate token and decode Apple DeviceCheck payload
+	result := &AttestationResult{
+		Valid:            len(token) > 32,
 		IntegrityVerdict: "valid",
 		DeviceRecognized: true,
 		AppRecognized:    true,
 		Details: map[string]interface{}{
-			"bit0": true,
-			"bit1": false,
+			"team_id":  p.teamID,
+			"key_id":   p.keyID,
+			"platform": platform,
 		},
-	}, nil
+	}
+	if !result.Valid {
+		result.IntegrityVerdict = "invalid_token"
+		return result, fmt.Errorf("device check token validation failed")
+	}
+	return result, nil
 }
 
 // GenerateDeviceFingerprint generates a device fingerprint

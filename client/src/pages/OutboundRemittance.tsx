@@ -1743,13 +1743,12 @@ function EnforcementSection({ role }: { role: UserRole }) {
 // =============================================================================
 
 function CorridorsSection() {
-  // Simulated volume data for heatmap
-  const heatmapData = useMemo(() => corridors.map(c => ({
+  const heatmapData = useMemo(() => corridors.map((c, i) => ({
     ...c,
-    volume: Math.round(Math.random() * 500 + 50) * 1000000,
-    transfers: Math.round(Math.random() * 200 + 10),
-    successRate: Math.round(Math.random() * 8 + 92),
-    avgLatency: Math.round(Math.random() * 2000 + 200),
+    volume: ((i * 37 + 13) % 500 + 50) * 1000000,
+    transfers: (i * 23 + 7) % 200 + 10,
+    successRate: (i * 3 + 1) % 8 + 92,
+    avgLatency: (i * 157 + 41) % 2000 + 200,
   })), []);
   const maxVol = Math.max(...heatmapData.map(c => c.volume));
 

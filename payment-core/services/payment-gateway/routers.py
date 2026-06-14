@@ -187,8 +187,8 @@ async def get_transaction_status(
         cached_data = await redis_client.get(f"txn:{request.transactionId}")
         
         if cached_data:
-            import ast
-            data = ast.literal_eval(cached_data.decode('utf-8'))
+            import json
+            data = json.loads(cached_data.decode('utf-8'))
             
             return TransactionStatusResponse(
                 transactionId=request.transactionId,
@@ -275,8 +275,8 @@ async def refund_transaction(
                 detail=f"Original transaction {request.originalTransactionId} not found"
             )
         
-        import ast
-        txn_data = ast.literal_eval(original_txn.decode('utf-8'))
+        import json
+        txn_data = json.loads(original_txn.decode('utf-8'))
         
         # Validate transaction is completed
         if txn_data.get('status') != TransactionStatus.COMPLETED.value:
@@ -366,14 +366,14 @@ async def health_check(
         try:
             await temporal_client.list_workflows()
             temporal_connected = True
-        except:
+        except Exception:
             pass
         
         # Check Redis connection
         try:
             await redis_client.ping()
             redis_connected = True
-        except:
+        except Exception:
             pass
         
         status = "healthy" if (temporal_connected and redis_connected) else "degraded"

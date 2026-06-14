@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { logger } from './logger';
 const API_BASE_URL = process.env.NEXT_PUBLIC_LAKEHOUSE_API_URL || 'http://localhost:8080';
 
 export interface MetricCard {
@@ -290,12 +291,12 @@ class LakehouseAPIClient {
         const data = JSON.parse(event.data);
         onMessage(data);
       } catch (e) {
-        console.error('[api] WebSocket message parse error:', e);
+        logger.error('[api] WebSocket message parse error:', e);
       }
     };
 
     this.ws.onerror = (error) => {
-      console.error('[api] WebSocket error:', error);
+      logger.error('[api] WebSocket error:', error);
     };
 
     this.ws.onclose = () => {

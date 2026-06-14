@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useState, useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import { Layers, Plus, Search, Upload, Download, Eye, Clock, CheckCircle, XCircle } from 'lucide-react';
@@ -36,7 +37,7 @@ export function BatchTransfers() {
   const batchFetcher = useCallback(() =>
     lakehouseAPI.fetch<{ batches: BatchTransfer[] }>('/api/v1/batch/transfers')
       .then(d => d.batches)
-      .catch((err: unknown) => { console.error("API fallback:", err); return sampleBatches; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return sampleBatches; }), []);
   const { data: batches } = useLakehouseData(batchFetcher, 15000);
   const activeBatches = batches || sampleBatches;
   const [search, setSearch] = useState('');

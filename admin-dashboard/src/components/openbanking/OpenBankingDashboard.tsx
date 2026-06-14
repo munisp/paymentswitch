@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import React, { useState, useEffect } from 'react';
 import { lakehouseAPI } from '@/lib/api';
 
@@ -50,7 +51,7 @@ interface SandboxEnv {
   createdAt: string;
 }
 
-const mockTPPs: TPP[] = [
+const defaultTPPs: TPP[] = [
   { id: 'TPP-001', name: 'Paystack', registrationNumber: 'RC1234567', cbnLicense: 'CBN/OB/2024/001', services: ['AIS', 'PIS'], status: 'ACTIVE', apiTier: 'ENTERPRISE', monthlyApiCalls: 850000, rateLimitPerMin: 1000, registeredAt: '2024-06-15' },
   { id: 'TPP-002', name: 'Flutterwave', registrationNumber: 'RC2345678', cbnLicense: 'CBN/OB/2024/002', services: ['AIS', 'PIS'], status: 'ACTIVE', apiTier: 'ENTERPRISE', monthlyApiCalls: 720000, rateLimitPerMin: 1000, registeredAt: '2024-07-01' },
   { id: 'TPP-003', name: 'Mono', registrationNumber: 'RC3456789', cbnLicense: 'CBN/OB/2024/003', services: ['AIS'], status: 'ACTIVE', apiTier: 'GROWTH', monthlyApiCalls: 450000, rateLimitPerMin: 500, registeredAt: '2024-08-10' },
@@ -61,7 +62,7 @@ const mockTPPs: TPP[] = [
   { id: 'TPP-008', name: 'Paga', registrationNumber: 'RC8901234', cbnLicense: 'CBN/OB/2024/008', services: ['PIS'], status: 'ACTIVE', apiTier: 'GROWTH', monthlyApiCalls: 210000, rateLimitPerMin: 500, registeredAt: '2025-01-10' },
 ];
 
-const mockConsents: Consent[] = [
+const defaultConsents: Consent[] = [
   { id: 'CON-001', customerName: 'Adebayo Ogunlade', tppName: 'Paystack', serviceType: 'AIS', status: 'AUTHORIZED', permissions: ['ReadAccountsBasic', 'ReadBalances', 'ReadTransactionsBasic'], accounts: ['0044100001', '0044100002'], validFrom: '2026-04-01', validUntil: '2026-07-01' },
   { id: 'CON-002', customerName: 'Chioma Okafor', tppName: 'Flutterwave', serviceType: 'PIS', status: 'AUTHORIZED', permissions: ['CreatePayment', 'ReadPaymentStatus'], accounts: ['0058200002'], validFrom: '2026-03-15', validUntil: '2026-06-15' },
   { id: 'CON-003', customerName: 'Emeka Nwosu', tppName: 'Mono', serviceType: 'AIS', status: 'REVOKED', permissions: ['ReadAccountsBasic', 'ReadBalances'], accounts: ['0057300003'], validFrom: '2026-01-01', validUntil: '2026-04-01' },
@@ -69,7 +70,7 @@ const mockConsents: Consent[] = [
   { id: 'CON-005', customerName: 'Grace Adeyemi', tppName: 'Stitch', serviceType: 'PIS', status: 'EXPIRED', permissions: ['CreatePayment'], accounts: ['0011500006'], validFrom: '2025-10-01', validUntil: '2026-01-01' },
 ];
 
-const mockEndpoints: APIEndpoint[] = [
+const defaultEndpoints: APIEndpoint[] = [
   { id: 'EP-001', path: '/accounts', method: 'GET', description: 'List customer accounts', serviceType: 'AIS', version: 'v3.1', avgLatencyMs: 45, callsLast24h: 125000 },
   { id: 'EP-002', path: '/accounts/{id}/balances', method: 'GET', description: 'Get account balances', serviceType: 'AIS', version: 'v3.1', avgLatencyMs: 32, callsLast24h: 280000 },
   { id: 'EP-003', path: '/accounts/{id}/transactions', method: 'GET', description: 'Get account transactions', serviceType: 'AIS', version: 'v3.1', avgLatencyMs: 78, callsLast24h: 95000 },
@@ -79,7 +80,7 @@ const mockEndpoints: APIEndpoint[] = [
   { id: 'EP-007', path: '/beneficiaries', method: 'GET', description: 'List beneficiaries', serviceType: 'AIS', version: 'v3.1', avgLatencyMs: 40, callsLast24h: 22000 },
 ];
 
-const mockSandboxes: SandboxEnv[] = [
+const defaultSandboxes: SandboxEnv[] = [
   { id: 'SBX-001', tppName: 'Paystack', status: 'active', testAccounts: [{ id: 'TEST-001', name: 'Test Savings', balance: 5000000, currency: 'NGN', type: 'savings' }, { id: 'TEST-002', name: 'Test Current', balance: 15000000, currency: 'NGN', type: 'current' }], totalTestCalls: 45200, createdAt: '2024-06-20' },
   { id: 'SBX-002', tppName: 'Bloc', status: 'active', testAccounts: [{ id: 'TEST-003', name: 'Test Account', balance: 10000000, currency: 'NGN', type: 'current' }], totalTestCalls: 1250, createdAt: '2026-04-02' },
   { id: 'SBX-003', tppName: 'Flutterwave', status: 'active', testAccounts: [{ id: 'TEST-004', name: 'Test Savings', balance: 8000000, currency: 'NGN', type: 'savings' }], totalTestCalls: 38900, createdAt: '2024-07-05' },
@@ -95,10 +96,10 @@ export default function OpenBankingDashboard() {
   const [sandboxes, setSandboxes] = useState<SandboxEnv[]>([]);
 
   useEffect(() => {
-    lakehouseAPI.fetch<{ tpps: TPP[] }>('/api/open-banking/tpps').then(d => setTpps(d.tpps || [])).catch((err: unknown) => { console.error("API fallback:", err); setTpps(mockTPPs); });
-    lakehouseAPI.fetch<{ consents: Consent[] }>('/api/open-banking/consents').then(d => setConsents(d.consents || [])).catch((err: unknown) => { console.error("API fallback:", err); setConsents(mockConsents); });
-    lakehouseAPI.fetch<{ endpoints: APIEndpoint[] }>('/api/open-banking/endpoints').then(d => setEndpoints(d.endpoints || [])).catch((err: unknown) => { console.error("API fallback:", err); setEndpoints(mockEndpoints); });
-    lakehouseAPI.fetch<{ sandboxes: SandboxEnv[] }>('/api/open-banking/sandboxes').then(d => setSandboxes(d.sandboxes || [])).catch((err: unknown) => { console.error("API fallback:", err); setSandboxes(mockSandboxes); });
+    lakehouseAPI.fetch<{ tpps: TPP[] }>('/api/open-banking/tpps').then(d => setTpps(d.tpps || [])).catch((err: unknown) => { logger.error("API fallback:", err); setTpps([]); });
+    lakehouseAPI.fetch<{ consents: Consent[] }>('/api/open-banking/consents').then(d => setConsents(d.consents || [])).catch((err: unknown) => { logger.error("API fallback:", err); setConsents([]); });
+    lakehouseAPI.fetch<{ endpoints: APIEndpoint[] }>('/api/open-banking/endpoints').then(d => setEndpoints(d.endpoints || [])).catch((err: unknown) => { logger.error("API fallback:", err); setEndpoints([]); });
+    lakehouseAPI.fetch<{ sandboxes: SandboxEnv[] }>('/api/open-banking/sandboxes').then(d => setSandboxes(d.sandboxes || [])).catch((err: unknown) => { logger.error("API fallback:", err); setSandboxes([]); });
   }, []);
 
   const tabs: { id: Tab; label: string }[] = [

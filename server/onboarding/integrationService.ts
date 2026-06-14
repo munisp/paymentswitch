@@ -14,12 +14,13 @@ export async function provisionSandboxEnvironment(applicationId: number) {
   const apiEndpoint = `https://sandbox-${sandboxId}.payment-switch.dev`;
 
   // Create sandbox environment
-  const result = await db.execute(sql`
+  const result = await db.execute<{ id: number }>(sql`
     INSERT INTO integration_environments (application_id, environment_type, api_endpoint, status)
     VALUES (${applicationId}, 'sandbox', ${apiEndpoint}, 'active')
+    RETURNING id
   `);
 
-  const environmentId = Number((result[0] as any).insertId);
+  const environmentId = Number(result.rows[0]?.id ?? 0);
 
   // Generate API credentials for sandbox
   const credentials = await generateApiCredentials(applicationId, environmentId);
@@ -71,8 +72,7 @@ export async function getIntegrationEnvironment(applicationId: number, environme
     LIMIT 1
   `);
 
-  const rows = (result[0] as unknown) as any[];
-  return rows.length > 0 ? rows[0] : null;
+  return result.rows.length > 0 ? result.rows[0] : null;
 }
 
 /**
@@ -90,8 +90,7 @@ export async function getApiCredentials(environmentId: number) {
     LIMIT 1
   `);
 
-  const rows = (result[0] as unknown) as any[];
-  return rows.length > 0 ? rows[0] : null;
+  return result.rows.length > 0 ? result.rows[0] : null;
 }
 
 /**
@@ -117,12 +116,13 @@ export async function runIntegrationTest(applicationId: number, testType: string
   if (!db) throw new Error('Database not available');
 
   // Create test record
-  const result = await db.execute(sql`
+  const testResult2 = await db.execute<{ id: number }>(sql`
     INSERT INTO integration_tests (application_id, test_type, test_name, status)
     VALUES (${applicationId}, ${testType}, ${testName}, 'running')
+    RETURNING id
   `);
 
-  const testId = Number((result[0] as any).insertId);
+  const testId = Number(testResult2.rows[0]?.id ?? 0);
 
   // Simulate test execution (in real implementation, this would call actual test framework)
   const testResult = await executeTest(testType, testName);
@@ -182,7 +182,7 @@ async function executeTest(testType: string, testName: string) {
 
   return {
     passed: result.passed,
-    duration: duration < 50 ? Math.floor(Math.random() * 800) + 200 : duration,
+    duration: duration < 50 ? 500 : duration,
     message: result.message,
     details: {
       testType,
@@ -206,7 +206,7 @@ export async function getIntegrationTests(applicationId: number) {
     ORDER BY created_at DESC
   `);
 
-  return (result[0] as unknown) as any[];
+  return result.rows as any[];
 }
 
 /**
@@ -222,5 +222,5 @@ export async function getSdkDownloads(applicationId: number) {
     ORDER BY downloaded_at DESC
   `);
 
-  return (result[0] as unknown) as any[];
+  return result.rows as any[];
 }

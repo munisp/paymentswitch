@@ -36,7 +36,7 @@ const GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserI
 
 class OAuthService {
   constructor(private client: ReturnType<typeof axios.create>) {
-    log.info("[OAuth] Initialized with baseURL:", ENV.oAuthServerUrl);
+    log.info({ baseURL: ENV.oAuthServerUrl }, "[OAuth] Initialized");
     if (!ENV.oAuthServerUrl) {
       log.error(
         "[OAuth] ERROR: OAUTH_SERVER_URL is not configured! Set OAUTH_SERVER_URL environment variable."
@@ -44,8 +44,23 @@ class OAuthService {
     }
   }
 
+  private static readonly ALLOWED_REDIRECT_HOSTS = new Set([
+    'app.paymentswitch.ng',
+    'admin.paymentswitch.ng',
+    'localhost',
+  ]);
+
   private decodeState(state: string): string {
     const redirectUri = atob(state);
+    try {
+      const url = new URL(redirectUri, 'https://app.paymentswitch.ng');
+      if (!OAuthService.ALLOWED_REDIRECT_HOSTS.has(url.hostname)) {
+        throw new Error(`Blocked redirect to untrusted host: ${url.hostname}`);
+      }
+    } catch (e) {
+      if (redirectUri.startsWith('/')) return redirectUri;
+      throw new Error('Invalid redirect URI in OAuth state');
+    }
     return redirectUri;
   }
 
@@ -235,7 +250,7 @@ class SDKServer {
         twoFactorVerified: twoFactorVerified === true,
       };
     } catch (error) {
-      log.warn("[Auth] Session verification failed", String(error));
+      log.warn({ err: String(error) }, "[Auth] Session verification failed");
       return null;
     }
   }
@@ -283,7 +298,7 @@ class SDKServer {
       try {
         const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
         await db.upsertUser({
-          openId: userInfo.openId,
+          sub: userInfo.openId,
           name: userInfo.name || null,
           email: userInfo.email ?? null,
           loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
@@ -291,7 +306,7 @@ class SDKServer {
         });
         user = await db.getUserByOpenId(userInfo.openId);
       } catch (error) {
-        log.error("[Auth] Failed to sync user from OAuth:", error);
+        log.error({ err: error }, "[Auth] Failed to sync user from OAuth");
         throw ForbiddenError("Failed to sync user info");
       }
     }
@@ -301,7 +316,7 @@ class SDKServer {
     }
 
     await db.upsertUser({
-      openId: user.openId,
+      sub: (user as any).openId ?? user.sub,
       lastSignedIn: signedInAt,
     });
 

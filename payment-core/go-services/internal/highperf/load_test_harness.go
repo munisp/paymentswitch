@@ -4,7 +4,7 @@ package highperf
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -174,7 +174,7 @@ func (h *LoadTestHarness) worker(workerID, numRequests int) {
 	for i := range accounts {
 		binary := make([]byte, 16)
 		for j := 0; j < 16; j++ {
-			binary[j] = byte(rand.Intn(256))
+			binary[j] = byte(rand.IntN(256))
 		}
 		copy(accounts[i][:], binary)
 	}
@@ -201,10 +201,10 @@ func (h *LoadTestHarness) executeRequest(accounts [][16]byte) {
 	atomic.AddUint64(&h.totalRequests, 1)
 
 	// Generate random transfer
-	debitIdx := rand.Intn(len(accounts))
-	creditIdx := rand.Intn(len(accounts))
+	debitIdx := rand.IntN(len(accounts))
+	creditIdx := rand.IntN(len(accounts))
 	for creditIdx == debitIdx {
-		creditIdx = rand.Intn(len(accounts))
+		creditIdx = rand.IntN(len(accounts))
 	}
 
 	var success bool
@@ -220,7 +220,7 @@ func (h *LoadTestHarness) executeRequest(accounts [][16]byte) {
 		}
 		// Generate ID
 		for i := 0; i < 16; i++ {
-			req.ID[i] = byte(rand.Intn(256))
+			req.ID[i] = byte(rand.IntN(256))
 		}
 
 		resp, err := h.hotPath.ProcessTransfer(h.ctx, req)
@@ -236,7 +236,7 @@ func (h *LoadTestHarness) executeRequest(accounts [][16]byte) {
 		}
 		// Generate ID
 		for i := 0; i < 16; i++ {
-			transfer.ID[i] = byte(rand.Intn(256))
+			transfer.ID[i] = byte(rand.IntN(256))
 		}
 
 		results, err := h.tbClient.CreateTransfers(h.ctx, []TBTransfer{transfer})
@@ -488,14 +488,14 @@ func GenerateTestTransfers(count int, accounts []TBAccount, amount uint64, ledge
 	for i := range transfers {
 		// Generate random ID
 		for j := 0; j < 16; j++ {
-			transfers[i].ID[j] = byte(rand.Intn(256))
+			transfers[i].ID[j] = byte(rand.IntN(256))
 		}
 
 		// Random debit and credit accounts
-		debitIdx := rand.Intn(len(accounts))
-		creditIdx := rand.Intn(len(accounts))
+		debitIdx := rand.IntN(len(accounts))
+		creditIdx := rand.IntN(len(accounts))
 		for creditIdx == debitIdx {
-			creditIdx = rand.Intn(len(accounts))
+			creditIdx = rand.IntN(len(accounts))
 		}
 
 		transfers[i].DebitAccountID = accounts[debitIdx].ID

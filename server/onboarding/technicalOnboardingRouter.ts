@@ -102,8 +102,8 @@ export const technicalOnboardingRouter = router({
           .where(eq(technicalConfigurations.id, existing[0].id));
         return { id: existing[0].id, message: 'Technical configuration updated' };
       } else {
-        const result = await db.insert(technicalConfigurations).values(data);
-        return { id: result[0].insertId, message: 'Technical configuration saved' };
+        const [ins] = await db.insert(technicalConfigurations).values(data).returning({ id: technicalConfigurations.id });
+        return { id: ins.id, message: 'Technical configuration saved' };
       }
     }),
 
@@ -178,8 +178,8 @@ export const technicalOnboardingRouter = router({
           .where(eq(securityCredentials.id, existing[0].id));
         return { id: existing[0].id, apiKey, message: 'Security credentials updated' };
       } else {
-        const result = await db.insert(securityCredentials).values(data);
-        return { id: result[0].insertId, apiKey, message: 'Security credentials saved' };
+        const [ins] = await db.insert(securityCredentials).values(data).returning({ id: securityCredentials.id });
+        return { id: ins.id, apiKey, message: 'Security credentials saved' };
       }
     }),
 
@@ -252,8 +252,8 @@ export const technicalOnboardingRouter = router({
           .where(eq(networkConfigurations.id, existing[0].id));
         return { id: existing[0].id, message: 'Network configuration updated' };
       } else {
-        const result = await db.insert(networkConfigurations).values(data);
-        return { id: result[0].insertId, message: 'Network configuration saved' };
+        const [ins] = await db.insert(networkConfigurations).values(data).returning({ id: networkConfigurations.id });
+        return { id: ins.id, message: 'Network configuration saved' };
       }
     }),
 
@@ -280,7 +280,7 @@ export const technicalOnboardingRouter = router({
       const { url } = await storagePut(fileKey, buffer, 'application/pdf');
 
       // Save document metadata
-      const result = await db.insert(complianceDocuments).values({
+      const [docIns] = await db.insert(complianceDocuments).values({
         applicationId: input.applicationId,
         userId: ctx.user.id,
         documentType: input.documentType,
@@ -290,10 +290,10 @@ export const technicalOnboardingRouter = router({
         dataStorageLocation: input.dataStorageLocation || null,
         crossBorderTransfer: input.crossBorderTransfer || false,
         gdprCompliant: input.gdprCompliant || false,
-      });
+      }).returning({ id: complianceDocuments.id });
 
       return { 
-        id: result[0].insertId, 
+        id: docIns.id, 
         url,
         message: 'Compliance document uploaded successfully' 
       };
@@ -381,6 +381,7 @@ export const technicalOnboardingRouter = router({
 
       // Create review record
       await db.insert(technicalOnboardingReviews).values({
+        configurationId: 0,
         applicationId: input.applicationId,
         reviewerId: 0, // Will be assigned to admin
         status: 'pending',
@@ -390,7 +391,7 @@ export const technicalOnboardingRouter = router({
       try {
         await notifyAdminsOfNewSubmission(input.applicationId, `Application ${input.applicationId}`);
       } catch (error) {
-        log.error('Failed to send admin notifications:', error);
+        log.error({ err: error }, 'Failed to send admin notifications:');
         // Don't fail the submission if notifications fail
       }
 
@@ -410,28 +411,29 @@ export const technicalOnboardingRouter = router({
       // Fetch related data for each review
       const enrichedReviews = await Promise.all(
         reviews.map(async (review) => {
+          const appId = review.applicationId ?? 0;
           const [techConfig] = await db
             .select()
             .from(technicalConfigurations)
-            .where(eq(technicalConfigurations.applicationId, review.applicationId))
+            .where(eq(technicalConfigurations.applicationId, appId))
             .limit(1);
 
           const [secCreds] = await db
             .select()
             .from(securityCredentials)
-            .where(eq(securityCredentials.applicationId, review.applicationId))
+            .where(eq(securityCredentials.applicationId, appId))
             .limit(1);
 
           const [netConfig] = await db
             .select()
             .from(networkConfigurations)
-            .where(eq(networkConfigurations.applicationId, review.applicationId))
+            .where(eq(networkConfigurations.applicationId, appId))
             .limit(1);
 
           return {
             ...review,
             submittedAt: review.createdAt,
-            organizationName: `Application ${review.applicationId}`,
+            organizationName: `Application ${appId}`,
             technicalConfig: techConfig || null,
             securityCreds: secCreds || null,
             networkConfig: netConfig || null,
@@ -480,7 +482,7 @@ export const technicalOnboardingRouter = router({
             status: input.status === 'approved' ? 'approved' : 
                    input.status === 'rejected' ? 'rejected' : 'draft'
           })
-          .where(eq(technicalConfigurations.applicationId, review.applicationId));
+          .where(eq(technicalConfigurations.applicationId, review.applicationId ?? 0));
       }
 
       // Send notification to participant
@@ -497,7 +499,7 @@ export const technicalOnboardingRouter = router({
         });
       } catch (notificationError) {
         // Log notification error but don't fail the review
-        log.error('[TechnicalOnboarding] Notification delivery failed:', notificationError);
+        log.error({ err: notificationError }, '[TechnicalOnboarding] Notification delivery failed');
       }
 
       return { message: 'Review completed successfully' };

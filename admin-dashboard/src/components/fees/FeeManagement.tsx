@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useState, useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import { DollarSign, Plus, Edit, Trash2, Calculator, ToggleLeft, ToggleRight } from 'lucide-react';
@@ -15,7 +16,7 @@ export function FeeManagement() {
   const feesFetcher = useCallback(() =>
     lakehouseAPI.fetch<{ fees: typeof feeConfigs }>('/api/v1/fees')
       .then(d => d.fees)
-      .catch((err: unknown) => { console.error("API fallback:", err); return feeConfigs; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return feeConfigs; }), []);
   const { data: fees } = useLakehouseData(feesFetcher, 60000);
   const activeFees = fees || feeConfigs;
   const [calcAmount, setCalcAmount] = useState(100000);

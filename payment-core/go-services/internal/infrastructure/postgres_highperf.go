@@ -6,10 +6,13 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+var validSQLIdentifier = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // PostgresHighPerfConfig configures the high-performance PostgreSQL client
 type PostgresHighPerfConfig struct {
@@ -245,8 +248,16 @@ func (c *PostgresHighPerfClient) BulkInsert(ctx context.Context, table string, c
 		return nil
 	}
 
-	// Build multi-value INSERT for simplicity
-	// In production, use COPY for better performance
+	// Validate identifiers to prevent SQL injection
+	if !validSQLIdentifier.MatchString(table) {
+		return fmt.Errorf("invalid table name: %q", table)
+	}
+	for _, col := range columns {
+		if !validSQLIdentifier.MatchString(col) {
+			return fmt.Errorf("invalid column name: %q", col)
+		}
+	}
+
 	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES ", table, joinStrings(columns, ", "))
 
 	var args []interface{}

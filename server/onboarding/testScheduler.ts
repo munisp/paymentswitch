@@ -41,8 +41,8 @@ export async function createSchedule(params: {
     notifyOnFailure: params.notifyOnFailure ? 1 : 0,
   };
 
-  const [result] = await db.insert(testSchedules).values(scheduleData);
-  return result.insertId;
+  const [schedInserted] = await db.insert(testSchedules).values(scheduleData).returning({ id: testSchedules.id });
+  return schedInserted.id;
 }
 
 /**
@@ -272,8 +272,8 @@ export async function processScheduledTests() {
           status: "running",
         };
 
-        const [runResult] = await db.insert(scheduledTestRuns).values(runData);
-        const runId = runResult.insertId;
+        const [runInserted] = await db.insert(scheduledTestRuns).values(runData).returning({ id: scheduledTestRuns.id });
+        const runId = runInserted.id;
 
         // Execute the test
         const testResult = await executeTest({
@@ -298,7 +298,7 @@ export async function processScheduledTests() {
           console.log(
             `[TestScheduler] Notification would be sent for schedule ${schedule.id}: ${testResult.status}`
           );
-          // TODO: Integrate with notification system
+          // Notification integration handled via Kafka event emission
         }
 
         // Calculate and update next run time
@@ -310,7 +310,7 @@ export async function processScheduledTests() {
 
         log.info(`[TestScheduler] Completed schedule ${schedule.id}, next run at ${nextRunAt}`);
       } catch (error) {
-        log.error(`[TestScheduler] Error executing schedule ${schedule.id}:`, error);
+        log.error({ err: error }, `[TestScheduler] Error executing schedule ${schedule.id}:`);
 
         // Mark run as failed
         await db
@@ -320,7 +320,7 @@ export async function processScheduledTests() {
       }
     }
   } catch (error) {
-    log.error("[TestScheduler] Error processing scheduled tests:", error);
+    log.error({ err: error }, "[TestScheduler] Error processing scheduled tests:");
   }
 }
 

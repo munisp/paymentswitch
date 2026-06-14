@@ -46,16 +46,18 @@ export async function addNotificationChannel(params: {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const [result] = await db.insert(notificationChannels).values({
+  const [chanInserted] = await db.insert(notificationChannels).values({
+    userId: 0,
     credentialId: params.credentialId,
     channelType: params.channelType,
     channelName: params.channelName,
+    destination: params.channelName,
     config: JSON.stringify(params.config),
     template: params.template || null,
-    isActive: 1,
-  });
+    isActive: true,
+  }).returning({ id: notificationChannels.id });
 
-  return { channelId: result.insertId };
+  return { channelId: chanInserted.id };
 }
 
 /**
@@ -75,7 +77,7 @@ export async function updateNotificationChannel(params: {
   if (params.channelName) updateData.channelName = params.channelName;
   if (params.config) updateData.config = JSON.stringify(params.config);
   if (params.template !== undefined) updateData.template = params.template;
-  if (params.isActive !== undefined) updateData.isActive = params.isActive ? 1 : 0;
+  if (params.isActive !== undefined) updateData.isActive = !!params.isActive;
 
   await db
     .update(notificationChannels)
@@ -111,8 +113,8 @@ export async function listNotificationChannels(credentialId: number) {
 
   return channels.map((channel) => ({
     ...channel,
-    config: JSON.parse(channel.config),
-    isActive: channel.isActive === 1,
+    config: JSON.parse(channel.config ?? '{}'),
+    isActive: !!channel.isActive,
   }));
 }
 
@@ -227,12 +229,13 @@ async function sendEmailNotification(config: EmailConfig, payload: any): Promise
       const path = await import('path');
       const emailDir = path.join(process.cwd(), 'storage', 'emails');
       await fs.mkdir(emailDir, { recursive: true });
-      const filename = `email_${Date.now()}_${Math.random().toString(36).substring(7)}.html`;
+      const { randomBytes } = require('crypto');
+      const filename = `email_${Date.now()}_${randomBytes(4).toString('hex')}.html`;
       await fs.writeFile(path.join(emailDir, filename), emailBody);
       log.info(`[Email] Saved to storage/emails/${filename} (no email service configured)`);
     }
   } catch (error) {
-    log.error('[Email] Failed to send:', error);
+    log.error({ err: error }, '[Email] Failed to send:');
     throw error;
   }
 }
@@ -273,7 +276,7 @@ function isDuringDND(channel: any): boolean {
         }
       }
     } catch (error) {
-      log.error('[DND] Failed to parse schedules:', error);
+      log.error({ err: error }, '[DND] Failed to parse schedules:');
     }
   }
 
@@ -303,7 +306,7 @@ export async function sendNotification(params: {
   }
 
   const channel = channels[0];
-  if (channel.isActive !== 1) {
+  if (!channel.isActive) {
     throw new Error("Channel is not active");
   }
 
@@ -313,16 +316,16 @@ export async function sendNotification(params: {
     return { success: false, reason: "dnd_active" };
   }
 
-  const config = JSON.parse(channel.config);
+  const config = JSON.parse(channel.config ?? '{}');
 
   // Render template if provided
   let payload = params.data;
   if (channel.template) {
     try {
-      const rendered = renderTemplate(channel.template, params.data as any);
+      const rendered = renderTemplate(channel.template ?? '', params.data as any);
       payload = JSON.parse(rendered);
     } catch (error) {
-      log.error("[Notification] Template rendering failed:", error);
+      log.error({ err: error }, "[Notification] Template rendering failed:");
       // Fall back to raw data
     }
   }
@@ -338,9 +341,10 @@ export async function sendNotification(params: {
     // Log successful delivery
     await db.insert(notificationDeliveries).values({
       channelId: params.channelId,
-      event: params.event,
-      payload: JSON.stringify(payload),
+      notificationType: params.event,
+      content: JSON.stringify(payload),
       status: "sent",
+      sentAt: new Date(),
     });
 
     return { success: true };
@@ -348,8 +352,8 @@ export async function sendNotification(params: {
     // Log failed delivery
     await db.insert(notificationDeliveries).values({
       channelId: params.channelId,
-      event: params.event,
-      payload: JSON.stringify(payload),
+      notificationType: params.event,
+      content: JSON.stringify(payload),
       status: "failed",
       errorMessage: error instanceof Error ? error.message : String(error),
     });

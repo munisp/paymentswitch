@@ -578,7 +578,7 @@ export class ComplianceControlMatrix {
   identifyGaps(): ComplianceGap[] {
     const gaps: ComplianceGap[] = [];
     
-    for (const control of this.controls.values()) {
+    for (const control of Array.from(this.controls.values())) {
       if (control.status !== 'compliant' && control.status !== 'not_applicable') {
         gaps.push({
           controlId: control.id,

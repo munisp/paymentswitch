@@ -554,7 +554,7 @@ export const remittanceRouter = router({
         // Import export service dynamically to avoid circular dependencies
         const { exportToCSV, formatRemittanceForExport, getRemittanceExportColumns } = await import('../services/exportService');
         const { getDb } = await import('../db');
-        const { remittances } = await import('../../drizzle/schema');
+        const { remittances } = await import('../../drizzle/remittance-schema');
         const { eq, and, gte, lte } = await import('drizzle-orm');
 
         const db = await getDb();
@@ -615,7 +615,7 @@ export const remittanceRouter = router({
       try {
         const { exportToExcel, formatRemittanceForExport, getRemittanceExportColumns } = await import('../services/exportService');
         const { getDb } = await import('../db');
-        const { remittances } = await import('../../drizzle/schema');
+        const { remittances } = await import('../../drizzle/remittance-schema');
         const { eq, and, gte, lte } = await import('drizzle-orm');
 
         const db = await getDb();
@@ -677,7 +677,7 @@ export const remittanceRouter = router({
       try {
         const { exportToPDF, formatRemittanceForExport, getRemittanceExportColumns } = await import('../services/exportService');
         const { getDb } = await import('../db');
-        const { remittances } = await import('../../drizzle/schema');
+        const { remittances } = await import('../../drizzle/remittance-schema');
         const { eq, and, gte, lte } = await import('drizzle-orm');
 
         const db = await getDb();

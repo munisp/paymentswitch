@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useState, useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import { HeadphonesIcon, Search, Plus, MessageSquare, Clock, CheckCircle, AlertCircle, User } from 'lucide-react';
@@ -19,7 +20,7 @@ export function SupportCenter() {
   const ticketFetcher = useCallback(() =>
     lakehouseAPI.fetch<{ tickets: typeof tickets }>('/api/v1/support/tickets')
       .then(d => d.tickets)
-      .catch((err: unknown) => { console.error("API fallback:", err); return tickets; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return tickets; }), []);
   const { data: apiTickets } = useLakehouseData(ticketFetcher, 15000);
   const activeTickets = apiTickets || tickets;
   const [search, setSearch] = useState('');

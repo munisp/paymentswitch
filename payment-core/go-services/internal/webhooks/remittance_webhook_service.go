@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -79,6 +80,7 @@ type WebhookService struct {
 	httpClient    *http.Client
 	maxRetries    int
 	retryDelays   []int
+	db            *sql.DB
 }
 
 func NewWebhookService() *WebhookService {
@@ -109,6 +111,7 @@ func (s *WebhookService) CreateWebhookEvent(remittanceID, eventType string, data
 	s.events[eventID] = event
 	s.mu.Unlock()
 
+	go s.persistEvent(event)
 	go s.deliverWebhookEvent(event)
 
 	return event, nil
@@ -130,6 +133,7 @@ func (s *WebhookService) deliverWebhookEvent(event *WebhookEvent) {
 		s.deliveries[delivery.ID] = delivery
 		s.mu.Unlock()
 
+		go s.persistDelivery(delivery)
 		s.attemptWebhookDelivery(event, delivery, sub)
 	}
 }
@@ -269,6 +273,7 @@ func (s *WebhookService) CreateSubscription(userID, url string, events []string)
 	s.subscriptions[subscription.ID] = subscription
 	s.mu.Unlock()
 
+	go s.persistSubscription(subscription)
 	return subscription, nil
 }
 
@@ -303,6 +308,7 @@ func (s *WebhookService) DeleteSubscription(subscriptionID string) error {
 	}
 
 	delete(s.subscriptions, subscriptionID)
+	go s.deleteSubscriptionFromDB(subscriptionID)
 	return nil
 }
 

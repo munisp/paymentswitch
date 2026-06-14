@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useState, useCallback } from 'react';
 import {
   Calendar,
@@ -20,8 +21,7 @@ import { MetricCard, MetricGrid } from '../dashboard/MetricCard';
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import type { SettlementWindow, Settlement, SettlementParticipant } from '@/types';
 
-// Mock data
-const mockSettlementWindows: SettlementWindow[] = [
+const defaultSettlementWindows: SettlementWindow[] = [
   {
     id: 'sw-001',
     state: 'PENDING_SETTLEMENT',
@@ -60,9 +60,9 @@ export function SettlementConsole() {
   const [approvalLoading, setApprovalLoading] = useState(false);
   const [dateRange, setDateRange] = useState('today');
 
-  const fetcher = useCallback(() => lakehouseAPI.fetch<{ windows: SettlementWindow[] }>('/api/v1/settlements/windows').catch((err: unknown) => { console.error("API fallback:", err); return { windows: mockSettlementWindows }; }), []);
+  const fetcher = useCallback(() => lakehouseAPI.fetch<{ windows: SettlementWindow[] }>('/api/v1/settlements/windows').catch((err: unknown) => { logger.error("API fallback:", err); return { windows: [] }; }), []);
   const { data: apiData } = useLakehouseData(fetcher, 30000);
-  const settlementWindows = apiData?.windows || mockSettlementWindows;
+  const settlementWindows = apiData?.windows || defaultSettlementWindows;
 
   const pendingWindows = settlementWindows.filter(w => w.state === 'PENDING_SETTLEMENT');
   const totalPendingAmount = pendingWindows.reduce((sum, w) => sum + w.totalAmount, 0);
@@ -70,7 +70,7 @@ export function SettlementConsole() {
   const handleApprove = async () => {
     setApprovalLoading(true);
     if (selectedWindow) {
-      try { await lakehouseAPI.fetch(`/api/v1/settlements/${selectedWindow.id}/approve`, { method: 'POST' }); } catch (err) { console.error('Settlement approval error:', err); }
+      try { await lakehouseAPI.fetch(`/api/v1/settlements/${selectedWindow.id}/approve`, { method: 'POST' }); } catch (err) { logger.error('Settlement approval error:', err); }
     }
     setApprovalLoading(false);
     setShowApprovalModal(false);

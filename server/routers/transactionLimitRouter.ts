@@ -8,7 +8,7 @@ import { eq, desc, and, sql } from "drizzle-orm";
 export const transactionLimitRouter = router({
   getMyLimits: protectedProcedure
     .query(async ({ ctx }) => {
-      const limits = await db.getDb().select().from(transactionLimits)
+      const limits = await (await db.requireDb()).select().from(transactionLimits)
         .where(eq(transactionLimits.userId, ctx.user.id));
       if (limits.length === 0) {
         const defaultLimits = [
@@ -17,7 +17,7 @@ export const transactionLimitRouter = router({
           { userId: ctx.user.id, tier: "standard", limitType: "monthly" as const, maxAmount: "20000000.00", currency: "NGN" },
           { userId: ctx.user.id, tier: "standard", limitType: "per_transaction" as const, maxAmount: "500000.00", currency: "NGN" },
         ];
-        await db.getDb().insert(transactionLimits).values(defaultLimits);
+        await (await db.requireDb()).insert(transactionLimits).values(defaultLimits);
         return defaultLimits.map((l, i) => ({ id: i + 1, ...l, currentUsage: "0", isOverridden: false, createdAt: new Date(), updatedAt: new Date() }));
       }
       return limits;
@@ -35,10 +35,10 @@ export const transactionLimitRouter = router({
       if (ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
       }
-      const existing = await db.getDb().select().from(transactionLimits)
+      const existing = await (await db.requireDb()).select().from(transactionLimits)
         .where(and(eq(transactionLimits.userId, input.userId), sql`${transactionLimits.limitType} = ${input.limitType}`));
       if (existing.length > 0) {
-        const [updated] = await db.getDb().update(transactionLimits)
+        const [updated] = await (await db.requireDb()).update(transactionLimits)
           .set({
             maxAmount: input.maxAmount,
             tier: input.tier,
@@ -51,7 +51,7 @@ export const transactionLimitRouter = router({
           .returning();
         return updated;
       }
-      const [created] = await db.getDb().insert(transactionLimits).values({
+      const [created] = await (await db.requireDb()).insert(transactionLimits).values({
         userId: input.userId,
         tier: input.tier,
         limitType: input.limitType,
@@ -71,7 +71,7 @@ export const transactionLimitRouter = router({
       justification: z.string().min(10),
     }))
     .mutation(async ({ ctx, input }) => {
-      const [request] = await db.getDb().insert(limitIncreaseRequests).values({
+      const [request] = await (await db.requireDb()).insert(limitIncreaseRequests).values({
         userId: ctx.user.id,
         currentLimit: input.currentLimit,
         requestedLimit: input.requestedLimit,
@@ -97,7 +97,7 @@ export const transactionLimitRouter = router({
       const conditions = [];
       if (input?.status) conditions.push(sql`${limitIncreaseRequests.status} = ${input.status}`);
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-      const items = await db.getDb().select().from(limitIncreaseRequests)
+      const items = await (await db.requireDb()).select().from(limitIncreaseRequests)
         .where(whereClause)
         .orderBy(desc(limitIncreaseRequests.createdAt))
         .limit(limit).offset(offset);
@@ -114,7 +114,7 @@ export const transactionLimitRouter = router({
       if (ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
       }
-      const [updated] = await db.getDb().update(limitIncreaseRequests)
+      const [updated] = await (await db.requireDb()).update(limitIncreaseRequests)
         .set({
           status: input.approved ? "approved" : "rejected",
           reviewedBy: ctx.user.id,
@@ -124,7 +124,7 @@ export const transactionLimitRouter = router({
         .where(eq(limitIncreaseRequests.id, input.id))
         .returning();
       if (input.approved && updated) {
-        await db.getDb().update(transactionLimits)
+        await (await db.requireDb()).update(transactionLimits)
           .set({ maxAmount: updated.requestedLimit, isOverridden: true, overriddenBy: ctx.user.id, updatedAt: new Date() })
           .where(and(eq(transactionLimits.userId, updated.userId), sql`${transactionLimits.limitType} = ${updated.limitType}`));
       }

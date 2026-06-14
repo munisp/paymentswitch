@@ -1,4 +1,4 @@
-import { router, publicProcedure } from "../_core/trpc";
+import { router, publicProcedure, protectedProcedure } from "../_core/trpc";
 import { z } from "zod";
 
 export const securityRouter = router({
@@ -157,7 +157,7 @@ export const securityRouter = router({
   })),
 
   // CRUD for PBAC policies
-  listPolicies: publicProcedure.query(() => ({
+  listPolicies: protectedProcedure.query(() => ({
     policies: [
       { id: "pol-001", name: "NIP Payment Authorization", effect: "ALLOW", enabled: true, priority: 100, resources: ["payment:nip:*"], actions: ["create", "approve"], conditions: [{ attribute: "role", operator: "in", value: ["teller", "supervisor", "system"] }], tags: ["nip"] },
       { id: "pol-002", name: "High Value Transaction Approval", effect: "DENY", enabled: true, priority: 200, resources: ["payment:*:*"], actions: ["approve"], conditions: [{ attribute: "transaction_amount", operator: "gt", value: 10000000 }], tags: ["high-value"] },
@@ -171,7 +171,7 @@ export const securityRouter = router({
     total: 8,
   })),
 
-  createPolicy: publicProcedure
+  createPolicy: protectedProcedure
     .input(z.object({
       name: z.string(),
       effect: z.enum(["ALLOW", "DENY"]),
@@ -186,7 +186,7 @@ export const securityRouter = router({
       createdAt: new Date().toISOString(),
     })),
 
-  togglePolicy: publicProcedure
+  togglePolicy: protectedProcedure
     .input(z.object({ id: z.string(), enabled: z.boolean() }))
     .mutation(({ input }: { input: { id: string; enabled: boolean } }) => ({ id: input.id, enabled: input.enabled, updatedAt: new Date().toISOString() })),
 });

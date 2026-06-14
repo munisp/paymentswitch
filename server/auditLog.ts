@@ -55,7 +55,7 @@ export async function logAudit(data: {
       status: data.status,
     });
   } catch (error) {
-    log.error("Failed to write audit log:", error);
+    log.error({ err: error }, "Failed to write audit log:");
   }
 }
 

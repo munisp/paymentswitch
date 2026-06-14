@@ -66,7 +66,7 @@ async function runCleanup() {
     const duration = Date.now() - startTime;
     log.info(`[CleanupJob] Cleanup completed in ${duration}ms`);
   } catch (error) {
-    log.error('[CleanupJob] Error during cleanup:', error);
+    log.error({ err: error }, '[CleanupJob] Error during cleanup:');
   } finally {
     isRunning = false;
   }

@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+// AMLScreener is called during Step C to perform AML/CFT risk scoring.
+type AMLScreener interface {
+	ScreenAML(ctx context.Context, name, bvn, country string, amountUSD float64) (status string, score float64, err error)
+}
+
 // RemittanceWorkflow implements the full outbound remittance lifecycle
 // as described in the architecture document (Steps A through G).
 // This is designed to run as a Temporal workflow.
@@ -14,6 +19,7 @@ type RemittanceWorkflow struct {
 	sanctions  *SanctionsScreeningService
 	billing    *TieredBillingService
 	providers  *ProviderAdapterFramework
+	aml        AMLScreener
 }
 
 // RemittanceState tracks the full lifecycle of an outbound transfer
@@ -148,12 +154,29 @@ func (w *RemittanceWorkflow) Execute(ctx context.Context, req *CreateRemittanceR
 		return state, err
 	}
 
+	// AML/CFT screening (separate from sanctions)
+	amlStatus := "clear"
+	amlScore := 0.0
+	if w.aml != nil {
+		var amlErr error
+		amlStatus, amlScore, amlErr = w.aml.ScreenAML(ctx, req.Sender.Name, req.Sender.BVN, req.Beneficiary.Country, req.Amount.AmountUSD)
+		if amlErr != nil {
+			state.fail("AML screening error: " + amlErr.Error())
+			return state, amlErr
+		}
+		if amlStatus == "high_risk" {
+			state.Status = StatusManualReview
+			state.addEvent("aml", "escalated", fmt.Sprintf("AML score %.1f exceeds threshold", amlScore))
+		}
+		state.addEvent("aml", amlStatus, fmt.Sprintf("AML score: %.1f in %v", amlScore, time.Since(compStart)))
+	}
+
 	state.Compliance = &ComplianceResult{
 		SanctionsStatus: screenResult.Status,
-		AMLStatus:       "clear",
+		AMLStatus:       amlStatus,
 		VelocityCheck:   "pass",
 		OverallDecision: screenResult.Decision,
-		Score:           screenResult.Score,
+		Score:           screenResult.Score + amlScore,
 	}
 
 	if screenResult.Decision == "block" {

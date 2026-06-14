@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import { Gift, Users, TrendingUp, DollarSign } from 'lucide-react';
@@ -16,7 +17,7 @@ export function ReferralProgram() {
   const fetcher = useCallback(() =>
     lakehouseAPI.fetch<{ referrals: typeof referrals }>('/api/v1/referrals')
       .then(d => d.referrals)
-      .catch((err: unknown) => { console.error("API fallback:", err); return referrals; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return referrals; }), []);
   const { data: apiReferrals } = useLakehouseData(fetcher, 30000);
   const activeReferrals = apiReferrals || referrals;
   const totalRewards = activeReferrals.reduce((sum, r) => sum + r.reward, 0);

@@ -18,7 +18,7 @@ package domestic
 import (
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"time"
 )
@@ -159,19 +159,19 @@ func (s *Neo4jGraphService) ExtractNodeFeatures(limit int) []NodeFeatures {
 	banks := []string{"ACCESS", "ZENITH", "GTBANK", "FIRSTBANK", "UBA", "ECOBANK", "WEMA", "KUDA", "OPAY", "PALMPAY"}
 
 	for i := 0; i < limit; i++ {
-		bank := banks[rand.Intn(len(banks))]
-		txCount := rand.Intn(200) + 1
+		bank := banks[rand.IntN(len(banks))]
+		txCount := rand.IntN(200) + 1
 		isFraud := rand.Float64() < 0.003 // 0.3% fraud rate
 
 		f := NodeFeatures{
-			AccountID:        fmt.Sprintf("%010d", rand.Int63n(9999999999)),
+			AccountID:        fmt.Sprintf("%010d", rand.Int64N(9999999999)),
 			BankCode:         bank,
 			TxCount7d:        txCount,
-			TotalSent7d:      float64(txCount) * float64(rand.Intn(100000)+10000),
-			TotalReceived7d:  float64(txCount) * float64(rand.Intn(80000)+8000),
-			UniqueRecipients: rand.Intn(txCount) + 1,
-			UniqueSenders:    rand.Intn(txCount/2+1) + 1,
-			AccountAgeDays:   rand.Intn(1800) + 1,
+			TotalSent7d:      float64(txCount) * float64(rand.IntN(100000)+10000),
+			TotalReceived7d:  float64(txCount) * float64(rand.IntN(80000)+8000),
+			UniqueRecipients: rand.IntN(txCount) + 1,
+			UniqueSenders:    rand.IntN(txCount/2+1) + 1,
+			AccountAgeDays:   rand.IntN(1800) + 1,
 			IsFraud:          isFraud,
 			ExtractedAt:      time.Now(),
 		}
@@ -191,7 +191,7 @@ func (s *Neo4jGraphService) ExtractNodeFeatures(limit int) []NodeFeatures {
 			f.RoundAmountRatio = 0.6 + rand.Float64()*0.4
 			f.NightTxRatio = 0.3 + rand.Float64()*0.5
 			f.BurstScore = 3.0 + rand.Float64()*7.0
-			f.AccountAgeDays = rand.Intn(30) + 1
+			f.AccountAgeDays = rand.IntN(30) + 1
 		}
 
 		features = append(features, f)

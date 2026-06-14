@@ -250,8 +250,8 @@ async def get_payment_status(transaction_id: str):
         cached_data = await redis_client.get(f"transaction:{transaction_id}")
         
         if cached_data:
-            import ast
-            transaction_data = ast.literal_eval(cached_data)
+            import json
+            transaction_data = json.loads(cached_data if isinstance(cached_data, str) else cached_data.decode('utf-8'))
             
             return TransactionStatusResponse(
                 transactionId=transaction_data["transactionId"],

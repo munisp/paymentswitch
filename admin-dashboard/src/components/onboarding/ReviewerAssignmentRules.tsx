@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import { toast } from '@/lib/toast';
 import React, { useState, useEffect, useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
@@ -54,7 +55,7 @@ interface Assignee {
 
 const API_BASE = process.env.NEXT_PUBLIC_ONBOARDING_API || 'http://localhost:8082';
 
-const mockReviewers: Assignee[] = [
+const defaultReviewers: Assignee[] = [
   { id: 'rev-001', name: 'John Reviewer', email: 'john@example.com', role: 'Senior Analyst', department: 'Compliance', isBackup: false, maxCaseload: 20, currentCaseload: 12 },
   { id: 'rev-002', name: 'Jane Analyst', email: 'jane@example.com', role: 'Analyst', department: 'Compliance', isBackup: false, maxCaseload: 15, currentCaseload: 8 },
   { id: 'rev-003', name: 'Mike Compliance', email: 'mike@example.com', role: 'Compliance Officer', department: 'Compliance', isBackup: false, maxCaseload: 10, currentCaseload: 7 },
@@ -62,7 +63,7 @@ const mockReviewers: Assignee[] = [
   { id: 'rev-005', name: 'Peter Admin', email: 'peter@example.com', role: 'Admin', department: 'Operations', isBackup: true, maxCaseload: 10, currentCaseload: 4 },
 ];
 
-const mockRules: AssignmentRule[] = [
+const defaultRules: AssignmentRule[] = [
   {
     id: 'rule-001',
     name: 'Nigerian Banks Assignment',
@@ -73,7 +74,7 @@ const mockRules: AssignmentRule[] = [
       { field: 'STAKEHOLDER_TYPE', operator: 'EQUALS', value: 'BANK' },
       { field: 'COUNTRY', operator: 'EQUALS', value: 'Nigeria' },
     ],
-    assignees: [mockReviewers[0], mockReviewers[2]],
+    assignees: [defaultReviewers[0], defaultReviewers[2]],
     createdAt: '2024-10-01T10:00:00Z',
     updatedAt: '2024-11-15T14:00:00Z',
     createdBy: 'Admin User',
@@ -87,7 +88,7 @@ const mockRules: AssignmentRule[] = [
     conditions: [
       { field: 'RISK_SCORE', operator: 'GREATER_THAN', value: 70 },
     ],
-    assignees: [mockReviewers[2], mockReviewers[3]],
+    assignees: [defaultReviewers[2], defaultReviewers[3]],
     createdAt: '2024-09-15T09:00:00Z',
     updatedAt: '2024-10-20T11:00:00Z',
     createdBy: 'Admin User',
@@ -101,7 +102,7 @@ const mockRules: AssignmentRule[] = [
     conditions: [
       { field: 'STAKEHOLDER_TYPE', operator: 'IN', value: ['FINTECH', 'PAYMENT_SERVICE_PROVIDER'] },
     ],
-    assignees: [mockReviewers[1], mockReviewers[4]],
+    assignees: [defaultReviewers[1], defaultReviewers[4]],
     createdAt: '2024-08-20T08:00:00Z',
     updatedAt: '2024-09-10T16:00:00Z',
     createdBy: 'Admin User',
@@ -115,7 +116,7 @@ const mockRules: AssignmentRule[] = [
     conditions: [
       { field: 'COUNTRY', operator: 'IN', value: ['Kenya', 'Tanzania', 'Uganda', 'Rwanda'] },
     ],
-    assignees: [mockReviewers[1]],
+    assignees: [defaultReviewers[1]],
     createdAt: '2024-07-10T12:00:00Z',
     updatedAt: '2024-08-05T10:00:00Z',
     createdBy: 'Admin User',
@@ -126,10 +127,10 @@ export function ReviewerAssignmentRules() {
   const fetcher = useCallback(() =>
     lakehouseAPI.fetch<{ rules: AssignmentRule[]; reviewers: Assignee[] }>('/api/v1/onboarding/assignment-rules')
       .then(d => ({ rules: d.rules, reviewers: d.reviewers }))
-      .catch((err: unknown) => { console.error("API fallback:", err); return { rules: mockRules, reviewers: mockReviewers }; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return { rules: defaultRules, reviewers: defaultReviewers }; }), []);
   const { data: apiData } = useLakehouseData(fetcher, 30000);
-  const [rules, setRules] = useState<AssignmentRule[]>(mockRules);
-  const [reviewers] = useState<Assignee[]>(mockReviewers);
+  const [rules, setRules] = useState<AssignmentRule[]>(defaultRules);
+  const [reviewers] = useState<Assignee[]>(defaultReviewers);
   useEffect(() => { if (apiData) { setRules(apiData.rules); } }, [apiData]);
   const [expandedRule, setExpandedRule] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);

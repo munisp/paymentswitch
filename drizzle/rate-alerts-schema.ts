@@ -28,6 +28,8 @@ export const rateAlerts = pgTable("rate_alerts", {
   notifyEmail: boolean("notify_email").default(true).notNull(),
   notifySms: boolean("notify_sms").default(false).notNull(),
   notifyPush: boolean("notify_push").default(true).notNull(),
+  notificationEmail: varchar("notification_email", { length: 320 }),
+  notificationPhone: varchar("notification_phone", { length: 32 }),
   
   // Alert metadata
   expiresAt: timestamp("expires_at"),
@@ -57,6 +59,7 @@ export const rateAlertHistory = pgTable("rate_alert_history", {
   
   // Timestamps
   triggeredAt: timestamp("triggered_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export type RateAlert = typeof rateAlerts.$inferSelect;

@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import { toast } from '@/lib/toast';
 import { useState, useEffect, useCallback } from 'react';
 
@@ -217,7 +218,7 @@ export default function JourneyDashboard() {
   useEffect(() => {
     fetch('http://localhost:8080/api/v1/journeys')
       .then(r => r.json()).then(d => setApiJourneys(d.journeys))
-      .catch((err: unknown) => { console.error("API fallback:", err); setApiJourneys(journeys); });
+      .catch((err: unknown) => { logger.error("API fallback:", err); setApiJourneys(journeys); });
   }, []);
   const activeJourneys = apiJourneys || journeys;
   const [selectedCategory, setSelectedCategory] = useState<string>('all');

@@ -30,11 +30,11 @@ export const auditLogRouter = router({
       if (input?.dateFrom) conditions.push(gte(auditLogEntries.createdAt, new Date(input.dateFrom)));
       if (input?.dateTo) conditions.push(lte(auditLogEntries.createdAt, new Date(input.dateTo)));
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-      const items = await db.getDb().select().from(auditLogEntries)
+      const items = await (await db.requireDb()).select().from(auditLogEntries)
         .where(whereClause)
         .orderBy(desc(auditLogEntries.createdAt))
         .limit(limit).offset(offset);
-      const [{ count }] = await db.getDb().select({ count: sql<number>`count(*)` })
+      const [{ count }] = await (await db.requireDb()).select({ count: sql<number>`count(*)` })
         .from(auditLogEntries).where(whereClause);
       return { items, total: Number(count), page, limit };
     }),
@@ -45,7 +45,7 @@ export const auditLogRouter = router({
       if (ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
       }
-      const [entry] = await db.getDb().select().from(auditLogEntries)
+      const [entry] = await (await db.requireDb()).select().from(auditLogEntries)
         .where(eq(auditLogEntries.id, input.id));
       if (!entry) throw new TRPCError({ code: "NOT_FOUND" });
       return entry;
@@ -56,10 +56,10 @@ export const auditLogRouter = router({
       if (ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
       }
-      const [{ total }] = await db.getDb().select({ total: sql<number>`count(*)` }).from(auditLogEntries);
+      const [{ total }] = await (await db.requireDb()).select({ total: sql<number>`count(*)` }).from(auditLogEntries);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const [{ todayCount }] = await db.getDb().select({ todayCount: sql<number>`count(*)` })
+      const [{ todayCount }] = await (await db.requireDb()).select({ todayCount: sql<number>`count(*)` })
         .from(auditLogEntries).where(gte(auditLogEntries.createdAt, today));
       return { totalEntries: Number(total), todayEntries: Number(todayCount) };
     }),

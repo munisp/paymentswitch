@@ -12,7 +12,7 @@ export const transactionNoteRouter = router({
       isInternal: z.boolean().default(false),
     }))
     .mutation(async ({ ctx, input }) => {
-      const [created] = await db.getDb().insert(transactionNotes).values({
+      const [created] = await (await db.requireDb()).insert(transactionNotes).values({
         transactionId: input.transactionId,
         userId: ctx.user.id,
         note: input.note,
@@ -28,7 +28,7 @@ export const transactionNoteRouter = router({
       if (ctx.user.role !== "admin") {
         conditions.push(eq(transactionNotes.isInternal, false));
       }
-      return await db.getDb().select().from(transactionNotes)
+      return await (await db.requireDb()).select().from(transactionNotes)
         .where(and(...conditions))
         .orderBy(desc(transactionNotes.createdAt));
     }),
@@ -39,7 +39,7 @@ export const transactionNoteRouter = router({
       note: z.string().min(1),
     }))
     .mutation(async ({ ctx, input }) => {
-      const [updated] = await db.getDb().update(transactionNotes)
+      const [updated] = await (await db.requireDb()).update(transactionNotes)
         .set({ note: input.note, updatedAt: new Date() })
         .where(and(eq(transactionNotes.id, input.id), eq(transactionNotes.userId, ctx.user.id)))
         .returning();
@@ -49,7 +49,7 @@ export const transactionNoteRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      await db.getDb().delete(transactionNotes)
+      await (await db.requireDb()).delete(transactionNotes)
         .where(and(eq(transactionNotes.id, input.id), eq(transactionNotes.userId, ctx.user.id)));
       return { success: true };
     }),

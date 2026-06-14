@@ -151,8 +151,7 @@ const stakeholderIcons: Record<string, React.ReactNode> = {
   REGULATOR: <Shield className="h-5 w-5" />,
 };
 
-// Mock data
-const mockCases: KYBCase[] = [
+const defaultCases: KYBCase[] = [
   {
     id: 'KYB-001',
     organizationName: 'First National Bank',
@@ -239,7 +238,7 @@ const mockCases: KYBCase[] = [
   },
 ];
 
-const mockDetail: KYBDetail = {
+const defaultDetail: KYBDetail = {
   id: 'KYB-001',
   organizationName: 'First National Bank',
   registrationNumber: 'RC-123456',
@@ -495,13 +494,13 @@ export function KYBVerificationPortal() {
             createdAt: c.submittedAt,
             updatedAt: c.submittedAt,
           }));
-          setCases(mappedCases.length > 0 ? mappedCases : mockCases);
+          setCases(mappedCases.length > 0 ? mappedCases : defaultCases);
         } else {
-          setCases(mockCases);
+          setCases([]);
         }
       } catch (error) {
         log.error('Error fetching KYB cases:', error);
-        setCases(mockCases);
+        setCases([]);
       } finally {
         setLoading(false);
       }
@@ -530,11 +529,11 @@ export function KYBVerificationPortal() {
         const data = await response.json();
         setSelectedCase(data);
       } else {
-        setSelectedCase(mockDetail);
+        setSelectedCase(null);
       }
     } catch (error) {
       log.error('Error fetching KYB case:', error);
-      setSelectedCase(mockDetail);
+      setSelectedCase(null);
     }
   };
 
@@ -561,7 +560,7 @@ export function KYBVerificationPortal() {
           createdAt: c.createdAt,
           updatedAt: c.updatedAt,
         }));
-        setCases(mappedCases.length > 0 ? mappedCases : mockCases);
+        setCases(mappedCases.length > 0 ? mappedCases : defaultCases);
       }
     } catch (error) {
       log.error('Error refetching KYB cases:', error);

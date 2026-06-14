@@ -5,6 +5,7 @@ package card
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -180,6 +181,7 @@ type CardProcessingEngine struct {
 	terminals      map[string]*MerchantTerminal
 	settlements    map[string]*CardSettlementBatch
 	metrics        *CardMetrics
+	db             *sql.DB
 }
 
 func cardID(prefix string) string {
@@ -213,6 +215,7 @@ func (e *CardProcessingEngine) IssueCard(card *IssuedCard) error {
 	e.mu.Lock()
 	e.cards[card.ID] = card
 	e.mu.Unlock()
+	go e.persistCard(card)
 
 	e.metrics.mu.Lock()
 	e.metrics.TotalCards++
@@ -264,6 +267,7 @@ func (e *CardProcessingEngine) ProcessTransaction(txn *CardTransaction) error {
 	e.mu.Lock()
 	e.transactions[txn.ID] = txn
 	e.mu.Unlock()
+	go e.persistTransaction(txn)
 
 	e.metrics.mu.Lock()
 	e.metrics.TotalTxns++
@@ -289,6 +293,7 @@ func (e *CardProcessingEngine) FileChargeback(cb *Chargeback) error {
 	e.mu.Lock()
 	e.chargebacks[cb.ID] = cb
 	e.mu.Unlock()
+	go e.persistChargeback(cb)
 
 	e.metrics.mu.Lock()
 	e.metrics.ActiveChargebacks++

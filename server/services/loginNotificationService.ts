@@ -50,9 +50,9 @@ export async function sendLoginNotification(params: LoginNotificationParams): Pr
     
     // Check if user wants login notifications
     if (prefs) {
-      const wantsNewDeviceAlerts = params.isNewDevice && prefs.newDeviceAlerts === 'true';
-      const wantsSuspiciousAlerts = params.isSuspicious && prefs.suspiciousActivityAlerts === 'true';
-      const wantsLoginAlerts = prefs.loginAlerts === 'true';
+      const wantsNewDeviceAlerts = params.isNewDevice && !!prefs.newDeviceAlerts;
+      const wantsSuspiciousAlerts = params.isSuspicious && !!prefs.suspiciousActivityAlerts;
+      const wantsLoginAlerts = !!prefs.loginAlerts;
       
       // Skip if user doesn't want this type of notification
       if (!wantsNewDeviceAlerts && !wantsSuspiciousAlerts && !wantsLoginAlerts) {
@@ -60,7 +60,7 @@ export async function sendLoginNotification(params: LoginNotificationParams): Pr
       }
       
       // Skip if email notifications are disabled
-      if (prefs.emailNotifications === 'false') {
+      if (!prefs.emailNotifications) {
         return { success: true }; // Silently skip
       }
     }
@@ -105,7 +105,7 @@ export async function sendLoginNotification(params: LoginNotificationParams): Pr
       });
 
       if (!emailResult.success) {
-        log.error('[LoginNotification] Failed to send email:', emailResult.error);
+        log.error({ err: emailResult.error }, '[LoginNotification] Failed to send email:');
       }
     }
 
@@ -116,7 +116,7 @@ export async function sendLoginNotification(params: LoginNotificationParams): Pr
 
     return { success: true };
   } catch (error) {
-    log.error('[LoginNotification] Error sending notification:', error);
+    log.error({ err: error }, '[LoginNotification] Error sending notification:');
     return { success: false, error: 'Failed to send notification' };
   }
 }

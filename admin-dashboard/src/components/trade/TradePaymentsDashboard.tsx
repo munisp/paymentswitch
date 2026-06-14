@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import React, { useState, useEffect } from 'react';
 import { lakehouseAPI } from '@/lib/api';
 
@@ -49,7 +50,7 @@ interface CustomsDutyPayment {
   status: string;
 }
 
-const mockLCs: LetterOfCredit[] = [
+const defaultLCs: LetterOfCredit[] = [
   { id: 'LC-001', lcNumber: 'LC-2026-A001', type: 'import', applicant: 'Dangote Industries', applicantBank: 'Access Bank', beneficiary: 'Sinopec Corp', beneficiaryBank: 'Bank of China', beneficiaryCountry: 'CN', amount: 25000000, currency: 'USD', goodsDescription: 'Industrial chemicals and petrochemical feedstock', shipmentPort: 'Shanghai', destinationPort: 'Apapa, Lagos', status: 'CONFIRMED', formMRef: 'FORM-M-2026-001', documents: [{ id: 'DOC-001', type: 'commercial_invoice', documentRef: 'INV-2026-SC001', status: 'verified' }] },
   { id: 'LC-002', lcNumber: 'LC-2026-A002', type: 'import', applicant: 'BUA Cement', applicantBank: 'GTBank', beneficiary: 'Thyssen Krupp AG', beneficiaryBank: 'Deutsche Bank', beneficiaryCountry: 'DE', amount: 8500000, currency: 'EUR', goodsDescription: 'Cement plant machinery and spare parts', shipmentPort: 'Hamburg', destinationPort: 'Tin Can Island, Lagos', status: 'ISSUED', formMRef: 'FORM-M-2026-002', documents: [] },
   { id: 'LC-003', lcNumber: 'LC-2026-E001', type: 'export', applicant: 'Olam Nigeria', applicantBank: 'Zenith Bank', beneficiary: 'Cargill Europe', beneficiaryBank: 'ING Bank', beneficiaryCountry: 'NL', amount: 12000000, currency: 'USD', goodsDescription: 'Raw cocoa beans (Grade 1)', shipmentPort: 'Apapa, Lagos', destinationPort: 'Rotterdam', status: 'DRAWN_DOWN', formMRef: 'FORM-A-2026-001', documents: [{ id: 'DOC-002', type: 'bill_of_lading', documentRef: 'BOL-2026-OL001', status: 'verified' }, { id: 'DOC-003', type: 'certificate_of_origin', documentRef: 'COO-2026-OL001', status: 'verified' }] },
@@ -57,13 +58,13 @@ const mockLCs: LetterOfCredit[] = [
   { id: 'LC-005', lcNumber: 'LC-2026-E002', type: 'export', applicant: 'Nigerian Breweries', applicantBank: 'First Bank', beneficiary: 'Heineken NV', beneficiaryBank: 'ABN AMRO', beneficiaryCountry: 'NL', amount: 3500000, currency: 'EUR', goodsDescription: 'Star Lager beer for export', shipmentPort: 'Apapa, Lagos', destinationPort: 'Rotterdam', status: 'SETTLED', formMRef: 'FORM-A-2026-002', documents: [{ id: 'DOC-004', type: 'bill_of_lading', documentRef: 'BOL-2026-NB001', status: 'verified' }] },
 ];
 
-const mockEscrows: EscrowPayment[] = [
+const defaultEscrows: EscrowPayment[] = [
   { id: 'ESC-001', buyerName: 'Lafarge Africa', sellerName: 'CAT Equipment Nigeria', totalAmount: 2500000, currency: 'USD', milestones: [{ id: 'MS-001', description: 'Equipment delivery', amount: 1500000, status: 'released' }, { id: 'MS-002', description: 'Installation & commissioning', amount: 750000, status: 'held' }, { id: 'MS-003', description: 'Acceptance testing', amount: 250000, status: 'held' }], status: 'IN_PROGRESS', createdAt: '2026-03-15' },
   { id: 'ESC-002', buyerName: 'TotalEnergies Nigeria', sellerName: 'Subsea 7 Ltd', totalAmount: 15000000, currency: 'USD', milestones: [{ id: 'MS-004', description: 'Pipeline fabrication', amount: 5000000, status: 'released' }, { id: 'MS-005', description: 'Offshore installation', amount: 8000000, status: 'held' }, { id: 'MS-006', description: 'Testing & handover', amount: 2000000, status: 'held' }], status: 'IN_PROGRESS', createdAt: '2026-01-20' },
   { id: 'ESC-003', buyerName: 'Flour Mills Nigeria', sellerName: 'Buhler AG', totalAmount: 4200000, currency: 'CHF', milestones: [{ id: 'MS-007', description: 'Full delivery', amount: 4200000, status: 'released' }], status: 'COMPLETED', createdAt: '2025-11-01' },
 ];
 
-const mockCustoms: CustomsDutyPayment[] = [
+const defaultCustoms: CustomsDutyPayment[] = [
   { id: 'CUS-001', assessmentRef: 'NCS-ASMT-2026-A001', importerName: 'Dangote Industries', dutyAmount: 125000000, vatAmount: 37500000, surchargeAmount: 6250000, totalAmount: 168750000, hsCode: '2902.20', goodsDesc: 'Toluene and petrochemical feedstock', portOfEntry: 'Apapa Port', status: 'PAID' },
   { id: 'CUS-002', assessmentRef: 'NCS-ASMT-2026-A002', importerName: 'BUA Cement', dutyAmount: 42500000, vatAmount: 12750000, surchargeAmount: 2125000, totalAmount: 57375000, hsCode: '8474.20', goodsDesc: 'Cement plant crushing machinery', portOfEntry: 'Tin Can Island', status: 'PAID' },
   { id: 'CUS-003', assessmentRef: 'NCS-ASMT-2026-A003', importerName: 'MTN Nigeria', dutyAmount: 225000000, vatAmount: 67500000, surchargeAmount: 11250000, totalAmount: 303750000, hsCode: '8517.62', goodsDesc: '5G network equipment and base stations', portOfEntry: 'Apapa Port', status: 'ASSESSED' },
@@ -80,9 +81,9 @@ export default function TradePaymentsDashboard() {
   const [customs, setCustoms] = useState<CustomsDutyPayment[]>([]);
 
   useEffect(() => {
-    lakehouseAPI.fetch<{ lcs: LetterOfCredit[] }>('/api/trade-payments/lcs').then(d => setLcs(d.lcs || [])).catch((err: unknown) => { console.error("API fallback:", err); setLcs(mockLCs); });
-    lakehouseAPI.fetch<{ escrows: EscrowPayment[] }>('/api/trade-payments/escrows').then(d => setEscrows(d.escrows || [])).catch((err: unknown) => { console.error("API fallback:", err); setEscrows(mockEscrows); });
-    lakehouseAPI.fetch<{ duties: CustomsDutyPayment[] }>('/api/trade-payments/customs').then(d => setCustoms(d.duties || [])).catch((err: unknown) => { console.error("API fallback:", err); setCustoms(mockCustoms); });
+    lakehouseAPI.fetch<{ lcs: LetterOfCredit[] }>('/api/trade-payments/lcs').then(d => setLcs(d.lcs || [])).catch((err: unknown) => { logger.error("API fallback:", err); setLcs([]); });
+    lakehouseAPI.fetch<{ escrows: EscrowPayment[] }>('/api/trade-payments/escrows').then(d => setEscrows(d.escrows || [])).catch((err: unknown) => { logger.error("API fallback:", err); setEscrows([]); });
+    lakehouseAPI.fetch<{ duties: CustomsDutyPayment[] }>('/api/trade-payments/customs').then(d => setCustoms(d.duties || [])).catch((err: unknown) => { logger.error("API fallback:", err); setCustoms([]); });
   }, []);
 
   const tabs: { id: Tab; label: string }[] = [

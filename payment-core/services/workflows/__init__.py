@@ -1,2 +1,2 @@
-"""$service_name service package."""
+"""Workflow service package."""
 __version__ = "1.0.0"

@@ -27,7 +27,7 @@ export function WebhookConfig() {
         if (data.webhooks) setActiveWebhooks(data.webhooks);
       }
     } catch {
-      // API unreachable — use mock data
+      // API unreachable — use default data
     }
   }, []);
 

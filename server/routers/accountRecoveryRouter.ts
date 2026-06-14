@@ -146,7 +146,7 @@ export const accountRecoveryRouter = router({
             log.info(`[AccountRecovery] Recovery code saved to storage/emails/${filename}`);
           }
         } catch (error) {
-          log.error('[AccountRecovery] Failed to send recovery code:', error);
+          log.error({ err: error }, '[AccountRecovery] Failed to send recovery code:');
           // Don't fail the request if email fails
         }
       }

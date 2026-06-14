@@ -430,7 +430,7 @@ export class JaegerSpanExporter implements SpanExporter {
         body: JSON.stringify({ spans: jaegerSpans })
       });
     } catch (error) {
-      log.error('Failed to export spans to Jaeger:', error);
+      log.error({ err: error }, 'Failed to export spans to Jaeger:');
     }
   }
 }

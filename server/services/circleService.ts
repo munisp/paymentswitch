@@ -1,3 +1,7 @@
+import { createChildLogger } from '../lib/logger';
+
+const log = createChildLogger('circleService');
+
 /**
  * Circle USDC Integration Service
  * 

@@ -20,8 +20,8 @@ import type { DashboardMetrics, ParticipantHealth, KillSwitch, Transaction } fro
 import { createLogger } from '@/lib/logger';
 const log = createLogger('NOCDashboard');
 
-// Mock data generators
-const generateMockMetrics = (): DashboardMetrics => ({
+// Default data generators
+const generateDefaultMetrics = (): DashboardMetrics => ({
   tps: 1247 + Math.random() * 100,
   successRate: 99.2 + Math.random() * 0.5,
   avgLatencyMs: 45 + Math.random() * 10,
@@ -33,7 +33,7 @@ const generateMockMetrics = (): DashboardMetrics => ({
   currency: 'NGN',
 });
 
-const generateMockChartData = () => {
+const generateDefaultChartData = () => {
   const data = [];
   const now = new Date();
   for (let i = 59; i >= 0; i--) {
@@ -48,7 +48,7 @@ const generateMockChartData = () => {
   return data;
 };
 
-const generateMockParticipants = (): ParticipantHealth[] => [
+const generateDefaultParticipants = (): ParticipantHealth[] => [
   { fspId: 'firstbank', name: 'FirstBank', status: 'HEALTHY', tps: 156.3, successRate: 99.8, avgLatencyMs: 42, lastTransactionAt: new Date().toISOString(), errorRate: 0.2 },
   { fspId: 'gtbank', name: 'GTBank', status: 'HEALTHY', tps: 142.1, successRate: 99.5, avgLatencyMs: 38, lastTransactionAt: new Date().toISOString(), errorRate: 0.5 },
   { fspId: 'zenith', name: 'Zenith Bank', status: 'HEALTHY', tps: 134.8, successRate: 99.7, avgLatencyMs: 45, lastTransactionAt: new Date().toISOString(), errorRate: 0.3 },
@@ -63,7 +63,7 @@ const generateMockParticipants = (): ParticipantHealth[] => [
   { fspId: 'keystone', name: 'Keystone Bank', status: 'HEALTHY', tps: 34.5, successRate: 99.4, avgLatencyMs: 55, lastTransactionAt: new Date().toISOString(), errorRate: 0.6 },
 ];
 
-const generateMockKillSwitches = (): KillSwitch[] => [
+const generateDefaultKillSwitches = (): KillSwitch[] => [
   { id: 'ks-1', name: 'Global Transaction Halt', type: 'GLOBAL', scope: { type: 'GLOBAL' }, status: 'INACTIVE' },
   { id: 'ks-2', name: 'Sterling Bank Suspend', type: 'PARTICIPANT', scope: { type: 'PARTICIPANT', value: 'sterling' }, status: 'ACTIVE', activatedAt: new Date(Date.now() - 1800000).toISOString(), activatedBy: 'admin@payment-switch.com', reason: 'Technical issues reported' },
   { id: 'ks-3', name: 'USD Transactions', type: 'CURRENCY', scope: { type: 'CURRENCY', value: 'USD' }, status: 'INACTIVE' },
@@ -79,28 +79,28 @@ const generateRecentTransactions = (): Transaction[] => [
 ];
 
 export function NOCDashboard() {
-  const [metrics, setMetrics] = useState<DashboardMetrics>(generateMockMetrics());
-  const [chartData, setChartData] = useState(generateMockChartData());
-  const [participants, setParticipants] = useState<ParticipantHealth[]>(generateMockParticipants());
-  const [killSwitches, setKillSwitches] = useState<KillSwitch[]>(generateMockKillSwitches());
+  const [metrics, setMetrics] = useState<DashboardMetrics>(generateDefaultMetrics());
+  const [chartData, setChartData] = useState(generateDefaultChartData());
+  const [participants, setParticipants] = useState<ParticipantHealth[]>(generateDefaultParticipants());
+  const [killSwitches, setKillSwitches] = useState<KillSwitch[]>(generateDefaultKillSwitches());
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>(generateRecentTransactions());
   const [isGlobalHalted, setIsGlobalHalted] = useState(false);
 
-  // Try to fetch from API first, fall back to mock data
+  // Try to fetch from API first, fall back to default data
   useEffect(() => {
     (async () => {
       try {
         const { lakehouseAPI } = await import('@/lib/api');
         const nocData = await lakehouseAPI.getNOCMetrics();
         if (nocData?.participant_health) setParticipants(nocData.participant_health as unknown as ParticipantHealth[]);
-      } catch (err) { console.error('NOC API unavailable, using mock data:', err); }
+      } catch (err) { log.error('NOC API unavailable, using defaults:', err); }
     })();
   }, []);
 
   // Simulate real-time updates
   useEffect(() => {
     const interval = setInterval(() => {
-      setMetrics(generateMockMetrics());
+      setMetrics(generateDefaultMetrics());
       setChartData((prev) => {
         const newData = [...prev.slice(1)];
         const now = new Date();

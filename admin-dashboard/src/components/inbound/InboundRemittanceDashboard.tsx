@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import React, { useState, useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 
@@ -86,7 +87,7 @@ export default function InboundRemittanceDashboard() {
   const fetcher = useCallback(() =>
     lakehouseAPI.fetch<{ corridors: Corridor[]; banks: ReceivingBank[]; transfers: Transfer[] }>('/api/v1/remittances/inbound')
       .then(d => ({ corridors: d.corridors, banks: d.banks, transfers: d.transfers }))
-      .catch((err: unknown) => { console.error("API fallback:", err); return { corridors, banks: receivingBanks, transfers }; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return { corridors, banks: receivingBanks, transfers }; }), []);
   const { data: apiData } = useLakehouseData(fetcher, 30000);
   const activeCorridors = apiData?.corridors || corridors;
   const activeBanks = apiData?.banks || receivingBanks;

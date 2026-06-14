@@ -87,11 +87,11 @@ async function seedTestUsers(): Promise<void> {
       const existing = await db
         .select()
         .from(users)
-        .where(eq(users.openId, user.openId))
+        .where(eq(users.sub, user.openId))
         .limit(1);
 
       await upsertUser({
-        openId: user.openId,
+        sub: user.openId,
         name: user.name,
         email: user.email,
         role: user.role,

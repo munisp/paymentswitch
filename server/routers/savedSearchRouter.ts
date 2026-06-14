@@ -14,11 +14,11 @@ export const savedSearchRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       if (input.isDefault) {
-        await db.getDb().update(savedSearches)
+        await (await db.requireDb()).update(savedSearches)
           .set({ isDefault: false })
           .where(and(eq(savedSearches.userId, ctx.user.id), eq(savedSearches.searchType, input.searchType)));
       }
-      const [saved] = await db.getDb().insert(savedSearches).values({
+      const [saved] = await (await db.requireDb()).insert(savedSearches).values({
         userId: ctx.user.id,
         name: input.name,
         searchType: input.searchType,
@@ -33,7 +33,7 @@ export const savedSearchRouter = router({
     .query(async ({ ctx, input }) => {
       const conditions = [eq(savedSearches.userId, ctx.user.id)];
       if (input?.searchType) conditions.push(eq(savedSearches.searchType, input.searchType));
-      return await db.getDb().select().from(savedSearches)
+      return await (await db.requireDb()).select().from(savedSearches)
         .where(and(...conditions))
         .orderBy(desc(savedSearches.createdAt));
     }),
@@ -41,7 +41,7 @@ export const savedSearchRouter = router({
   delete: protectedProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ ctx, input }) => {
-      await db.getDb().delete(savedSearches)
+      await (await db.requireDb()).delete(savedSearches)
         .where(and(eq(savedSearches.id, input.id), eq(savedSearches.userId, ctx.user.id)));
       return { success: true };
     }),

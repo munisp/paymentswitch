@@ -170,12 +170,8 @@ export function validateURL(url: string): boolean {
  * Generate API key
  */
 export function generateAPIKey(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let apiKey = '';
-  for (let i = 0; i < 32; i++) {
-    apiKey += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return `pk_${apiKey}`;
+  const { randomBytes } = require('crypto');
+  return `pk_${randomBytes(24).toString('base64url')}`;
 }
 
 /**

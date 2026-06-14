@@ -59,9 +59,9 @@ export async function validateGoLiveReadiness(applicationId: number): Promise<{
   const missingItems: string[] = [];
 
   if (!checklist.certificationPassed) missingItems.push("Certification not passed");
-  if (!checklist.securityAuditCompleted) missingItems.push("Security audit not completed");
+  if (!checklist.securityAuditComplete) missingItems.push("Security audit not completed");
   if (!checklist.complianceVerified) missingItems.push("Compliance not verified");
-  if (!checklist.integrationTested) missingItems.push("Integration not tested");
+  if (!checklist.integrationTestsPassed) missingItems.push("Integration not tested");
   if (!checklist.documentationReviewed) missingItems.push("Documentation not reviewed");
   if (!checklist.supportContactsProvided) missingItems.push("Support contacts not provided");
   if (!checklist.disasterRecoveryPlanSubmitted) missingItems.push("Disaster recovery plan not submitted");
@@ -93,11 +93,11 @@ export async function initializeGoLiveChecklist(applicationId: number) {
   }
 
   // Create new checklist
-  const result = await db.insert(goLiveChecklist).values({
+  const [inserted] = await db.insert(goLiveChecklist).values({
     applicationId,
-  });
+  }).returning({ id: goLiveChecklist.id });
 
-  return { id: result[0].insertId, applicationId };
+  return { id: inserted.id, applicationId };
 }
 
 /**
@@ -107,9 +107,9 @@ export async function updateChecklistItem(
   applicationId: number,
   updates: Partial<{
     certificationPassed: boolean;
-    securityAuditCompleted: boolean;
+    securityAuditComplete: boolean;
     complianceVerified: boolean;
-    integrationTested: boolean;
+    integrationTestsPassed: boolean;
     documentationReviewed: boolean;
     supportContactsProvided: boolean;
     disasterRecoveryPlanSubmitted: boolean;
@@ -134,18 +134,18 @@ export async function updateChecklistItem(
   if (checklist) {
     const allCompleted =
       checklist.certificationPassed &&
-      checklist.securityAuditCompleted &&
+      checklist.securityAuditComplete &&
       checklist.complianceVerified &&
-      checklist.integrationTested &&
+      checklist.integrationTestsPassed &&
       checklist.documentationReviewed &&
       checklist.supportContactsProvided &&
       checklist.disasterRecoveryPlanSubmitted &&
       checklist.productionEndpointsConfigured;
 
-    if (allCompleted !== checklist.allItemsCompleted) {
+    if (allCompleted !== (checklist.status === 'completed')) {
       await db
         .update(goLiveChecklist)
-        .set({ allItemsCompleted: allCompleted })
+        .set({ status: allCompleted ? 'completed' : 'pending' })
         .where(eq(goLiveChecklist.applicationId, applicationId));
     }
   }
@@ -181,21 +181,20 @@ export async function requestProductionAccess(
   const webhookSecret = generateWebhookSecret();
 
   // Create production credentials
-  const result = await db.insert(productionCredentials).values({
+  const [credInserted] = await db.insert(productionCredentials).values({
     applicationId,
-    userId,
+    apiKey,
+    apiSecret,
     productionApiKey: apiKey,
     productionApiSecret: apiSecret,
     productionWebhookSecret: webhookSecret,
-    productionEndpoint: config.productionEndpoint,
-    productionWebhookUrl: config.productionWebhookUrl || null,
     dailyTransactionLimit: config.dailyTransactionLimit,
     monthlyTransactionLimit: config.monthlyTransactionLimit || null,
     status: "pending",
-  });
+  }).returning({ id: productionCredentials.id });
 
   return {
-    id: result[0].insertId,
+    id: credInserted.id,
     apiKey,
     apiSecret,
     webhookSecret,
@@ -216,8 +215,6 @@ export async function activateProductionAccess(
     .update(productionCredentials)
     .set({
       status: "active",
-      activatedAt: new Date(),
-      activatedBy: adminUserId,
     })
     .where(eq(productionCredentials.id, credentialId));
 
@@ -286,9 +283,16 @@ export async function recordMonitoringMetrics(
   if (!db) throw new Error("Database not available");
 
   await db.insert(productionMonitoring).values({
+    applicationId: 0,
     credentialId,
     date: new Date(),
-    ...metrics,
+    totalTransactions: metrics.totalTransactions,
+    successfulTransactions: metrics.successfulTransactions,
+    failedTransactions: metrics.failedTransactions,
+    averageResponseTime: metrics.averageResponseTime,
+    uptimePercentage: metrics.uptimePercentage?.toString(),
+    errorRate: metrics.errorRate?.toString(),
+    activeAlerts: metrics.alertsTriggered,
   });
 
   return { success: true };
@@ -314,13 +318,23 @@ export async function createIncidentReport(
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const result = await db.insert(incidentReports).values({
+  const incidentTypeMap: Record<string, "outage" | "degradation" | "security" | "data_breach" | "other"> = {
+    outage: "outage", performance_degradation: "degradation", security_breach: "security",
+    data_issue: "data_breach", integration_failure: "other", other: "other",
+  };
+  const [incidentInserted] = await db.insert(incidentReports).values({
+    applicationId: 0,
     credentialId,
-    reportedBy: userId,
-    ...incident,
-  });
+    assignedTo: userId,
+    incidentType: incidentTypeMap[incident.incidentType] ?? "other",
+    severity: incident.severity,
+    title: incident.title,
+    description: incident.description,
+    detectedAt: incident.occurredAt,
+    occurredAt: incident.occurredAt,
+  }).returning({ id: incidentReports.id });
 
-  return { id: result[0].insertId };
+  return { id: incidentInserted.id };
 }
 
 /**

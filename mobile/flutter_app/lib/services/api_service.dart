@@ -159,4 +159,37 @@ class ApiService {
 
   Future<Response> healthCheck() =>
       _dio.get('/api/trpc/resilience.healthCheck');
+
+  // Account Activity
+  Future<Response> getAccountActivity({int page = 1, int limit = 50}) =>
+      _dio.get('/api/trpc/accountActivity.list', queryParameters: {'input': '{"json":{"page":$page,"limit":$limit}}'});
+
+  // Rate Alerts
+  Future<Response> getRateAlerts() =>
+      _dio.get('/api/trpc/rateAlerts.list');
+
+  Future<Response> createRateAlert(Map<String, dynamic> data) =>
+      _dio.post('/api/trpc/rateAlerts.create', data: {'json': data});
+
+  // Notification Settings
+  Future<Response> getNotificationSettings() =>
+      _dio.get('/api/trpc/notificationSettings.get');
+
+  Future<Response> updateNotificationSettings(Map<String, dynamic> data) =>
+      _dio.post('/api/trpc/notificationSettings.update', data: {'json': data});
+
+  // Inbound Remittance
+  Future<Response> getInboundRemittances({int page = 1}) =>
+      _dio.get('/api/trpc/inboundRemittance.list', queryParameters: {'input': '{"json":{"page":$page}}'});
+
+  // Settlements
+  Future<Response> getSettlements({int page = 1}) =>
+      _dio.get('/api/trpc/settlements.list', queryParameters: {'input': '{"json":{"page":$page}}'});
+
+  // Two-Factor Authentication
+  Future<Response> getTwoFactorStatus() =>
+      _dio.get('/api/trpc/twoFactor.getStatus');
+
+  Future<Response> enableTwoFactor(Map<String, dynamic> data) =>
+      _dio.post('/api/trpc/twoFactor.enable', data: {'json': data});
 }

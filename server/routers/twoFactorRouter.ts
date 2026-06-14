@@ -232,7 +232,7 @@ export const twoFactorRouter = router({
       
       const newSessionToken = await sdk.signSession(
         {
-          openId: ctx.user.openId,
+          openId: ctx.user.sub,
           appId: ctx.session?.appId || process.env.VITE_APP_ID || '',
           name: ctx.user.name || '',
           twoFactorVerified: true,

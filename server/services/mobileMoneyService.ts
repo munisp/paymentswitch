@@ -122,7 +122,8 @@ export async function sendMobileMoneyTransfer(params: {
   narration?: string;
 }): Promise<MobileMoneyTransfer> {
   // Generate reference
-  const reference = `MOMO_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const { randomBytes } = require('crypto');
+  const reference = `MOMO_${Date.now()}_${randomBytes(5).toString('hex')}`;
 
   // Validate amount limits
   const providerInfo = getMobileMoneyProviders().find(p => p.id === params.provider);

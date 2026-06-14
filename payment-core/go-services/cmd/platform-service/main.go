@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/payment-switch/go-services/internal/integration"
+	"github.com/payment-switch/go-services/pkg/middleware"
 )
 
 var port = getEnv("PLATFORM_PORT", "8081")
@@ -82,9 +83,17 @@ func main() {
 		w.Write(data)
 	})
 
+	// RBAC auth middleware — skips health endpoints
+	rbac := middleware.NewRBACMiddleware(&middleware.RBACConfig{
+		JWTSecret:          getEnv("JWT_SECRET", "payment-switch-secret"),
+		JWTIssuer:          getEnv("JWT_ISSUER", "payment-switch"),
+		SkipPaths:          []string{"/health", "/smoke-test"},
+		EnableAuditLogging: true,
+	})
+
 	server := &http.Server{
 		Addr:         ":" + port,
-		Handler:      mux,
+		Handler:      rbac.Authenticate(mux),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,

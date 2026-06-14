@@ -40,7 +40,7 @@ export default function AdminDashboard() {
         certified: 0,
         production: 0,
       },
-    },
+    } as any,
   });
   const { data: participantsData, isLoading: participantsLoading } = trpc.admin.listParticipants.useQuery({
     page: currentPage,

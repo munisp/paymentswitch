@@ -9,12 +9,12 @@ import { randomBytes } from "crypto";
 export const referralRouter = router({
   getMyCode: protectedProcedure
     .query(async ({ ctx }) => {
-      const [existing] = await db.getDb().select().from(referrals)
+      const [existing] = await (await db.requireDb()).select().from(referrals)
         .where(eq(referrals.referrerId, ctx.user.id))
         .limit(1);
       if (existing) return { code: existing.referralCode };
       const code = `REF-${randomBytes(4).toString("hex").toUpperCase()}`;
-      await db.getDb().insert(referrals).values({
+      await (await db.requireDb()).insert(referrals).values({
         referrerId: ctx.user.id,
         referralCode: code,
       });
@@ -24,11 +24,11 @@ export const referralRouter = router({
   applyCode: protectedProcedure
     .input(z.object({ code: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const [referral] = await db.getDb().select().from(referrals)
+      const [referral] = await (await db.requireDb()).select().from(referrals)
         .where(eq(referrals.referralCode, input.code));
       if (!referral) throw new TRPCError({ code: "NOT_FOUND", message: "Invalid referral code" });
       if (referral.referrerId === ctx.user.id) throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot use your own referral code" });
-      const [updated] = await db.getDb().update(referrals)
+      const [updated] = await (await db.requireDb()).update(referrals)
         .set({
           referredUserId: ctx.user.id,
           status: "completed",
@@ -42,7 +42,7 @@ export const referralRouter = router({
 
   myReferrals: protectedProcedure
     .query(async ({ ctx }) => {
-      const items = await db.getDb().select().from(referrals)
+      const items = await (await db.requireDb()).select().from(referrals)
         .where(eq(referrals.referrerId, ctx.user.id))
         .orderBy(desc(referrals.createdAt));
       const totalRewards = items.reduce((sum, r) => sum + parseFloat(r.rewardAmount), 0);
@@ -55,7 +55,7 @@ export const referralRouter = router({
       if (ctx.user.role !== "admin") {
         throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
       }
-      const all = await db.getDb().select().from(referrals).orderBy(desc(referrals.createdAt));
+      const all = await (await db.requireDb()).select().from(referrals).orderBy(desc(referrals.createdAt));
       const totalRewards = all.reduce((sum, r) => sum + parseFloat(r.rewardAmount), 0);
       return {
         totalReferrals: all.length,

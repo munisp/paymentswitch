@@ -54,7 +54,7 @@ export async function sendSMS(params: SendSMSParams): Promise<{ success: boolean
 
       if (!response.ok) {
         const error = await response.text();
-        log.error('[SMS] Failed to send SMS:', error);
+        log.error({ err: error }, '[SMS] Failed to send SMS:');
         return { success: false, error: 'Failed to send SMS' };
       }
 
@@ -62,7 +62,7 @@ export async function sendSMS(params: SendSMSParams): Promise<{ success: boolean
       log.info('[SMS] SMS sent successfully:', data.sid);
       return { success: true };
     } catch (error) {
-      log.error('[SMS] Error sending SMS:', error);
+      log.error({ err: error }, '[SMS] Error sending SMS:');
       return { success: false, error: 'SMS service error' };
     }
   }
@@ -104,7 +104,7 @@ ${params.message}
     await fs.writeFile(filepath, smsContent, 'utf-8');
     log.info(`[SMS] Saved to: ${filepath}`);
   } catch (error) {
-    log.error('[SMS] Failed to save SMS to file:', error);
+    log.error({ err: error }, '[SMS] Failed to save SMS to file:');
   }
 
   return { success: true };

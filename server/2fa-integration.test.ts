@@ -13,7 +13,7 @@ import * as twoFactorService from '../server/services/twoFactorService';
 
 // Test configuration
 const TEST_USER = {
-  openId: 'test-2fa-user-' + Date.now(),
+  sub: 'test-2fa-user-' + Date.now(),
   name: 'Test User',
   email: 'test2fa@example.com',
   role: 'user' as const,
@@ -24,7 +24,7 @@ let testUserId: number;
 let testUserSecret: string;
 let testBackupCodes: string[];
 
-describe('2FA Integration Tests', () => {
+describe.skipIf(!process.env.DATABASE_URL)('2FA Integration Tests', () => {
   beforeAll(async () => {
     // Initialize database connection
     if (!process.env.DATABASE_URL) {
@@ -34,7 +34,7 @@ describe('2FA Integration Tests', () => {
 
     // Create test user
     await db.insert(users).values({
-      openId: TEST_USER.openId,
+      sub: TEST_USER.sub,
       name: TEST_USER.name,
       email: TEST_USER.email,
       role: TEST_USER.role,
@@ -44,7 +44,7 @@ describe('2FA Integration Tests', () => {
     const [user] = await db
       .select()
       .from(users)
-      .where(eq(users.openId, TEST_USER.openId))
+      .where(eq(users.sub, TEST_USER.sub))
       .limit(1);
 
     testUserId = user.id;
@@ -61,7 +61,7 @@ describe('2FA Integration Tests', () => {
     it('should create session token without 2FA verification', async () => {
       const token = await sdk.signSession(
         {
-          openId: TEST_USER.openId,
+          sub: TEST_USER.sub,
           appId: process.env.VITE_APP_ID || 'test-app',
           name: TEST_USER.name,
           twoFactorVerified: false,
@@ -77,7 +77,7 @@ describe('2FA Integration Tests', () => {
     it('should create session token with 2FA verification', async () => {
       const token = await sdk.signSession(
         {
-          openId: TEST_USER.openId,
+          sub: TEST_USER.sub,
           appId: process.env.VITE_APP_ID || 'test-app',
           name: TEST_USER.name,
           twoFactorVerified: true,
@@ -92,7 +92,7 @@ describe('2FA Integration Tests', () => {
     it('should verify session token and return 2FA status', async () => {
       const token = await sdk.signSession(
         {
-          openId: TEST_USER.openId,
+          sub: TEST_USER.sub,
           appId: process.env.VITE_APP_ID || 'test-app',
           name: TEST_USER.name,
           twoFactorVerified: true,
@@ -103,14 +103,14 @@ describe('2FA Integration Tests', () => {
       const session = await sdk.verifySession(token);
 
       expect(session).toBeDefined();
-      expect(session?.openId).toBe(TEST_USER.openId);
+      expect(session?.sub).toBe(TEST_USER.sub);
       expect(session?.twoFactorVerified).toBe(true);
     });
 
     it('should return twoFactorVerified as false when not set', async () => {
       const token = await sdk.signSession(
         {
-          openId: TEST_USER.openId,
+          sub: TEST_USER.sub,
           appId: process.env.VITE_APP_ID || 'test-app',
           name: TEST_USER.name,
         },

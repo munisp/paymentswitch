@@ -95,10 +95,10 @@ export const fxRiskRouter = router({
     } catch {
       return Object.entries(currentRates).map(([pair, rate]) => ({
         currencyPair: pair,
-        netExposure: Math.floor(Math.random() * 5000000000),
-        dailyVolume: Math.floor(Math.random() * 20000000000),
+        netExposure: 0,
+        dailyVolume: 0,
         currentRate: rate,
-        hedgeRatio: Math.random() * 0.3 + 0.6,
+        hedgeRatio: 0,
       }));
     }
   }),
@@ -136,7 +136,7 @@ export const fxRiskRouter = router({
 
       const history = [];
       for (let i = points; i >= 0; i--) {
-        const variation = (Math.random() - 0.5) * baseRate * 0.02;
+        const variation = Math.sin(i * 0.1) * baseRate * 0.005;
         history.push({
           timestamp: new Date(Date.now() - i * interval).toISOString(),
           rate: baseRate + variation,

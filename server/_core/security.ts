@@ -10,6 +10,7 @@ const log = createChildLogger('security');
  */
 class RateLimitStore {
   private memoryStore = new Map<string, { count: number; resetAt: number }>();
+  private accessCount = 0;
   private redisUrl: string | undefined;
   private redisAvailable = false;
 
@@ -38,7 +39,7 @@ class RateLimitStore {
     };
     this.memoryStore.set(key, newEntry);
 
-    if (Math.random() < 0.01) {
+    if (++this.accessCount % 100 === 0) {
       this.cleanup();
     }
 

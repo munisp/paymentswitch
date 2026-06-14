@@ -35,12 +35,14 @@ import { formatDistanceToNow } from 'date-fns';
 interface RecoveryRequest {
   id: number;
   userId: number;
-  recoveryMethod: 'email' | 'sms' | 'admin';
-  status: 'pending' | 'approved' | 'rejected' | 'completed' | 'expired';
-  requestedAt: Date;
+  recoveryMethod: string;
+  status: string;
+  requestedAt?: Date;
   expiresAt: Date;
   ipAddress?: string | null;
   userAgent?: string | null;
+  createdAt?: Date;
+  [key: string]: any;
 }
 
 export default function RecoveryRequests() {
@@ -252,7 +254,7 @@ export default function RecoveryRequests() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Requested:</span>
-                  <span>{formatDistanceToNow(new Date(selectedRequest.requestedAt), { addSuffix: true })}</span>
+                  <span>{formatDistanceToNow(new Date(selectedRequest.requestedAt ?? selectedRequest.createdAt ?? new Date()), { addSuffix: true })}</span>
                 </div>
                 {selectedRequest.ipAddress && (
                   <div className="flex justify-between">

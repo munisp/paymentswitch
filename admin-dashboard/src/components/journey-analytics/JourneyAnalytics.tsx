@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import { useState, useEffect, useCallback } from 'react';
 
 interface JourneyMetric {
@@ -30,7 +31,7 @@ const defaultMetrics: JourneyMetric[] = [
   { journeyId: 8, journeyName: 'Remittance FX Transfer', totalRuns: 5600, successRate: 97.3, avgDuration: '3.5s', lastRun: '3 min ago', trend: 'up' },
 ];
 
-const mockDailyData: DailyMetric[] = [
+const defaultDailyData: DailyMetric[] = [
   { date: 'Mon', runs: 12500, success: 12300, failed: 200 },
   { date: 'Tue', runs: 13200, success: 13000, failed: 200 },
   { date: 'Wed', runs: 11800, success: 11600, failed: 200 },
@@ -45,7 +46,7 @@ export default function JourneyAnalytics() {
   useEffect(() => {
     fetch('http://localhost:8080/api/v1/journeys/analytics')
       .then(r => r.json()).then(d => setApiMetrics(d.metrics))
-      .catch((err: unknown) => { console.error("API fallback:", err); setApiMetrics(defaultMetrics); });
+      .catch((err: unknown) => { logger.error("API fallback:", err); setApiMetrics(defaultMetrics); });
   }, []);
   const metrics = apiMetrics || defaultMetrics;
   const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d'>('7d');
@@ -124,8 +125,8 @@ export default function JourneyAnalytics() {
           Journey Runs Over Time
         </h2>
         <div className="h-64 flex items-end gap-2 md:gap-4">
-          {mockDailyData.map((day, index) => {
-            const maxRuns = Math.max(...mockDailyData.map(d => d.runs));
+          {defaultDailyData.map((day, index) => {
+            const maxRuns = Math.max(...defaultDailyData.map(d => d.runs));
             const successHeight = (day.success / maxRuns) * 100;
             const failedHeight = (day.failed / maxRuns) * 100;
             

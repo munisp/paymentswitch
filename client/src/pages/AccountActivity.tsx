@@ -50,7 +50,7 @@ export default function AccountActivity() {
       }
     } catch (error) {
       toast.error('Failed to end session');
-      log.error(error);
+      log.error(String(error));
     } finally {
       setSessionToEnd(null);
     }
@@ -69,7 +69,7 @@ export default function AccountActivity() {
       }
     } catch (error) {
       toast.error('Failed to end sessions');
-      log.error(error);
+      log.error(String(error));
     } finally {
       setShowEndAllDialog(false);
     }

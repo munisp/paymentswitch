@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"sync"
@@ -134,7 +134,7 @@ type ProbabilitySampler struct {
 func NewProbabilitySampler(probability float64) *ProbabilitySampler {
 	return &ProbabilitySampler{
 		probability: probability,
-		rng:         rand.New(rand.NewSource(time.Now().UnixNano())),
+		rng:         rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 0)),
 	}
 }
 
@@ -428,18 +428,18 @@ func parseTraceParent(header string) (*SpanContext, error) {
 
 func generateTraceID() TraceID {
 	var t TraceID
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rng := rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 0))
 	for i := range t {
-		t[i] = byte(rng.Intn(256))
+		t[i] = byte(rng.IntN(256))
 	}
 	return t
 }
 
 func generateSpanID() SpanID {
 	var s SpanID
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rng := rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), 0))
 	for i := range s {
-		s[i] = byte(rng.Intn(256))
+		s[i] = byte(rng.IntN(256))
 	}
 	return s
 }

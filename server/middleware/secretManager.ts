@@ -327,7 +327,7 @@ export class SecretRotationScheduler {
         }
         log.info(`[SecretRotation] Rotated secret: ${path}`);
       } catch (error) {
-        log.error(`[SecretRotation] Failed to rotate secret ${path}:`, error);
+        log.error({ err: error }, `[SecretRotation] Failed to rotate secret ${path}:`);
       }
     }, intervalMs);
 
@@ -344,7 +344,7 @@ export class SecretRotationScheduler {
   }
 
   cancelAllRotations(): void {
-    for (const path of this.rotationIntervals.keys()) {
+    for (const path of Array.from(this.rotationIntervals.keys())) {
       this.cancelRotation(path);
     }
   }

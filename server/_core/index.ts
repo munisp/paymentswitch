@@ -12,6 +12,8 @@ import { startRetryProcessor } from "../onboarding/retryScheduler";
 import { startTestScheduler } from "../onboarding/testScheduler";
 import { startRateAlertMonitor } from "../jobs/rateAlertMonitor";
 import { startCleanupJob } from "../jobs/cleanupJob";
+import { seedOutboundData } from "../services/outboundRemittanceDbService";
+import { startTransferLifecycleWorker, stopTransferLifecycleWorker } from "../services/transferLifecycleWorker";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { generalRateLimiter, rateLimitErrorHandler } from "../middleware/rateLimitMiddleware";
 import { registerOAuthRoutes } from "./oauth";
@@ -166,7 +168,7 @@ async function startServer() {
     logger.warn({ preferredPort, port }, 'Port busy, using alternative');
   }
 
-  server.listen(port, () => {
+  server.listen(port, async () => {
     logger.info({ port, env: process.env.NODE_ENV }, 'Server started');
     
     // Start webhook retry processor
@@ -180,6 +182,16 @@ async function startServer() {
     
     // Start cleanup job
     startCleanupJob();
+    
+    // Seed outbound remittance data (idempotent — only runs if tables are empty)
+    try {
+      await seedOutboundData();
+    } catch (err) {
+      logger.warn({ err }, 'Outbound remittance seeding skipped');
+    }
+    
+    // Start transfer lifecycle background worker
+    startTransferLifecycleWorker();
   });
 
   // Graceful shutdown handler
@@ -204,6 +216,9 @@ async function startServer() {
     forceExit.unref();
 
     try {
+      // Stop background workers
+      stopTransferLifecycleWorker();
+      
       // Drain database pool
       const db = await import("../db");
       // getDb initializes pool; on shutdown we just log

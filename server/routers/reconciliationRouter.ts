@@ -1,8 +1,13 @@
 import { z } from 'zod';
 import { router, protectedProcedure } from '../_core/trpc';
 import { TRPCError } from '@trpc/server';
+import { randomBytes } from 'crypto';
 import { createChildLogger } from '../lib/logger';
 const log = createChildLogger('reconciliationRouter');
+
+function secureId(prefix: string): string {
+  return `${prefix}-${randomBytes(6).toString('hex').toUpperCase()}`;
+}
 
 const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
   if (ctx.user.role !== 'admin') {
@@ -49,10 +54,12 @@ export const reconciliationRouter = router({
     .mutation(async ({ ctx, input }) => {
       log.info({ ...input, userId: ctx.user.id }, 'Reconciliation started');
 
-      const id = `REC-${Date.now().toString(36).toUpperCase()}`;
-      const matched = Math.floor(Math.random() * 5000) + 10000;
-      const mismatched = Math.floor(Math.random() * 10);
-      const missing = Math.floor(Math.random() * 5);
+      const id = secureId('REC');
+      // Reconciliation results are computed from actual DB/ledger comparison.
+      // Until a live ledger is connected, return zero-state results.
+      const matched = 0;
+      const mismatched = 0;
+      const missing = 0;
 
       const result = {
         id,
@@ -75,9 +82,9 @@ export const reconciliationRouter = router({
           id: `EXC-${Date.now().toString(36)}-${i}`,
           reconciliationId: id,
           type: 'amount_mismatch',
-          transactionId: `TXN-${Math.random().toString(36).slice(2, 10)}`,
-          dbAmount: Math.floor(Math.random() * 1000000),
-          ledgerAmount: Math.floor(Math.random() * 1000000),
+          transactionId: secureId('TXN'),
+          dbAmount: 0,
+          ledgerAmount: 0,
           status: 'pending',
           resolution: null,
           resolvedBy: null,
@@ -134,11 +141,11 @@ export const reconciliationRouter = router({
     const accounts = ['MAIN_OPERATING', 'SETTLEMENT_POOL', 'FEE_COLLECTION', 'ESCROW', 'FLOAT'];
     return accounts.map(account => ({
       account,
-      dbBalance: Math.floor(Math.random() * 100000000000),
-      ledgerBalance: Math.floor(Math.random() * 100000000000),
+      dbBalance: 0,
+      ledgerBalance: 0,
       get variance() { return Math.abs(this.dbBalance - this.ledgerBalance); },
       get matched() { return this.variance < 100; },
-      lastReconciled: new Date(Date.now() - Math.random() * 86400000).toISOString(),
+      lastReconciled: new Date().toISOString(),
     }));
   }),
 });

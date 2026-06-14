@@ -2,6 +2,7 @@ package disputes
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"sort"
@@ -177,6 +178,7 @@ type DisputeService struct {
 	mu        sync.RWMutex
 	disputes  map[string]*Dispute
 	slaConfig SLAConfig
+	db        *sql.DB
 }
 
 func NewDisputeService(slaConfig *SLAConfig) *DisputeService {
@@ -243,6 +245,7 @@ func (s *DisputeService) CreateDispute(params struct {
 	s.mu.Lock()
 	s.disputes[dispute.ID] = dispute
 	s.mu.Unlock()
+	go s.persistDispute(dispute)
 
 	return dispute
 }
@@ -288,6 +291,7 @@ func (s *DisputeService) UpdateStatus(disputeID string, status DisputeStatus, ac
 		dispute.EscalatedAt = &now
 	}
 
+	go s.persistDispute(dispute)
 	return dispute, nil
 }
 
@@ -321,6 +325,7 @@ func (s *DisputeService) AssignDispute(disputeID, assignee, actor string) (*Disp
 		Timestamp:   time.Now(),
 	})
 
+	go s.persistDispute(dispute)
 	return dispute, nil
 }
 
@@ -360,6 +365,7 @@ func (s *DisputeService) AddEvidence(disputeID string, evidence struct {
 		Timestamp:   time.Now(),
 	})
 
+	go s.persistDispute(dispute)
 	return dispute, nil
 }
 
@@ -381,6 +387,7 @@ func (s *DisputeService) AddComment(disputeID, comment, actor string) (*Dispute,
 	})
 
 	dispute.UpdatedAt = time.Now()
+	go s.persistDispute(dispute)
 	return dispute, nil
 }
 
@@ -423,6 +430,7 @@ func (s *DisputeService) ResolveDispute(disputeID string, resolution struct {
 		},
 	})
 
+	go s.persistDispute(dispute)
 	return dispute, nil
 }
 
@@ -449,6 +457,7 @@ func (s *DisputeService) EscalateDispute(disputeID, reason, actor string) (*Disp
 		Timestamp:   time.Now(),
 	})
 
+	go s.persistDispute(dispute)
 	return dispute, nil
 }
 

@@ -6,12 +6,23 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	_ "github.com/lib/pq"
 )
+
+var validIdentifier = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+func validateIdentifier(name string) error {
+	if !validIdentifier.MatchString(name) {
+		return fmt.Errorf("invalid SQL identifier: %q", name)
+	}
+	return nil
+}
 
 // RealPostgresClient implements Postgres operations with connection pooling
 type RealPostgresClient struct {
@@ -55,7 +66,7 @@ func DefaultRealPostgresConfig() RealPostgresConfig {
 		Port:            5432,
 		Database:        "payment_switch",
 		User:            "postgres",
-		Password:        "",
+		Password:        os.Getenv("POSTGRES_PASSWORD"),
 		SSLMode:         "prefer",
 		MaxOpenConns:    100,
 		MaxIdleConns:    25,
@@ -271,7 +282,16 @@ func (c *RealPostgresClient) BatchInsert(ctx context.Context, table string, colu
 	}
 	defer tx.Rollback()
 
-	// Build multi-row INSERT statement
+	// Validate table and column names to prevent SQL injection
+	if err := validateIdentifier(table); err != nil {
+		return fmt.Errorf("invalid table name: %w", err)
+	}
+	for _, col := range columns {
+		if err := validateIdentifier(col); err != nil {
+			return fmt.Errorf("invalid column name: %w", err)
+		}
+	}
+
 	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES ", table, joinStrings(columns, ", "))
 
 	var args []interface{}

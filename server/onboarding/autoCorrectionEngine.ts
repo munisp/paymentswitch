@@ -56,7 +56,7 @@ async function getThresholdSettings(): Promise<ThresholdSettings> {
     );
 
   const settingsMap = settings.reduce((acc, setting) => {
-    acc[setting.settingKey] = setting.settingValue;
+    if (setting.settingKey) acc[setting.settingKey] = setting.settingValue ?? '';
     return acc;
   }, {} as Record<string, string>);
 

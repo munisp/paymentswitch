@@ -67,8 +67,8 @@ export default function OpenSearchDashboard() {
     );
   }
 
-  const errorLogs = logs.filter((l) => l.level?.toLowerCase() === "error").length;
-  const criticalEvents = securityEvents.filter((e) => e.severity === "critical").length;
+  const errorLogs = logs.filter((l: any) => l.level?.toLowerCase() === "error").length;
+  const criticalEvents = securityEvents.filter((e: any) => e.severity === "critical").length;
 
   return (
     <div className="space-y-6">
@@ -175,13 +175,13 @@ export default function OpenSearchDashboard() {
               </TableHeader>
               <TableBody>
                 {logs
-                  .filter((log) =>
+                  .filter((log: any) =>
                     searchQuery
                       ? log.message?.toLowerCase().includes(searchQuery.toLowerCase())
                       : true
                   )
                   .slice(0, 20)
-                  .map((log, idx) => (
+                  .map((log: any, idx: number) => (
                     <TableRow key={idx}>
                       <TableCell className="text-xs whitespace-nowrap">
                         {new Date(log.timestamp).toLocaleString()}
@@ -227,7 +227,7 @@ export default function OpenSearchDashboard() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {securityEvents.slice(0, 10).map((event, idx) => (
+                {securityEvents.slice(0, 10).map((event: any, idx: number) => (
                   <TableRow key={idx}>
                     <TableCell className="text-xs whitespace-nowrap">
                       {new Date(event.timestamp).toLocaleString()}

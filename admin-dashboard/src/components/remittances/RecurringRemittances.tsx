@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useState, useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import { RefreshCw, Plus, Search, Play, Pause, Trash2, Edit } from 'lucide-react';
@@ -35,7 +36,7 @@ export function RecurringRemittances() {
   const fetcher = useCallback(() =>
     lakehouseAPI.fetch<{ remittances: RecurringRemittance[] }>('/api/v1/remittances/recurring')
       .then(d => d.remittances)
-      .catch((err: unknown) => { console.error("API fallback:", err); return sampleRemittances; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return sampleRemittances; }), []);
   const { data: apiRemittances } = useLakehouseData(fetcher, 30000);
   const activeRemittances = apiRemittances || sampleRemittances;
   const [search, setSearch] = useState('');

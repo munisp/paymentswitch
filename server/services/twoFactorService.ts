@@ -202,7 +202,8 @@ export async function sendSmsVerificationCode(
   options: SmsTwoFactorOptions
 ): Promise<{ success: boolean; code: string; expiresAt: Date }> {
   // Generate 6-digit code
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const { randomInt } = require('crypto');
+  const code = String(randomInt(100000, 999999));
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
   // In production, integrate with SMS provider

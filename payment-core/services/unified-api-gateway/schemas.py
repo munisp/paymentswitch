@@ -1,4 +1,4 @@
-"""Pydantic schemas for $service_name service."""
+"""Pydantic schemas for unified-api-gateway service."""
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from datetime import datetime

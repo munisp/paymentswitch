@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import React, { useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import { Cpu, Activity, Zap, Shield, DollarSign, Clock } from 'lucide-react';
@@ -12,7 +13,7 @@ export function RustServices() {
   const fetcher = useCallback(() =>
     lakehouseAPI.fetch<{ services: typeof rustServices }>('/api/v1/infrastructure/rust-services')
       .then(d => d.services)
-      .catch((err: unknown) => { console.error("API fallback:", err); return rustServices; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return rustServices; }), []);
   const { data: services } = useLakehouseData(fetcher, 30000);
   const activeServices = services || rustServices;
   return (

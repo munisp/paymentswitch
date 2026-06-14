@@ -51,7 +51,7 @@ export default function PaymentStatusTracker({
 
   const fetchPaymentStatus = async () => {
     try {
-      const result = await trpc.remittance.getRemittance.query({ remittanceId: transactionID });
+      const result = await (trpc.remittance.getRemittance as any).query({ remittanceId: transactionID });
 
       setStatus({
         transactionID: result.remittanceId,

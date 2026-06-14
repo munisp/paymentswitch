@@ -38,7 +38,7 @@ export default function KubecostDashboard() {
   }
 
   const totalSavings = report?.recommendations?.reduce(
-    (sum, r) => sum + (r.monthly_savings || 0),
+    (sum: number, r: any) => sum + (r.monthly_savings || 0),
     0
   ) || 0;
 
@@ -131,7 +131,7 @@ export default function KubecostDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {report.by_namespace.slice(0, 10).map((ns, idx) => (
+                  {report.by_namespace.slice(0, 10).map((ns: any, idx: number) => (
                     <TableRow key={idx}>
                       <TableCell className="font-medium">{ns.namespace}</TableCell>
                       <TableCell>{formatCurrency(ns.cpu_cost || 0)}</TableCell>
@@ -175,7 +175,7 @@ export default function KubecostDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {report.recommendations.slice(0, 10).map((rec, idx) => (
+                  {report.recommendations.slice(0, 10).map((rec: any, idx: number) => (
                     <TableRow key={idx}>
                       <TableCell>
                         <Badge variant="outline">{rec.type}</Badge>
@@ -211,7 +211,7 @@ export default function KubecostDashboard() {
               <div className="text-sm text-blue-600 font-medium">CPU Costs</div>
               <div className="text-xl font-bold text-blue-800">
                 {formatCurrency(
-                  report?.by_namespace?.reduce((sum, ns) => sum + (ns.cpu_cost || 0), 0) || 0
+                  report?.by_namespace?.reduce((sum: number, ns: any) => sum + (ns.cpu_cost || 0), 0) || 0
                 )}
               </div>
             </div>
@@ -219,7 +219,7 @@ export default function KubecostDashboard() {
               <div className="text-sm text-purple-600 font-medium">RAM Costs</div>
               <div className="text-xl font-bold text-purple-800">
                 {formatCurrency(
-                  report?.by_namespace?.reduce((sum, ns) => sum + (ns.ram_cost || 0), 0) || 0
+                  report?.by_namespace?.reduce((sum: number, ns: any) => sum + (ns.ram_cost || 0), 0) || 0
                 )}
               </div>
             </div>
@@ -227,7 +227,7 @@ export default function KubecostDashboard() {
               <div className="text-sm text-green-600 font-medium">Storage Costs</div>
               <div className="text-xl font-bold text-green-800">
                 {formatCurrency(
-                  report?.by_namespace?.reduce((sum, ns) => sum + (ns.pv_cost || 0), 0) || 0
+                  report?.by_namespace?.reduce((sum: number, ns: any) => sum + (ns.pv_cost || 0), 0) || 0
                 )}
               </div>
             </div>
@@ -235,7 +235,7 @@ export default function KubecostDashboard() {
               <div className="text-sm text-orange-600 font-medium">Network Costs</div>
               <div className="text-xl font-bold text-orange-800">
                 {formatCurrency(
-                  report?.by_namespace?.reduce((sum, ns) => sum + (ns.network_cost || 0), 0) || 0
+                  report?.by_namespace?.reduce((sum: number, ns: any) => sum + (ns.network_cost || 0), 0) || 0
                 )}
               </div>
             </div>

@@ -146,8 +146,7 @@ const documentTypeLabels: Record<DocumentType, string> = {
   AUTHORIZATION_LETTER: 'Authorization Letter',
 };
 
-// Mock data
-const mockPersons: KYCPerson[] = [
+const defaultPersons: KYCPerson[] = [
   {
     id: 'KYC-001',
     kybCaseId: 'OB-2024-001',
@@ -230,7 +229,7 @@ const mockPersons: KYCPerson[] = [
   },
 ];
 
-const mockDetail: KYCDetail = {
+const defaultDetail: KYCDetail = {
   id: 'KYC-001',
   kybCaseId: 'OB-2024-001',
   organizationName: 'First National Bank',
@@ -440,13 +439,13 @@ export function KYCVerificationPortal() {
             createdAt: c.submittedAt,
             updatedAt: c.submittedAt,
           }));
-          setPersons(mappedPersons.length > 0 ? mappedPersons : mockPersons);
+          setPersons(mappedPersons.length > 0 ? mappedPersons : defaultPersons);
         } else {
-          setPersons(mockPersons);
+          setPersons([]);
         }
       } catch (error) {
         log.error('Error fetching KYC cases:', error);
-        setPersons(mockPersons);
+        setPersons([]);
       } finally {
         setLoading(false);
       }
@@ -493,7 +492,7 @@ export function KYCVerificationPortal() {
           createdAt: c.submittedAt || c.createdAt,
           updatedAt: c.submittedAt || c.updatedAt,
         }));
-        setPersons(mappedPersons.length > 0 ? mappedPersons : mockPersons);
+        setPersons(mappedPersons.length > 0 ? mappedPersons : defaultPersons);
       }
     } catch (error) {
       log.error('Error refetching KYC cases:', error);
@@ -540,12 +539,12 @@ export function KYCVerificationPortal() {
         };
         setSelectedPerson(detail);
       } else {
-        // Fallback to mock if API fails
-        setSelectedPerson(mockDetail);
+        // Fallback to empty state if API fails
+        setSelectedPerson(null);
       }
     } catch (error) {
       log.error('Error fetching KYC case details:', error);
-      setSelectedPerson(mockDetail);
+      setSelectedPerson(null);
     }
   };
 

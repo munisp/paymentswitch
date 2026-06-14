@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 )
@@ -159,7 +160,7 @@ func DefaultServiceMeshConfig() *ServiceMeshConfig {
 		TigerBeetle: MeshTigerBeetleConfig{Addresses: []string{"localhost:3000"}, ClusterID: 0},
 		Postgres:    MeshPostgresConfig{DSN: "postgres://payment:payment@localhost:5432/paymentswitch?sslmode=disable"},
 		Redis:       MeshRedisConfig{Addr: "localhost:6379", Password: "", DB: 0},
-		OpenSearch:  MeshOpenSearchConfig{URLs: []string{"http://localhost:9200"}, Username: "admin", Password: "admin"},
+		OpenSearch:  MeshOpenSearchConfig{URLs: []string{"http://localhost:9200"}, Username: os.Getenv("OPENSEARCH_USERNAME"), Password: os.Getenv("OPENSEARCH_PASSWORD")},
 	}
 }
 

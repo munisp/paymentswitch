@@ -32,7 +32,9 @@ export async function setKeyPermissions(params: {
   if (params.permissions.length > 0) {
     await db.insert(apiKeyPermissions).values(
       params.permissions.map((perm) => ({
+        apiKeyId: params.credentialId,
         credentialId: params.credentialId,
+        permission: perm.resource ?? '',
         resource: perm.resource,
         canRead: perm.canRead,
         canWrite: perm.canWrite,
@@ -55,10 +57,10 @@ export async function getKeyPermissions(credentialId: number): Promise<Permissio
     .where(eq(apiKeyPermissions.credentialId, credentialId));
 
   return perms.map((p) => ({
-    resource: p.resource,
-    canRead: p.canRead,
-    canWrite: p.canWrite,
-    canDelete: p.canDelete,
+    resource: p.resource ?? '',
+    canRead: !!p.canRead,
+    canWrite: !!p.canWrite,
+    canDelete: !!p.canDelete,
   }));
 }
 
@@ -88,11 +90,11 @@ export async function checkPermission(params: {
 
   switch (params.action) {
     case "read":
-      return perm.canRead;
+      return !!perm.canRead;
     case "write":
-      return perm.canWrite;
+      return !!perm.canWrite;
     case "delete":
-      return perm.canDelete;
+      return !!perm.canDelete;
     default:
       return false;
   }
@@ -110,14 +112,14 @@ export async function createPermissionTemplate(params: {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const [result] = await db.insert(apiPermissionTemplates).values({
+  const [permInserted] = await db.insert(apiPermissionTemplates).values({
     name: params.name,
     description: params.description,
     permissions: JSON.stringify(params.permissions),
-    isSystem: params.isSystem || false,
-  });
+    isDefault: params.isSystem || false,
+  }).returning({ id: apiPermissionTemplates.id });
 
-  return result.insertId;
+  return permInserted.id;
 }
 
 /**

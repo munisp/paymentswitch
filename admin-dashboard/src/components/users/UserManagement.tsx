@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import React, { useState, useEffect, useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import {
@@ -55,8 +56,7 @@ interface Role {
   permissions: string[];
 }
 
-// Mock data
-const mockUsers: User[] = [
+const defaultUsers: User[] = [
   {
     id: 'usr-001',
     username: 'john.adeyemi',
@@ -178,9 +178,9 @@ export function UserManagement() {
   const fetcher = useCallback(() =>
     lakehouseAPI.fetch<{ users: User[] }>('/api/v1/users')
       .then(d => d.users)
-      .catch((err: unknown) => { console.error("API fallback:", err); return mockUsers; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return []; }), []);
   const { data: apiUsers, loading } = useLakehouseData(fetcher, 30000);
-  const [users, setUsers] = useState<User[]>(mockUsers);
+  const [users, setUsers] = useState<User[]>(defaultUsers);
   useEffect(() => { if (apiUsers) setUsers(apiUsers); }, [apiUsers]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');

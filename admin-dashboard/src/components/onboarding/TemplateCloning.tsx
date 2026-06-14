@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import React, { useState, useEffect, useCallback } from 'react';
 import { lakehouseAPI, useLakehouseData } from '@/lib/api';
 import {
@@ -47,7 +48,7 @@ interface CloneRequest {
 
 const API_BASE = process.env.NEXT_PUBLIC_ONBOARDING_API || 'http://localhost:8082';
 
-const mockTemplates: OrganizationTemplate[] = [
+const defaultTemplates: OrganizationTemplate[] = [
   {
     id: 'tmpl-001',
     organizationName: 'First Bank Nigeria',
@@ -129,9 +130,9 @@ export function TemplateCloning() {
   const tmplFetcher = useCallback(() =>
     lakehouseAPI.fetch<{ templates: OrganizationTemplate[] }>('/api/v1/onboarding/templates')
       .then(d => d.templates)
-      .catch((err: unknown) => { console.error("API fallback:", err); return mockTemplates; }), []);
+      .catch((err: unknown) => { logger.error("API fallback:", err); return []; }), []);
   const { data: apiTemplates } = useLakehouseData(tmplFetcher, 30000);
-  const [templates, setTemplates] = useState<OrganizationTemplate[]>(mockTemplates);
+  const [templates, setTemplates] = useState<OrganizationTemplate[]>(defaultTemplates);
   useEffect(() => { if (apiTemplates) setTemplates(apiTemplates); }, [apiTemplates]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<string>('ALL');

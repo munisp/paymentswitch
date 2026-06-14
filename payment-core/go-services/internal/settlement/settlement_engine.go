@@ -2,6 +2,7 @@ package settlement
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -123,8 +124,13 @@ type ProviderConfirmation struct {
 
 // SettlementEngine orchestrates batch netting, settlement windows,
 // file generation, and reconciliation across all payment rails.
+//
+// State is held in memory for low-latency access and, when a database is
+// attached via AttachDB, write-through persisted to PostgreSQL so that
+// in-flight batches, the pending queue, and net positions survive restarts.
 type SettlementEngine struct {
 	mu             sync.RWMutex
+	db             *sql.DB
 	railConfigs    map[string]*RailConfig
 	activeBatches  map[string]*SettlementBatch
 	completedBatch []SettlementBatch
@@ -232,7 +238,9 @@ func (e *SettlementEngine) SubmitTransfer(t Transfer) (*SettlementBatch, error) 
 	}
 
 	e.pendingQueue[t.RailID] = append(e.pendingQueue[t.RailID], t)
-	e.updatePosition(t)
+	pos := e.updatePosition(t)
+	e.persistPendingTransfer(t)
+	e.persistPosition(pos)
 	return nil, nil
 }
 
@@ -257,10 +265,11 @@ func (e *SettlementEngine) settleImmediate(t Transfer, cfg *RailConfig) (*Settle
 	}
 
 	e.activeBatches[batchID] = batch
+	e.persistBatch(batch, false)
 	return batch, nil
 }
 
-func (e *SettlementEngine) updatePosition(t Transfer) {
+func (e *SettlementEngine) updatePosition(t Transfer) *NetPosition {
 	positions := e.positions[t.RailID]
 	pos, ok := positions[t.ParticipantID]
 	if !ok {
@@ -274,6 +283,7 @@ func (e *SettlementEngine) updatePosition(t Transfer) {
 	pos.GrossDebit += t.AmountNGN
 	pos.NetAmount += int64(t.AmountNGN)
 	pos.TransferCount++
+	return pos
 }
 
 // CloseBatchWindow closes the current batch window for a rail,
@@ -331,6 +341,9 @@ func (e *SettlementEngine) CloseBatchWindow(railID string) (*SettlementBatch, er
 	e.pendingQueue[railID] = make([]Transfer, 0)
 	e.positions[railID] = make(map[string]*NetPosition)
 
+	e.persistBatch(batch, false)
+	e.clearRailQueue(railID)
+
 	return batch, nil
 }
 
@@ -359,6 +372,7 @@ func (e *SettlementEngine) ConfirmSettlement(batchID string) error {
 	now := time.Now()
 	batch.Status = StatusConfirmed
 	batch.ConfirmedAt = &now
+	e.persistBatch(batch, false)
 	return nil
 }
 
@@ -376,12 +390,14 @@ func (e *SettlementEngine) FailSettlement(batchID string, reason string) error {
 	if batch.RetryCount < cfg.RetryAttempts {
 		batch.RetryCount++
 		batch.Status = StatusPending
+		e.persistBatch(batch, false)
 		return nil
 	}
 
 	now := time.Now()
 	batch.Status = StatusFailed
 	batch.FailedAt = &now
+	e.persistBatch(batch, false)
 	return nil
 }
 
@@ -443,6 +459,7 @@ func (e *SettlementEngine) Reconcile(batchID string, confirmations []ProviderCon
 
 	e.completedBatch = append(e.completedBatch, *batch)
 	delete(e.activeBatches, batchID)
+	e.persistBatch(batch, true)
 
 	return result, nil
 }
