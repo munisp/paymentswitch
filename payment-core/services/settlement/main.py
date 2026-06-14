@@ -4,6 +4,8 @@ Handles real-time settlement and reconciliation between participating financial 
 """
 
 import os
+import signal
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
@@ -109,12 +111,10 @@ participant_positions: Dict[str, Dict[str, ParticipantPosition]] = {}
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "service": "settlement",
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    """Health check endpoint for Kubernetes probes"""
+    if _shutting_down:
+        return JSONResponse(status_code=503, content={"status": "shutting_down", "service": "settlement"})
+    return {"status": "healthy", "service": "settlement"}
 
 @app.post("/windows", status_code=status.HTTP_201_CREATED)
 async def create_settlement_window(currency: str) -> SettlementWindow:
@@ -527,8 +527,29 @@ async def get_daily_settlement_report(date: str) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     import uvicorn
-
-from routers import router as settlement_router
-
-from routers import router as settlement_router
     uvicorn.run(app, host="0.0.0.0", port=8002)
+
+
+# Graceful shutdown handling
+_shutting_down = False
+
+@app.on_event("startup")
+async def startup_event():
+    """Configure signal handlers for graceful shutdown."""
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(_shutdown(s)))
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup resources on shutdown."""
+    global _shutting_down
+    _shutting_down = True
+    logger.info("settlement shutting down gracefully")
+
+async def _shutdown(sig):
+    """Handle shutdown signal."""
+    global _shutting_down
+    _shutting_down = True
+    logger.info(f"Received {sig.name}, shutting down settlement gracefully")
+

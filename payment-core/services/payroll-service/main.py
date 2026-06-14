@@ -1,3 +1,5 @@
+import signal
+import asyncio
 import logging
 import sys
 
@@ -25,6 +27,31 @@ app = FastAPI(
 )
 
 app.include_router(router)
+
+
+# Graceful shutdown handling
+_shutting_down = False
+
+@app.on_event("startup")
+async def startup_event():
+    """Configure signal handlers for graceful shutdown."""
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(_shutdown(s)))
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup resources on shutdown."""
+    global _shutting_down
+    _shutting_down = True
+    logger.info("payroll-service shutting down gracefully")
+
+async def _shutdown(sig):
+    """Handle shutdown signal."""
+    global _shutting_down
+    _shutting_down = True
+    logger.info(f"Received {sig.name}, shutting down payroll-service gracefully")
+
 
 
 @app.get("/health")

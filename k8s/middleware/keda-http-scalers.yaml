@@ -1,0 +1,167 @@
+# KEDA ScaledObjects for HTTP services — scale on request rate via Prometheus
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: mojaloop-service-scaler
+  namespace: payment-switch
+  labels:
+    app: mojaloop-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mojaloop-service
+  minReplicaCount: 3
+  maxReplicaCount: 30
+  pollingInterval: 15
+  cooldownPeriod: 60
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.monitoring.svc:9090
+        metricName: mojaloop_transfers_per_second
+        query: sum(rate(http_requests_total{app="mojaloop-service"}[1m]))
+        threshold: "500"
+        activationThreshold: "50"
+    - type: cpu
+      metadata:
+        type: Utilization
+        value: "70"
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: payment-switch-api-scaler
+  namespace: payment-switch
+  labels:
+    app: payment-switch-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: payment-switch-api
+  minReplicaCount: 3
+  maxReplicaCount: 20
+  pollingInterval: 15
+  cooldownPeriod: 60
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 30
+          selectPolicy: Max
+          policies:
+            - type: Percent
+              value: 50
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          selectPolicy: Min
+          policies:
+            - type: Percent
+              value: 25
+              periodSeconds: 120
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.monitoring.svc:9090
+        metricName: api_requests_per_second
+        query: sum(rate(http_requests_total{app="payment-switch-api"}[1m]))
+        threshold: "1000"
+        activationThreshold: "100"
+    - type: cpu
+      metadata:
+        type: Utilization
+        value: "70"
+    - type: memory
+      metadata:
+        type: Utilization
+        value: "80"
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: go-ledger-scaler
+  namespace: payment-switch
+  labels:
+    app: go-ledger
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: go-ledger
+  minReplicaCount: 3
+  maxReplicaCount: 50
+  pollingInterval: 15
+  cooldownPeriod: 60
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.monitoring.svc:9090
+        metricName: ledger_operations_per_second
+        query: sum(rate(grpc_server_handled_total{grpc_service="ledger.LedgerService"}[1m]))
+        threshold: "1000"
+        activationThreshold: "100"
+    - type: cpu
+      metadata:
+        type: Utilization
+        value: "70"
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: onboarding-service-scaler
+  namespace: payment-switch
+  labels:
+    app: onboarding-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: onboarding-service
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  pollingInterval: 30
+  cooldownPeriod: 120
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.monitoring.svc:9090
+        metricName: onboarding_requests_per_second
+        query: sum(rate(http_requests_total{app="onboarding-service"}[1m]))
+        threshold: "100"
+        activationThreshold: "10"
+    - type: cpu
+      metadata:
+        type: Utilization
+        value: "75"
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: biometric-auth-scaler
+  namespace: payment-switch
+  labels:
+    app: biometric-auth
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: biometric-auth
+  minReplicaCount: 2
+  maxReplicaCount: 15
+  pollingInterval: 15
+  cooldownPeriod: 60
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.monitoring.svc:9090
+        metricName: biometric_verifications_per_second
+        query: sum(rate(http_requests_total{app="biometric-auth"}[1m]))
+        threshold: "200"
+        activationThreshold: "20"
+    - type: cpu
+      metadata:
+        type: Utilization
+        value: "65"
