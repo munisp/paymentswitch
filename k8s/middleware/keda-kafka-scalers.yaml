@@ -1,0 +1,278 @@
+# KEDA ScaledObjects for Kafka consumer auto-scaling
+# Scales based on consumer group lag — pods scale up when messages accumulate
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: kafka-auth
+  namespace: payment-switch
+spec:
+  secretTargetRef:
+    - parameter: sasl
+      name: kafka-credentials
+      key: mechanism
+    - parameter: username
+      name: kafka-credentials
+      key: username
+    - parameter: password
+      name: kafka-credentials
+      key: password
+    - parameter: tls
+      name: kafka-credentials
+      key: ca-cert
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: redis-auth
+  namespace: payment-switch
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: redis-credentials
+      key: password
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: payment-gateway-scaler
+  namespace: payment-switch
+  labels:
+    app: payment-gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: payment-gateway
+  minReplicaCount: 3
+  maxReplicaCount: 50
+  pollingInterval: 15
+  cooldownPeriod: 60
+  advanced:
+    restoreToOriginalReplicaCount: true
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          selectPolicy: Max
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 15
+            - type: Pods
+              value: 10
+              periodSeconds: 15
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          selectPolicy: Min
+          policies:
+            - type: Percent
+              value: 10
+              periodSeconds: 60
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-0.kafka-headless:9092,kafka-1.kafka-headless:9092,kafka-2.kafka-headless:9092
+        consumerGroup: payment-gateway-group
+        topic: payment.transfers
+        lagThreshold: "100"
+        activationLagThreshold: "10"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-auth
+    - type: cpu
+      metadata:
+        type: Utilization
+        value: "70"
+    - type: memory
+      metadata:
+        type: Utilization
+        value: "80"
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: fraud-detection-scaler
+  namespace: payment-switch
+  labels:
+    app: fraud-detection
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fraud-detection
+  minReplicaCount: 2
+  maxReplicaCount: 30
+  pollingInterval: 10
+  cooldownPeriod: 60
+  advanced:
+    restoreToOriginalReplicaCount: true
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          selectPolicy: Max
+          policies:
+            - type: Percent
+              value: 200
+              periodSeconds: 10
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          selectPolicy: Min
+          policies:
+            - type: Percent
+              value: 10
+              periodSeconds: 60
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-0.kafka-headless:9092,kafka-1.kafka-headless:9092,kafka-2.kafka-headless:9092
+        consumerGroup: fraud-detection-group
+        topic: transaction-events
+        lagThreshold: "50"
+        activationLagThreshold: "5"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-auth
+    - type: cpu
+      metadata:
+        type: Utilization
+        value: "60"
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: data-pipeline-scaler
+  namespace: payment-switch
+  labels:
+    app: data-pipeline
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: data-pipeline
+  minReplicaCount: 2
+  maxReplicaCount: 20
+  pollingInterval: 30
+  cooldownPeriod: 120
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-0.kafka-headless:9092,kafka-1.kafka-headless:9092,kafka-2.kafka-headless:9092
+        consumerGroup: data-pipeline-group
+        topic: audit.events
+        lagThreshold: "1000"
+        activationLagThreshold: "100"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-auth
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: notification-service-scaler
+  namespace: payment-switch
+  labels:
+    app: notification-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: notification-service
+  minReplicaCount: 2
+  maxReplicaCount: 15
+  pollingInterval: 15
+  cooldownPeriod: 60
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-0.kafka-headless:9092,kafka-1.kafka-headless:9092,kafka-2.kafka-headless:9092
+        consumerGroup: notification-service-group
+        topic: notification.events
+        lagThreshold: "200"
+        activationLagThreshold: "20"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-auth
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: webhook-delivery-scaler
+  namespace: payment-switch
+  labels:
+    app: webhook-delivery
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: webhook-delivery
+  minReplicaCount: 2
+  maxReplicaCount: 20
+  pollingInterval: 15
+  cooldownPeriod: 60
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-0.kafka-headless:9092,kafka-1.kafka-headless:9092,kafka-2.kafka-headless:9092
+        consumerGroup: webhook-delivery-group
+        topic: webhook.deliveries
+        lagThreshold: "500"
+        activationLagThreshold: "50"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-auth
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: kyc-service-scaler
+  namespace: payment-switch
+  labels:
+    app: kyc-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kyc-service
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  pollingInterval: 30
+  cooldownPeriod: 120
+  triggers:
+    - type: redis
+      metadata:
+        address: redis-master.payment-switch.svc:6379
+        listName: kyc:pending
+        listLength: "10"
+        activationListLength: "1"
+      authenticationRef:
+        name: redis-auth
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: sanctions-screening-scaler
+  namespace: payment-switch
+  labels:
+    app: sanctions-screening
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sanctions-screening
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  pollingInterval: 15
+  cooldownPeriod: 60
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-0.kafka-headless:9092,kafka-1.kafka-headless:9092,kafka-2.kafka-headless:9092
+        consumerGroup: sanctions-screening-group
+        topic: compliance.screening-requests
+        lagThreshold: "20"
+        activationLagThreshold: "2"
+        offsetResetPolicy: latest
+      authenticationRef:
+        name: kafka-auth

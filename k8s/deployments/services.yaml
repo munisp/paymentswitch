@@ -1,0 +1,229 @@
+# K8s Services — ClusterIP for internal service discovery
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mojaloop-service
+  namespace: payment-switch
+  labels:
+    app: mojaloop-service
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app: mojaloop-service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: onboarding-service
+  namespace: payment-switch
+  labels:
+    app: onboarding-service
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app: onboarding-service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-service
+  namespace: payment-switch
+  labels:
+    app: platform-service
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8082
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app: platform-service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-ledger
+  namespace: payment-switch
+  labels:
+    app: go-ledger
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app: go-ledger
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-gateway
+  namespace: payment-switch
+  labels:
+    app: payment-gateway
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app: payment-gateway
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-detection
+  namespace: payment-switch
+  labels:
+    app: fraud-detection
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app: fraud-detection
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: settlement-engine
+  namespace: payment-switch
+  labels:
+    app: settlement-engine
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+  selector:
+    app: settlement-engine
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-switch-api
+  namespace: payment-switch
+  labels:
+    app: payment-switch-api
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      protocol: TCP
+  selector:
+    app: payment-switch-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+  namespace: payment-switch
+  labels:
+    app: notification-service
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+  selector:
+    app: notification-service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook-delivery
+  namespace: payment-switch
+  labels:
+    app: webhook-delivery
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+  selector:
+    app: webhook-delivery
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sanctions-screening
+  namespace: payment-switch
+  labels:
+    app: sanctions-screening
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+  selector:
+    app: sanctions-screening
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: biometric-auth
+  namespace: payment-switch
+  labels:
+    app: biometric-auth
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+  selector:
+    app: biometric-auth

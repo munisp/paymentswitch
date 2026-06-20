@@ -1,4 +1,6 @@
 """Main application for the instant-settlement service."""
+import signal
+import asyncio
 import logging
 import os
 import sys
@@ -43,7 +45,9 @@ app.include_router(router)
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for Kubernetes probes."""
+    """Health check endpoint for Kubernetes probes"""
+    if _shutting_down:
+        return JSONResponse(status_code=503, content={"status": "shutting_down", "service": "instant-settlement"})
     return {"status": "healthy", "service": "instant-settlement"}
 
 
@@ -58,6 +62,31 @@ async def root():
     """Root endpoint."""
     return {"service": "instant-settlement", "version": "1.0.0", "status": "running"}
 
+
+
+
+# Graceful shutdown handling
+_shutting_down = False
+
+@app.on_event("startup")
+async def startup_event():
+    """Configure signal handlers for graceful shutdown."""
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(_shutdown(s)))
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup resources on shutdown."""
+    global _shutting_down
+    _shutting_down = True
+    logger.info("instant-settlement shutting down gracefully")
+
+async def _shutdown(sig):
+    """Handle shutdown signal."""
+    global _shutting_down
+    _shutting_down = True
+    logger.info(f"Received {sig.name}, shutting down instant-settlement gracefully")
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
