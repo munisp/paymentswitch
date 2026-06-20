@@ -99,23 +99,22 @@ discovery:
     servers:
       - "kube-dns.kube-system.svc.cluster.local:53"
 
-# Deployment mode
+# Deployment mode — standalone (YAML-based, no etcd dependency)
+# Switch to traditional + etcd when etcd cluster is deployed
 deployment:
-  role: traditional
-  role_traditional:
-    config_provider: etcd
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
 
   admin:
     admin_key_required: true
+    admin_key:
+      - name: admin
+        key: "${APISIX_ADMIN_KEY}"
+        role: admin
     admin_listen:
       ip: 127.0.0.1
       port: 9180
-
-  etcd:
-    host:
-      - "http://etcd.payment-switch.svc.cluster.local:2379"
-    prefix: "/apisix"
-    timeout: 30
 
 # Telemetry
 telemetry:

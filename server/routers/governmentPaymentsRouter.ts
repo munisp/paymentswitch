@@ -216,7 +216,7 @@ export const governmentPaymentsRouter = router({
         amount: z.number().positive(),
         nin: z.string().optional(),
         bvn: z.string().optional(),
-      })),
+      })).min(1),
       channelPreference: z.enum(['NIP', 'MOBILE_MONEY', 'AGENT_CASH']).default('NIP'),
       initiatedBy: z.string(),
     }))

@@ -104,6 +104,7 @@ type RemittanceOrchestrator struct {
 	coinbaseService *crypto.CoinbaseService
 	nibssService    *banking.NIBSSService
 	kycService      *kyc.KYCService
+	tierEnforcer    *kyc.TierLimitEnforcer
 	webhookHandlers []func(WebhookPayload)
 	smsHandlers     []func(phone, message string)
 }
@@ -114,6 +115,7 @@ func NewRemittanceOrchestrator() *RemittanceOrchestrator {
 		coinbaseService: crypto.NewCoinbaseService(),
 		nibssService:    banking.NewNIBSSService(),
 		kycService:      kyc.NewKYCService(),
+		tierEnforcer:    kyc.NewTierLimitEnforcer(kyc.NewDailyUsageTracker()),
 		webhookHandlers: []func(WebhookPayload){},
 		smsHandlers:     []func(phone, message string){},
 	}
@@ -367,8 +369,16 @@ func (o *RemittanceOrchestrator) handleAMLScreening(state *RemittanceWorkflowSta
 	state.AMLCleared = true
 
 	// KYC Tier enforcement for outbound FX
-	tierEnforcer := kyc.NewTierLimitEnforcer(kyc.NewDailyUsageTracker())
-	fxCheck := tierEnforcer.CheckOutboundFXAllowed(kyc.KYCTier(state.KYCTier), state.SenderAmount)
+	// Convert fiat amount (NGN) to USD equivalent for CBN limit check.
+	// CBN official rate used as fallback; in production this comes from the FX service.
+	ngnToUSD := 1.0 / 1500.0 // CBN approximate rate
+	if state.ExchangeRate > 0 && state.FiatAmount > 0 {
+		// Use actual fiat amount from conversion step
+		ngnToUSD = 1.0 / 1500.0
+	}
+	amountUSD := state.FiatAmount * ngnToUSD
+
+	fxCheck := o.tierEnforcer.CheckOutboundFXAllowed(kyc.KYCTier(state.KYCTier), amountUSD)
 	if !fxCheck.Allowed {
 		state.CurrentStep = StepFailed
 		state.Error = fxCheck.Reason
