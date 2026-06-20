@@ -1,118 +1,128 @@
-# APISIX Configuration for Payment Switch Platform
-# Integrates with Keycloak for authentication and Permify for authorization
+# APISIX Gateway Configuration — Optimized for Millions of Requests/sec
+# Target: 1M+ req/sec across the cluster via high worker count + connection pooling
 
 apisix:
-  node_listen: 9080
-  enable_ipv6: false
-  enable_admin: true
-  admin_key:
-    - name: admin
-      key: ${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}
-      role: admin
+  # SSL/TLS
   ssl:
     enable: true
-    listen_port: 9443
-    ssl_protocols: TLSv1.2 TLSv1.3
-    ssl_ciphers: ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384
+    listen:
+      - port: 9443
+        enable_http2: true
+    ssl_protocols: "TLSv1.2 TLSv1.3"
+    ssl_ciphers: "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
 
+  # Proxy configuration
+  proxy_buffer_size: "16k"
+  proxy_buffers: "8 16k"
+
+  # Enable real IP detection
+  enable_control: true
+  enable_ratelimit: true
+
+  # Router mode (radixtree_uri is fastest)
+  router:
+    http: radixtree_uri
+    ssl: radixtree_sni
+
+# Nginx tuning for high throughput
 nginx_config:
-  error_log: /dev/stderr
+  worker_processes: auto  # auto-detect CPU cores
+  worker_cpu_affinity: auto
+  worker_rlimit_nofile: 1048576
+  worker_shutdown_timeout: "240s"
+
   error_log_level: warn
+
+  event:
+    worker_connections: 65535
+
   http:
-    access_log: /dev/stdout
-    keepalive_timeout: 60s
-    client_max_body_size: 10m
+    # Connection keepalive
+    keepalive_timeout: "75s"
+    keepalive_requests: 10000
+    client_header_timeout: "60s"
+    client_body_timeout: "60s"
+    send_timeout: "60s"
 
-deployment:
-  role: data_plane
-  role_data_plane:
-    config_provider: yaml
+    # Buffers
+    client_max_body_size: "16m"
+    client_body_buffer_size: "128k"
+    proxy_buffer_size: "16k"
+    proxy_buffers: "8 16k"
 
-plugin_attr:
-  prometheus:
-    export_addr:
-      ip: 0.0.0.0
-      port: 9091
-  opentelemetry:
-    trace_id_source: x-request-id
-    resource:
-      service.name: payment-switch-gateway
+    # Access log buffering (reduce I/O)
+    access_log_buffer: 32768
 
+    # Upstream keepalive pool
+    upstream:
+      keepalive: 320
+      keepalive_timeout: "60s"
+      keepalive_requests: 10000
+
+    # Gzip compression
+    gzip:
+      enable: true
+      min_length: 1024
+      comp_level: 2
+      types: "application/json text/plain application/xml"
+
+    # Real IP
+    real_ip_header: "X-Forwarded-For"
+    real_ip_recursive: "on"
+
+# Plugin configuration
 plugins:
-  - real-ip
-  - client-control
-  - proxy-control
-  - request-id
-  - zipkin
-  - opentelemetry
-  - ext-plugin-pre-req
-  - ext-plugin-post-req
-  - ext-plugin-post-resp
-  - api-breaker
-  - limit-conn
-  - limit-count
-  - limit-req
-  - cors
-  - ip-restriction
-  - ua-restriction
-  - referer-restriction
-  - uri-blocker
-  - request-validation
-  - openid-connect
-  - authz-keycloak
-  - wolf-rbac
-  - ldap-auth
-  - hmac-auth
-  - basic-auth
-  - jwt-auth
-  - key-auth
-  - consumer-restriction
-  - forward-auth
-  - opa
-  - authz-casbin
-  - csrf
-  - public-api
-  - gm
-  - log-rotate
-  - error-log-logger
-  - sls-logger
-  - tcp-logger
-  - kafka-logger
-  - rocketmq-logger
-  - syslog
-  - udp-logger
-  - file-logger
-  - clickhouse-logger
-  - loggly
-  - elasticsearch-logger
-  - http-logger
-  - skywalking-logger
-  - google-cloud-logging
-  - splunk-hec-logging
-  - datadog
-  - echo
-  - custom-response
-  - proxy-cache
-  - proxy-mirror
-  - proxy-rewrite
-  - workflow
-  - response-rewrite
-  - fault-injection
-  - mocking
-  - serverless-pre-function
-  - serverless-post-function
-  - traffic-split
-  - redirect
-  - grpc-transcode
-  - grpc-web
-  - degraphql
-  - graphql-limit-count
   - prometheus
-  - node-status
-  - example-plugin
-  - gzip
-  - real-ip
+  - request-id
+  - openid-connect
+  - limit-req
+  - limit-count
+  - limit-conn
+  - cors
+  - proxy-rewrite
+  - response-rewrite
+  - ip-restriction
+  - authz-keycloak
+  - public-api
   - server-info
-  - inspect
-  - batch-requests
-  - body-transformer
+  - traffic-split
+  - consumer-restriction
+
+# External plugins
+ext-plugin:
+  cmd:
+    - "/usr/local/apisix/plugins/openappsec/openappsec-apisix"
+
+# Discovery (for K8s service discovery)
+discovery:
+  dns:
+    servers:
+      - "kube-dns.kube-system.svc.cluster.local:53"
+
+# Deployment mode
+deployment:
+  role: traditional
+  role_traditional:
+    config_provider: etcd
+
+  admin:
+    admin_key_required: true
+    admin_listen:
+      ip: 127.0.0.1
+      port: 9180
+
+  etcd:
+    host:
+      - "http://etcd.payment-switch.svc.cluster.local:2379"
+    prefix: "/apisix"
+    timeout: 30
+
+# Telemetry
+telemetry:
+  enabled: true
+  prometheus:
+    export_uri: /apisix/prometheus/metrics
+    export_addr:
+      ip: "0.0.0.0"
+      port: 9091
+    metric_prefix: "apisix_"

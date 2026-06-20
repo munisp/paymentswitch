@@ -13,12 +13,15 @@ data:
   DB_TYPE: "postgres"
   DB_HOST: "mojaloop-postgres-pooler-rw.payment-switch.svc.cluster.local"
   DB_PORT: "5432"
-  DB_CONNECTION_POOL_MIN: "10"
-  DB_CONNECTION_POOL_MAX: "50"
-  DB_ACQUIRE_TIMEOUT: "30000"
+  DB_CONNECTION_POOL_MIN: "20"
+  DB_CONNECTION_POOL_MAX: "100"
+  DB_ACQUIRE_TIMEOUT: "10000"
   DB_CREATE_TIMEOUT: "30000"
   DB_DESTROY_TIMEOUT: "5000"
   DB_IDLE_TIMEOUT: "30000"
+  
+  # Handler concurrency
+  HANDLER_CONCURRENCY: "200"
   DB_REAP_INTERVAL: "1000"
   DB_CREATE_RETRY_INTERVAL: "200"
   
@@ -127,11 +130,11 @@ spec:
             timeoutSeconds: 5
           resources:
             requests:
-              memory: "1Gi"
-              cpu: "500m"
-            limits:
               memory: "2Gi"
               cpu: "1000m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
 
 ---
 # Account Lookup Service with PostgreSQL
@@ -214,11 +217,11 @@ spec:
             periodSeconds: 10
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "250m"
-            limits:
               memory: "1Gi"
               cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
 
 ---
 # Quoting Service with PostgreSQL
@@ -301,11 +304,11 @@ spec:
             periodSeconds: 10
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "250m"
-            limits:
               memory: "1Gi"
               cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
 
 ---
 # Central Settlements with PostgreSQL

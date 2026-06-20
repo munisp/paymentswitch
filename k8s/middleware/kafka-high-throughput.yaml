@@ -1,0 +1,182 @@
+---
+# Kafka Cluster Configuration — Optimized for Millions of Messages/sec
+# Uses Strimzi Kafka operator for K8s-native management
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-broker-config
+  namespace: payment-switch
+data:
+  server.properties: |
+    # Network threads
+    num.network.threads=16
+    num.io.threads=32
+
+    # Socket buffers (1MB each)
+    socket.send.buffer.bytes=1048576
+    socket.receive.buffer.bytes=1048576
+    socket.request.max.bytes=104857600
+
+    # Log/segment settings
+    log.flush.interval.ms=1000
+    log.retention.hours=168
+    log.segment.bytes=1073741824
+    log.retention.check.interval.ms=300000
+
+    # Recovery threads
+    num.recovery.threads.per.data.dir=8
+
+    # Replication
+    num.replica.fetchers=8
+    default.replication.factor=3
+    min.insync.replicas=2
+
+    # Message limits
+    message.max.bytes=10485760
+    replica.fetch.max.bytes=10485760
+
+    # Compression
+    compression.type=lz4
+
+    # Group coordinator
+    group.initial.rebalance.delay.ms=3000
+    group.max.session.timeout.ms=300000
+
+    # Transaction settings
+    transaction.state.log.replication.factor=3
+    transaction.state.log.min.isr=2
+    transaction.max.timeout.ms=900000
+
+    # Auto topic creation (disabled for production)
+    auto.create.topics.enable=false
+    delete.topic.enable=true
+
+    # Metrics
+    metric.reporters=io.confluent.metrics.reporter.ConfluentMetricsReporter
+    confluent.metrics.reporter.publish.ms=15000
+
+---
+# Kafka StatefulSet for high-throughput deployment
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: payment-switch
+  labels:
+    app: kafka
+spec:
+  serviceName: kafka-headless
+  replicas: 6
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9308"
+    spec:
+      terminationGracePeriodSeconds: 120
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: kafka
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: kafka
+          image: confluentinc/cp-kafka:7.6.0
+          ports:
+            - containerPort: 9092
+              name: kafka
+            - containerPort: 9308
+              name: jmx
+          env:
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xmx6g -Xms6g"
+            - name: KAFKA_JVM_PERFORMANCE_OPTS
+              value: "-XX:+UseG1GC -XX:MaxGCPauseMillis=20 -XX:InitiatingHeapOccupancyPercent=35 -XX:+ExplicitGCInvokesConcurrent -XX:G1HeapRegionSize=16M"
+            - name: KAFKA_LOG_DIRS
+              value: "/var/lib/kafka/data"
+          resources:
+            requests:
+              memory: "8Gi"
+              cpu: "4000m"
+            limits:
+              memory: "12Gi"
+              cpu: "8000m"
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+            - name: config
+              mountPath: /etc/kafka/server.properties
+              subPath: server.properties
+      volumes:
+        - name: config
+          configMap:
+            name: kafka-broker-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3-encrypted
+        resources:
+          requests:
+            storage: 500Gi
+
+---
+# Kafka Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-headless
+  namespace: payment-switch
+spec:
+  clusterIP: None
+  ports:
+    - port: 9092
+      name: kafka
+  selector:
+    app: kafka
+
+---
+# Kafka Client Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: payment-switch
+spec:
+  ports:
+    - port: 9092
+      name: kafka
+  selector:
+    app: kafka
+
+---
+# PodDisruptionBudget
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kafka-pdb
+  namespace: payment-switch
+spec:
+  minAvailable: 4
+  selector:
+    matchLabels:
+      app: kafka
