@@ -1,6 +1,7 @@
 package kyc
 
 import (
+	"database/sql"
 	"fmt"
 	"sync"
 	"time"
@@ -91,6 +92,7 @@ type TierEnforcementResult struct {
 // DailyUsageTracker tracks per-user daily transaction volumes for tier enforcement.
 type DailyUsageTracker struct {
 	mu    sync.RWMutex
+	db    *sql.DB
 	usage map[string]*dailyRecord
 }
 
@@ -124,6 +126,8 @@ func (t *DailyUsageTracker) RecordTransaction(userID string, amountNGN float64) 
 	}
 	rec.TotalNGN += amountNGN
 	rec.TxCount++
+
+	go t.persistUsage(userID, rec)
 }
 
 // GetDailyUsage returns the current day's usage for a user.

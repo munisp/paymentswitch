@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../_core/trpc';
+import { getDb } from '../db';
+import { lettersOfCredit, escrowPayments, customsDutyPayments } from '../../drizzle/payments-schema';
+import { eq, and, desc } from 'drizzle-orm';
 
 // --- Types & Seed Data ---
 
@@ -88,6 +91,36 @@ export const tradePaymentsRouter = router({
   listLCs: protectedProcedure
     .input(z.object({ type: z.string().optional(), status: z.string().optional() }).optional())
     .query(async ({ input }) => {
+      const db = await getDb();
+      if (db) {
+        const conditions = [];
+        if (input?.status) conditions.push(eq(lettersOfCredit.status, input.status));
+        const rows = await db.select().from(lettersOfCredit)
+          .where(conditions.length ? and(...conditions) : undefined)
+          .orderBy(desc(lettersOfCredit.createdAt));
+        if (rows.length > 0) {
+          return {
+            lcs: rows.map(r => ({
+              id: r.id, lcNumber: r.id, type: '', applicant: r.applicantName,
+              applicantBank: r.issuingBank, beneficiary: r.beneficiaryName,
+              beneficiaryBank: '', beneficiaryCountry: '', amount: Number(r.amount),
+              currency: r.currency, goodsDescription: '', shipmentPort: '',
+              destinationPort: '', shipmentDeadline: r.expiryDate ?? r.createdAt,
+              expiryDate: r.expiryDate ?? r.createdAt, status: r.status,
+              documents: [] as { id: string; type: string; documentRef: string; uploadedBy: string; uploadedAt: Date; status: string }[],
+              issuedAt: r.createdAt, formMRef: '',
+            })),
+            total: rows.length,
+            _source: 'DB' as const,
+            summary: {
+              totalLCs: rows.length,
+              importLCs: 0, exportLCs: 0,
+              totalValueUSD: rows.reduce((s, r) => s + Number(r.amount), 0),
+              activeLCs: rows.filter(r => !['SETTLED', 'EXPIRED', 'CANCELLED'].includes(r.status)).length,
+            },
+          };
+        }
+      }
       let lcs = [...seedLCs];
       if (input?.type) lcs = lcs.filter(l => l.type === input.type);
       if (input?.status) lcs = lcs.filter(l => l.status === input.status);
@@ -105,18 +138,56 @@ export const tradePaymentsRouter = router({
       };
     }),
 
-  listEscrows: protectedProcedure.query(async () => ({
-    escrows: seedEscrows,
-    totalActive: seedEscrows.filter(e => e.status === 'active').length,
-    totalValueUSD: seedEscrows.reduce((s, e) => s + e.totalAmount, 0),
-    _source: 'SEED' as const,
-  })),
+  listEscrows: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (db) {
+      const rows = await db.select().from(escrowPayments);
+      if (rows.length > 0) {
+        return {
+          escrows: rows.map(r => ({
+            id: r.id, buyerName: r.buyerName, sellerName: r.sellerName,
+            totalAmount: Number(r.amount), currency: r.currency,
+            milestones: [] as { id: string; description: string; amount: number; dueDate: Date; status: string }[],
+            status: r.status, createdAt: r.createdAt,
+          })),
+          totalActive: rows.filter(r => r.status === 'held').length,
+          totalValueUSD: rows.reduce((s, r) => s + Number(r.amount), 0),
+          _source: 'DB' as const,
+        };
+      }
+    }
+    return {
+      escrows: seedEscrows,
+      totalActive: seedEscrows.filter(e => e.status === 'active').length,
+      totalValueUSD: seedEscrows.reduce((s, e) => s + e.totalAmount, 0),
+      _source: 'SEED' as const,
+    };
+  }),
 
-  listCustomsDuties: protectedProcedure.query(async () => ({
-    duties: seedCustomsDuties,
-    totalPaid: seedCustomsDuties.filter(d => ['paid', 'cleared'].includes(d.status)).reduce((s, d) => s + d.totalAmount, 0),
-    _source: 'SEED' as const,
-  })),
+  listCustomsDuties: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (db) {
+      const rows = await db.select().from(customsDutyPayments);
+      if (rows.length > 0) {
+        return {
+          duties: rows.map(r => ({
+            id: r.id, assessmentRef: r.declarationNumber, importerName: r.importerName,
+            dutyAmount: Number(r.amount), vatAmount: 0, surchargeAmount: 0,
+            totalAmount: Number(r.amount), hsCode: '',
+            goodsDesc: '', portOfEntry: '', status: r.status,
+            paidAt: r.paidAt,
+          })),
+          totalPaid: rows.filter(r => ['paid', 'cleared'].includes(r.status)).reduce((s, r) => s + Number(r.amount), 0),
+          _source: 'DB' as const,
+        };
+      }
+    }
+    return {
+      duties: seedCustomsDuties,
+      totalPaid: seedCustomsDuties.filter(d => ['paid', 'cleared'].includes(d.status)).reduce((s, d) => s + d.totalAmount, 0),
+      _source: 'SEED' as const,
+    };
+  }),
 
   createLC: protectedProcedure
     .input(z.object({

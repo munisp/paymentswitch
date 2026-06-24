@@ -15,13 +15,14 @@ from .schemas import (
     HealthResponse,
     SyncStatus
 )
+from . import persistence as db
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/offline", tags=["Offline Payments"])
 
-# In-memory storage
-offline_transactions = {}
+# All state persisted to PostgreSQL via the persistence module.
+# In-memory storage removed.
 
 
 @router.post("/sync", response_model=SyncResponse)
@@ -50,12 +51,12 @@ async def sync_offline_payments(
                     failed_count += 1
                     continue
                 
-                # Store transaction
-                offline_transactions[txn.transaction_id] = {
-                    "status": SyncStatus.SYNCED,
-                    "data": txn.dict(),
-                    "synced_at": datetime.utcnow().isoformat()
-                }
+                # Store transaction in PostgreSQL
+                await db.store_transaction(
+                    txn.transaction_id,
+                    SyncStatus.SYNCED,
+                    txn.dict(),
+                )
                 
                 synced_count += 1
                 logger.info(f"Synced offline transaction {txn.transaction_id}")
@@ -93,12 +94,12 @@ async def submit_offline_payment(request: OfflinePaymentRequest):
         if not verify_offline_signature(request.offline_signature, request.transaction_id):
             raise HTTPException(status_code=400, detail="Invalid signature")
         
-        # Store transaction
-        offline_transactions[request.transaction_id] = {
-            "status": SyncStatus.SYNCED,
-            "data": request.dict(),
-            "synced_at": datetime.utcnow().isoformat()
-        }
+        # Store transaction in PostgreSQL
+        await db.store_transaction(
+            request.transaction_id,
+            SyncStatus.SYNCED,
+            request.dict(),
+        )
         
         logger.info(f"Submitted offline payment {request.transaction_id}")
         

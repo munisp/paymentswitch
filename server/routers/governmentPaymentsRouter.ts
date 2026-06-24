@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../_core/trpc';
+import { getDb } from '../db';
+import { governmentPayments, taxPayments, pensionRemittances, socialDisbursements } from '../../drizzle/payments-schema';
+import { eq, and, desc, sql } from 'drizzle-orm';
 
 // --- Types & Seed Data ---
 
@@ -120,6 +123,35 @@ export const governmentPaymentsRouter = router({
   listGovernmentPayments: protectedProcedure
     .input(z.object({ category: z.string().optional(), status: z.string().optional() }).optional())
     .query(async ({ input }) => {
+      const db = await getDb();
+      if (db) {
+        const conditions = [];
+        if (input?.category) conditions.push(eq(governmentPayments.type, input.category));
+        if (input?.status) conditions.push(eq(governmentPayments.status, input.status));
+        const rows = await db.select().from(governmentPayments)
+          .where(conditions.length ? and(...conditions) : undefined)
+          .orderBy(desc(governmentPayments.createdAt));
+        if (rows.length > 0) {
+          return {
+            payments: rows.map((r: typeof rows[number]) => ({
+              id: r.id, category: r.type, status: r.status,
+              payerName: r.payerName, payerTin: r.payerId,
+              beneficiaryMda: r.agency, amount: Number(r.amount),
+              tsaCode: r.reference, revenueCode: r.reference,
+              narration: r.description ?? '', completedAt: r.completedAt,
+              gifmisRef: (r.metadata as Record<string, string>)?.gifmisRef ?? '',
+            })),
+            total: rows.length,
+            _source: 'DB' as const,
+            summary: {
+              totalCollections: rows.length,
+              completed: rows.filter((r: typeof rows[number]) => r.status === 'COMPLETED').length,
+              totalValueNGN: rows.filter((r: typeof rows[number]) => r.status === 'COMPLETED').reduce((s: number, r: typeof rows[number]) => s + Number(r.amount), 0),
+            },
+          };
+        }
+      }
+      // Fallback to seed data if DB unavailable or empty
       let payments = [...seedGovPayments];
       if (input?.category) payments = payments.filter(p => p.category === input.category);
       if (input?.status) payments = payments.filter(p => p.status === input.status);
@@ -138,6 +170,28 @@ export const governmentPaymentsRouter = router({
   listTaxPayments: protectedProcedure
     .input(z.object({ taxType: z.string().optional(), status: z.string().optional() }).optional())
     .query(async ({ input }) => {
+      const db = await getDb();
+      if (db) {
+        const conditions = [];
+        if (input?.taxType) conditions.push(eq(taxPayments.taxType, input.taxType));
+        if (input?.status) conditions.push(eq(taxPayments.status, input.status));
+        const rows = await db.select().from(taxPayments)
+          .where(conditions.length ? and(...conditions) : undefined);
+        if (rows.length > 0) {
+          return {
+            taxes: rows.map(r => ({
+              id: r.id, taxType: r.taxType, payerName: r.taxpayerName,
+              payerTin: r.taxpayerTin, assessmentYear: parseInt(r.period),
+              taxOffice: '', amount: Number(r.amount), penalty: 0, interest: 0,
+              totalAmount: Number(r.amount), status: r.status,
+              paidAt: r.createdAt, receiptNumber: r.firsReference ?? '',
+            })),
+            total: rows.length,
+            _source: 'DB' as const,
+            totalPaidNGN: rows.filter(r => r.status === 'paid').reduce((s, r) => s + Number(r.amount), 0),
+          };
+        }
+      }
       let taxes = [...seedTaxPayments];
       if (input?.taxType) taxes = taxes.filter(t => t.taxType === input.taxType);
       if (input?.status) taxes = taxes.filter(t => t.status === input.status);
@@ -149,19 +203,60 @@ export const governmentPaymentsRouter = router({
       };
     }),
 
-  listPensions: protectedProcedure.query(async () => ({
-    pensions: seedPensions,
-    totalContributions: seedPensions.reduce((s, p) => s + p.totalAmount, 0),
-    totalEmployees: seedPensions.reduce((s, p) => s + p.employeeCount, 0),
-    _source: 'SEED' as const,
-  })),
+  listPensions: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (db) {
+      const rows = await db.select().from(pensionRemittances);
+      if (rows.length > 0) {
+        return {
+          pensions: rows.map(r => ({
+            id: r.id, employerName: r.employerName, employerRc: r.employerRcNumber,
+            pfaName: r.pfaName, pfaCode: '', employeeCount: r.employeeCount,
+            employerContribution: Number(r.amount) * 0.55,
+            employeeContribution: Number(r.amount) * 0.40,
+            voluntaryContribution: Number(r.amount) * 0.05,
+            totalAmount: Number(r.amount), period: r.period,
+            status: r.status, confirmedAt: r.createdAt,
+          })),
+          totalContributions: rows.reduce((s, r) => s + Number(r.amount), 0),
+          totalEmployees: rows.reduce((s, r) => s + r.employeeCount, 0),
+          _source: 'DB' as const,
+        };
+      }
+    }
+    return {
+      pensions: seedPensions,
+      totalContributions: seedPensions.reduce((s, p) => s + p.totalAmount, 0),
+      totalEmployees: seedPensions.reduce((s, p) => s + p.employeeCount, 0),
+      _source: 'SEED' as const,
+    };
+  }),
 
-  listSocialDisbursements: protectedProcedure.query(async () => ({
-    disbursements: seedSocialDisbursements,
-    totalBeneficiaries: seedSocialDisbursements.reduce((s, d) => s + d.beneficiaryCount, 0),
-    totalDisbursed: seedSocialDisbursements.reduce((s, d) => s + d.totalAmount, 0),
-    _source: 'SEED' as const,
-  })),
+  listSocialDisbursements: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (db) {
+      const rows = await db.select().from(socialDisbursements);
+      if (rows.length > 0) {
+        return {
+          disbursements: rows.map(r => ({
+            id: r.id, programName: r.programName, programCode: r.id,
+            beneficiaryCount: r.beneficiaryCount, amountPerBeneficiary: Number(r.totalAmount) / r.beneficiaryCount,
+            totalAmount: Number(r.totalAmount), disbursedCount: 0,
+            failedCount: 0, status: r.status, initiatedBy: '',
+          })),
+          totalBeneficiaries: rows.reduce((s, r) => s + r.beneficiaryCount, 0),
+          totalDisbursed: rows.reduce((s, r) => s + Number(r.totalAmount), 0),
+          _source: 'DB' as const,
+        };
+      }
+    }
+    return {
+      disbursements: seedSocialDisbursements,
+      totalBeneficiaries: seedSocialDisbursements.reduce((s, d) => s + d.beneficiaryCount, 0),
+      totalDisbursed: seedSocialDisbursements.reduce((s, d) => s + d.totalAmount, 0),
+      _source: 'SEED' as const,
+    };
+  }),
 
   listRegulatoryReports: protectedProcedure.query(async () => ({
     reports: seedReports,

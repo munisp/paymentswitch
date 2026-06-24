@@ -1,6 +1,7 @@
 package remittance
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"sync"
@@ -100,6 +101,7 @@ type WebhookPayload struct {
 
 type RemittanceOrchestrator struct {
 	mu              sync.RWMutex
+	db              *sql.DB
 	workflows       map[string]*RemittanceWorkflowState
 	coinbaseService *crypto.CoinbaseService
 	nibssService    *banking.NIBSSService
@@ -155,6 +157,7 @@ func (o *RemittanceOrchestrator) StartWorkflow(params *StartWorkflowParams) (*Re
 	o.workflows[params.RemittanceID] = state
 	o.mu.Unlock()
 
+	go o.persistWorkflow(state)
 	return state, nil
 }
 
@@ -190,6 +193,7 @@ func (o *RemittanceOrchestrator) ProcessWorkflowStep(state *RemittanceWorkflowSt
 	o.workflows[state.RemittanceID] = state
 	o.mu.Unlock()
 
+	go o.persistWorkflow(state)
 	return state, err
 }
 

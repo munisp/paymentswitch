@@ -21,6 +21,7 @@ pub mod postings;
 pub mod fx_pricing;
 pub mod dynamic_pricing;
 pub mod settlement;
+pub mod persistence;
 
 pub use accounts::{AccountFamily, AccountId, ParticipantAccounts};
 pub use postings::{PostingEngine, TransferCommand, TransferBatch, PostingResult};

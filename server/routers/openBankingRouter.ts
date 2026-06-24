@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../_core/trpc';
+import { getDb } from '../db';
+import { tpps, consents } from '../../drizzle/payments-schema';
+import { eq, and, desc } from 'drizzle-orm';
 
 // --- Types & Seed Data ---
 
@@ -101,12 +104,38 @@ export const openBankingRouter = router({
   listTPPs: protectedProcedure
     .input(z.object({ status: z.string().optional(), tier: z.string().optional() }).optional())
     .query(async ({ input }) => {
-      let tpps = [...seedTPPs];
-      if (input?.status) tpps = tpps.filter(t => t.status === input.status);
-      if (input?.tier) tpps = tpps.filter(t => t.apiTier === input.tier);
+      const db = await getDb();
+      if (db) {
+        const conditions = [];
+        if (input?.status) conditions.push(eq(tpps.status, input.status));
+        const rows = await db.select().from(tpps)
+          .where(conditions.length ? and(...conditions) : undefined);
+        if (rows.length > 0) {
+          return {
+            tpps: rows.map(r => ({
+              id: r.id, name: r.name, registrationNumber: '',
+              cbnLicense: '', services: [] as string[], status: r.status,
+              apiTier: '', clientId: r.clientId, webhookUrl: '',
+              contactEmail: '', monthlyApiCalls: r.apiCallsToday,
+              rateLimitPerMin: 0, registeredAt: r.registeredAt,
+            })),
+            total: rows.length,
+            _source: 'DB' as const,
+            summary: {
+              totalTPPs: rows.length,
+              activeTPPs: rows.filter(r => r.status === 'ACTIVE').length,
+              totalApiCalls: rows.reduce((s, r) => s + r.apiCallsToday, 0),
+              enterprise: 0, growth: 0, starter: 0, sandbox: 0,
+            },
+          };
+        }
+      }
+      let filteredTpps = [...seedTPPs];
+      if (input?.status) filteredTpps = filteredTpps.filter(t => t.status === input.status);
+      if (input?.tier) filteredTpps = filteredTpps.filter(t => t.apiTier === input.tier);
       return {
-        tpps,
-        total: tpps.length,
+        tpps: filteredTpps,
+        total: filteredTpps.length,
         _source: 'SEED' as const,
         summary: {
           totalTPPs: seedTPPs.length,
@@ -123,12 +152,40 @@ export const openBankingRouter = router({
   listConsents: protectedProcedure
     .input(z.object({ status: z.string().optional(), tppId: z.string().optional() }).optional())
     .query(async ({ input }) => {
-      let consents = [...seedConsents];
-      if (input?.status) consents = consents.filter(c => c.status === input.status);
-      if (input?.tppId) consents = consents.filter(c => c.tppId === input.tppId);
+      const db = await getDb();
+      if (db) {
+        const conditions = [];
+        if (input?.status) conditions.push(eq(consents.status, input.status));
+        if (input?.tppId) conditions.push(eq(consents.tppId, input.tppId));
+        const rows = await db.select().from(consents)
+          .where(conditions.length ? and(...conditions) : undefined);
+        if (rows.length > 0) {
+          return {
+            consents: rows.map(r => ({
+              id: r.id, customerId: r.accountId, customerName: '',
+              tppId: r.tppId, tppName: '', serviceType: '',
+              status: r.status, permissions: r.permissions as string[],
+              accounts: [] as string[], validFrom: r.createdAt,
+              validUntil: r.expiresAt ?? r.createdAt,
+              authorizedAt: r.createdAt, revokedAt: null as Date | null,
+            })),
+            total: rows.length,
+            _source: 'DB' as const,
+            summary: {
+              totalConsents: rows.length,
+              authorized: rows.filter(r => r.status === 'AUTHORIZED').length,
+              revoked: rows.filter(r => r.status === 'REVOKED').length,
+              expired: rows.filter(r => r.status === 'EXPIRED').length,
+            },
+          };
+        }
+      }
+      let filteredConsents = [...seedConsents];
+      if (input?.status) filteredConsents = filteredConsents.filter(c => c.status === input.status);
+      if (input?.tppId) filteredConsents = filteredConsents.filter(c => c.tppId === input.tppId);
       return {
-        consents,
-        total: consents.length,
+        consents: filteredConsents,
+        total: filteredConsents.length,
         _source: 'SEED' as const,
         summary: {
           totalConsents: seedConsents.length,

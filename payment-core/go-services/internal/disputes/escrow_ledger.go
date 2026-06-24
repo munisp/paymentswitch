@@ -2,6 +2,7 @@ package disputes
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -45,6 +46,7 @@ type EscrowBalance struct {
 // with the same interface for integration.
 type EscrowLedger struct {
 	mu       sync.RWMutex
+	db       *sql.DB
 	entries  []EscrowEntry
 	balances map[string]*EscrowBalance // merchantID -> balance
 }
@@ -87,6 +89,8 @@ func (l *EscrowLedger) HoldFunds(disputeID, transactionID, merchantID string, am
 	bal.ActiveHolds++
 
 	l.entries = append(l.entries, entry)
+	go l.persistEntry(&entry)
+	go l.persistBalance(bal)
 	return &entry, nil
 }
 
@@ -120,6 +124,8 @@ func (l *EscrowLedger) ReleaseFunds(disputeID, merchantID string, settlementRef 
 	}
 
 	l.entries = append(l.entries, entry)
+	go l.persistEntry(&entry)
+	go l.persistBalance(bal)
 	return &entry, nil
 }
 
@@ -152,6 +158,8 @@ func (l *EscrowLedger) RefundFunds(disputeID, merchantID string) (*EscrowEntry, 
 	}
 
 	l.entries = append(l.entries, entry)
+	go l.persistEntry(&entry)
+	go l.persistBalance(bal)
 	return &entry, nil
 }
 

@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../_core/trpc';
+import { getDb } from '../db';
+import { issuedCards, cardTransactions, chargebacks } from '../../drizzle/payments-schema';
+import { eq, and, desc } from 'drizzle-orm';
 
 // --- Types & Seed Data ---
 
@@ -110,6 +113,36 @@ export const cardProcessingRouter = router({
   listCards: protectedProcedure
     .input(z.object({ scheme: z.string().optional(), type: z.string().optional(), status: z.string().optional() }).optional())
     .query(async ({ input }) => {
+      const db = await getDb();
+      if (db) {
+        const conditions = [];
+        if (input?.scheme) conditions.push(eq(issuedCards.scheme, input.scheme));
+        if (input?.type) conditions.push(eq(issuedCards.type, input.type));
+        if (input?.status) conditions.push(eq(issuedCards.status, input.status));
+        const rows = await db.select().from(issuedCards)
+          .where(conditions.length ? and(...conditions) : undefined);
+        if (rows.length > 0) {
+          return {
+            cards: rows.map(r => ({
+              id: r.id, tokenizedPAN: '', last4: r.lastFour,
+              scheme: r.scheme, type: r.type,
+              issuerBankCode: '', issuerBankName: '', holderName: r.holderName,
+              expiryMonth: r.expiryMonth, expiryYear: r.expiryYear,
+              status: r.status, dailyLimit: 0, monthlyLimit: 0,
+              issuedAt: r.issuedAt, is3DSEnrolled: false,
+            })),
+            total: rows.length,
+            _source: 'DB' as const,
+            summary: {
+              totalCards: rows.length,
+              activeCards: rows.filter(r => r.status === 'active').length,
+              visa: rows.filter(r => r.scheme === 'VISA').length,
+              mastercard: rows.filter(r => r.scheme === 'MASTERCARD').length,
+              verve: rows.filter(r => r.scheme === 'VERVE').length,
+            },
+          };
+        }
+      }
       let cards = [...seedCards];
       if (input?.scheme) cards = cards.filter(c => c.scheme === input.scheme);
       if (input?.type) cards = cards.filter(c => c.type === input.type);
@@ -131,6 +164,39 @@ export const cardProcessingRouter = router({
   listTransactions: protectedProcedure
     .input(z.object({ scheme: z.string().optional(), channel: z.string().optional(), status: z.string().optional() }).optional())
     .query(async ({ input }) => {
+      const db = await getDb();
+      if (db) {
+        const conditions = [];
+        if (input?.status) conditions.push(eq(cardTransactions.status, input.status));
+        if (input?.scheme) conditions.push(eq(cardTransactions.type, input.scheme));
+        const rows = await db.select().from(cardTransactions)
+          .where(conditions.length ? and(...conditions) : undefined)
+          .orderBy(desc(cardTransactions.createdAt));
+        if (rows.length > 0) {
+          const approved = rows.filter(r => r.status === 'approved');
+          return {
+            transactions: rows.map(r => ({
+              id: r.id, authCode: r.authCode ?? '', rrn: '', type: r.type,
+              cardLast4: '', scheme: '', merchantName: r.merchantName,
+              merchantCategory: '', terminalId: '', channel: '',
+              amount: Number(r.amount), feeAmount: 0, status: r.status,
+              declineReason: '', is3DSVerified: false, riskScore: 0,
+              processedAt: r.createdAt,
+            })),
+            total: rows.length,
+            _source: 'DB' as const,
+            summary: {
+              totalTxns: rows.length,
+              approved: approved.length,
+              declined: rows.filter(r => r.status === 'declined').length,
+              totalVolumeNGN: approved.reduce((s, r) => s + Number(r.amount), 0),
+              totalFeesNGN: 0,
+              approvalRate: (approved.length / rows.length * 100).toFixed(1),
+              avgRiskScore: '0',
+            },
+          };
+        }
+      }
       let txns = [...seedTxns];
       if (input?.scheme) txns = txns.filter(t => t.scheme === input.scheme);
       if (input?.channel) txns = txns.filter(t => t.channel === input.channel);
@@ -152,12 +218,33 @@ export const cardProcessingRouter = router({
       };
     }),
 
-  listChargebacks: protectedProcedure.query(async () => ({
-    chargebacks: seedChargebacks,
-    totalActive: seedChargebacks.filter(c => !['resolved', 'lost'].includes(c.status)).length,
-    totalDisputeAmount: seedChargebacks.reduce((s, c) => s + c.disputeAmount, 0),
-    _source: 'SEED' as const,
-  })),
+  listChargebacks: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (db) {
+      const rows = await db.select().from(chargebacks);
+      if (rows.length > 0) {
+        return {
+          chargebacks: rows.map(r => ({
+            id: r.id, transactionId: r.transactionId,
+            originalAmount: Number(r.amount), disputeAmount: Number(r.amount),
+            reasonCode: r.reason, reasonDesc: r.reason,
+            cardholderName: '', merchantName: '', status: r.status,
+            filedAt: r.createdAt, dueDate: r.resolvedAt ?? r.createdAt,
+            resolution: '',
+          })),
+          totalActive: rows.filter(r => !['resolved', 'lost'].includes(r.status)).length,
+          totalDisputeAmount: rows.reduce((s, r) => s + Number(r.amount), 0),
+          _source: 'DB' as const,
+        };
+      }
+    }
+    return {
+      chargebacks: seedChargebacks,
+      totalActive: seedChargebacks.filter(c => !['resolved', 'lost'].includes(c.status)).length,
+      totalDisputeAmount: seedChargebacks.reduce((s, c) => s + c.disputeAmount, 0),
+      _source: 'SEED' as const,
+    };
+  }),
 
   listTerminals: protectedProcedure.query(async () => ({
     terminals: seedTerminals,

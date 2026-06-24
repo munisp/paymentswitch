@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../_core/trpc';
+import { getDb } from '../db';
+import { domesticPayments, standingOrders, bulkDisbursements } from '../../drizzle/payments-schema';
+import { eq, and, desc } from 'drizzle-orm';
 
 // --- AI/ML Python Service (real implementations) ---
 const AI_ML_SERVICE_URL = process.env.AI_ML_SERVICE_URL || 'http://localhost:8100';
@@ -348,6 +351,38 @@ export const domesticPaymentsRouter = router({
   listPayments: protectedProcedure
     .input(z.object({ type: z.string().optional(), status: z.string().optional(), channel: z.string().optional() }).optional())
     .query(async ({ input }) => {
+      const db = await getDb();
+      if (db) {
+        const conditions = [];
+        if (input?.type) conditions.push(eq(domesticPayments.type, input.type));
+        if (input?.status) conditions.push(eq(domesticPayments.status, input.status));
+        const rows = await db.select().from(domesticPayments)
+          .where(conditions.length ? and(...conditions) : undefined)
+          .orderBy(desc(domesticPayments.createdAt));
+        if (rows.length > 0) {
+          const completed = rows.filter(r => r.status === 'COMPLETED');
+          return {
+            payments: rows.map(r => ({
+              id: r.id, type: r.type, senderAccount: r.senderAccount,
+              senderBank: r.senderBank, recipientAccount: r.recipientAccount,
+              recipientBank: r.recipientBank, amount: Number(r.amount),
+              currency: r.currency, narration: r.narration, reference: r.reference,
+              status: r.status, createdAt: r.createdAt, completedAt: r.completedAt,
+            })),
+            total: rows.length,
+            summary: {
+              totalPayments: rows.length,
+              completed: completed.length,
+              failed: rows.filter(r => r.status === 'FAILED').length,
+              pending: rows.filter(r => r.status === 'PENDING_APPROVAL').length,
+              totalVolumeNGN: completed.reduce((s, r) => s + Number(r.amount), 0),
+              p2pCount: rows.filter(r => r.type === 'P2P').length,
+              p2bCount: rows.filter(r => ['P2B', 'QR_PAY'].includes(r.type)).length,
+              billCount: rows.filter(r => r.type === 'BILL_PAYMENT').length,
+            },
+          };
+        }
+      }
       let payments = [...seedPayments];
       if (input?.type) payments = payments.filter(p => p.type === input.type);
       if (input?.status) payments = payments.filter(p => p.status === input.status);
@@ -371,14 +406,41 @@ export const domesticPaymentsRouter = router({
 
   listBillProviders: protectedProcedure.query(async () => ({ providers: seedBillProviders })),
 
-  listStandingOrders: protectedProcedure.query(async () => ({
-    orders: seedStandingOrders,
-    totalActive: seedStandingOrders.filter(o => o.status === 'active').length,
-  })),
+  listStandingOrders: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (db) {
+      const rows = await db.select().from(standingOrders);
+      if (rows.length > 0) {
+        return {
+          orders: rows.map(r => ({
+            id: r.id, accountId: r.accountId, recipientAccount: r.recipientAccount,
+            recipientBank: r.recipientBank, amount: Number(r.amount),
+            frequency: r.frequency, nextExecution: r.nextExecution, status: r.status,
+          })),
+          totalActive: rows.filter(r => r.status === 'active').length,
+        };
+      }
+    }
+    return {
+      orders: seedStandingOrders,
+      totalActive: seedStandingOrders.filter(o => o.status === 'active').length,
+    };
+  }),
 
-  listBulkDisbursements: protectedProcedure.query(async () => ({
-    disbursements: seedBulkDisbursements,
-  })),
+  listBulkDisbursements: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (db) {
+      const rows = await db.select().from(bulkDisbursements);
+      if (rows.length > 0) {
+        return { disbursements: rows.map(r => ({
+          id: r.id, initiatorId: r.initiatorId, totalAmount: Number(r.totalAmount),
+          beneficiaryCount: r.beneficiaryCount, processedCount: r.processedCount,
+          failedCount: r.failedCount, status: r.status,
+        })) };
+      }
+    }
+    return { disbursements: seedBulkDisbursements };
+  }),
 
   createPayment: protectedProcedure
     .input(z.object({

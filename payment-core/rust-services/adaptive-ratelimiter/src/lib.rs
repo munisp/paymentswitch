@@ -1,3 +1,5 @@
+pub mod persistence;
+
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
