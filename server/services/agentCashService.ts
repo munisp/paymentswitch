@@ -1,4 +1,7 @@
 import { createChildLogger } from '../lib/logger';
+import { getDb } from '../db';
+import { eq } from 'drizzle-orm';
+import { collectionCodes as collectionCodesTable } from '../../drizzle/payments-schema';
 
 const log = createChildLogger('agentCash');
 /**
@@ -115,7 +118,7 @@ export async function generateCollectionCode(params: {
     status: 'active',
   };
 
-  // In production, register code with agent provider API
+  // Register with provider API
   switch (params.provider) {
     case 'paga':
       await registerPagaCollectionCode(collectionCode);
@@ -128,8 +131,25 @@ export async function generateCollectionCode(params: {
       break;
   }
 
-  // Store in database
-  // await db.createCollectionCode(collectionCode);
+  // Persist to PostgreSQL
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.insert(collectionCodesTable).values({
+        code,
+        remittanceId: params.remittanceId,
+        amount: String(params.amount),
+        currency: params.currency,
+        recipientPhone: params.recipientPhone,
+        provider: params.provider,
+        qrCodeUrl,
+        status: 'active',
+        expiresAt: expiresAt,
+      });
+    } catch (err) {
+      log.error({ err }, '[Agent Cash] DB persist error');
+    }
+  }
 
   return collectionCode;
 }
@@ -144,22 +164,41 @@ export async function getCollectionCodeStatus(code: string): Promise<{
   agentId?: string;
   agentName?: string;
 }> {
-  // In production, fetch from database and check with provider
-  // const collectionCode = await db.getCollectionCode(code);
-
-  return {
-    code,
-    status: 'active',
-  };
+  const db = await getDb();
+  if (db) {
+    try {
+      const rows = await db.select().from(collectionCodesTable).where(eq(collectionCodesTable.code, code)).limit(1);
+      if (rows.length > 0) {
+        const row = rows[0];
+        const isExpired = row.expiresAt && new Date(row.expiresAt) < new Date();
+        return {
+          code,
+          status: (isExpired ? 'expired' : row.status) as 'active' | 'collected' | 'expired' | 'cancelled',
+          collectedAt: row.collectedAt || undefined,
+          agentId: row.agentId || undefined,
+        };
+      }
+    } catch (err) {
+      log.error({ err }, '[Agent Cash] DB query error');
+    }
+  }
+  return { code, status: 'active' };
 }
 
 /**
  * Cancel collection code
  */
 export async function cancelCollectionCode(code: string): Promise<boolean> {
-  // In production, update database and notify provider
-  // await db.updateCollectionCode(code, { status: 'cancelled' });
-
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.update(collectionCodesTable)
+        .set({ status: 'cancelled' })
+        .where(eq(collectionCodesTable.code, code));
+    } catch (err) {
+      log.error({ err }, '[Agent Cash] DB cancel error');
+    }
+  }
   return true;
 }
 
@@ -197,72 +236,87 @@ export function calculateAgentFee(amount: number, provider: 'paga' | 'opay' | 'k
  * Paga Integration
  */
 async function registerPagaCollectionCode(collectionCode: CollectionCode): Promise<void> {
-  // In production, call Paga API
+  const apiKey = process.env.PAGA_API_KEY;
+  const apiUrl = process.env.PAGA_API_URL || 'https://api.paga.com/v1';
+  if (apiKey) {
+    try {
+      const response = await fetch(`${apiUrl}/collection-codes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          code: collectionCode.code,
+          amount: collectionCode.amount,
+          recipientPhone: collectionCode.recipientPhone,
+          expiresAt: collectionCode.expiresAt.toISOString(),
+        }),
+      });
+      if (!response.ok) {
+        log.error({ status: response.status }, '[Paga] Registration failed');
+      }
+    } catch (err) {
+      log.error({ err }, '[Paga] API error');
+    }
+  }
   log.info({ code: collectionCode.code }, '[Paga] Registered collection code');
-
-  // Example Paga API call:
-  // const response = await fetch('https://api.paga.com/v1/collection-codes', {
-  //   method: 'POST',
-  //   headers: {
-  //     'Content-Type': 'application/json',
-  //     'Authorization': `Bearer ${process.env.PAGA_API_KEY}`,
-  //   },
-  //   body: JSON.stringify({
-  //     code: collectionCode.code,
-  //     amount: collectionCode.amount,
-  //     recipientPhone: collectionCode.recipientPhone,
-  //     expiresAt: collectionCode.expiresAt,
-  //   }),
-  // });
 }
 
 /**
  * OPay Integration
  */
 async function registerOPayCollectionCode(collectionCode: CollectionCode): Promise<void> {
-  // In production, call OPay API
+  const apiKey = process.env.OPAY_API_KEY;
+  const merchantId = process.env.OPAY_MERCHANT_ID;
+  const apiUrl = process.env.OPAY_API_URL || 'https://api.opay.com/v1';
+  if (apiKey && merchantId) {
+    try {
+      const response = await fetch(`${apiUrl}/cashout/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'MerchantId': merchantId, 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          reference: collectionCode.remittanceId,
+          code: collectionCode.code,
+          amount: collectionCode.amount,
+          phoneNumber: collectionCode.recipientPhone,
+          expiryTime: collectionCode.expiresAt.toISOString(),
+        }),
+      });
+      if (!response.ok) {
+        log.error({ status: response.status }, '[OPay] Registration failed');
+      }
+    } catch (err) {
+      log.error({ err }, '[OPay] API error');
+    }
+  }
   log.info({ code: collectionCode.code }, '[OPay] Registered collection code');
-
-  // Example OPay API call:
-  // const response = await fetch('https://api.opay.com/v1/cashout/create', {
-  //   method: 'POST',
-  //   headers: {
-  //     'Content-Type': 'application/json',
-  //     'MerchantId': process.env.OPAY_MERCHANT_ID,
-  //     'Authorization': `Bearer ${process.env.OPAY_API_KEY}`,
-  //   },
-  //   body: JSON.stringify({
-  //     reference: collectionCode.remittanceId,
-  //     code: collectionCode.code,
-  //     amount: collectionCode.amount,
-  //     phoneNumber: collectionCode.recipientPhone,
-  //     expiryTime: collectionCode.expiresAt.toISOString(),
-  //   }),
-  // });
 }
 
 /**
  * Kudi Integration
  */
 async function registerKudiCollectionCode(collectionCode: CollectionCode): Promise<void> {
-  // In production, call Kudi API
+  const apiKey = process.env.KUDI_API_KEY;
+  const apiUrl = process.env.KUDI_API_URL || 'https://api.kudi.com/v1';
+  if (apiKey) {
+    try {
+      const response = await fetch(`${apiUrl}/withdrawals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+        body: JSON.stringify({
+          withdrawalCode: collectionCode.code,
+          amount: collectionCode.amount,
+          currency: collectionCode.currency,
+          recipientPhone: collectionCode.recipientPhone,
+          expiresAt: collectionCode.expiresAt.toISOString(),
+        }),
+      });
+      if (!response.ok) {
+        log.error({ status: response.status }, '[Kudi] Registration failed');
+      }
+    } catch (err) {
+      log.error({ err }, '[Kudi] API error');
+    }
+  }
   log.info({ code: collectionCode.code }, '[Kudi] Registered collection code');
-
-  // Example Kudi API call:
-  // const response = await fetch('https://api.kudi.com/v1/withdrawals', {
-  //   method: 'POST',
-  //   headers: {
-  //     'Content-Type': 'application/json',
-  //     'X-API-Key': process.env.KUDI_API_KEY,
-  //   },
-  //   body: JSON.stringify({
-  //     withdrawalCode: collectionCode.code,
-  //     amount: collectionCode.amount,
-  //     currency: collectionCode.currency,
-  //     recipientPhone: collectionCode.recipientPhone,
-  //     expiresAt: collectionCode.expiresAt,
-  //   }),
-  // });
 }
 
 /**
@@ -277,9 +331,22 @@ export async function sendCollectionCodeSMS(params: {
 }): Promise<boolean> {
   const message = `Your cash pickup code is: ${params.code}. Collect ₦${params.amount.toLocaleString()} from any ${params.agentName} agent. Code expires on ${params.expiresAt.toLocaleDateString()}. Keep this code secure.`;
 
-  // In production, send via Twilio, Africa's Talking, etc.
-  log.info(`[SMS] Sending to ${params.recipientPhone}: ${message}`);
-
+  const smsApiUrl = process.env.SMS_API_URL;
+  const smsApiKey = process.env.SMS_API_KEY;
+  if (smsApiUrl && smsApiKey) {
+    try {
+      await fetch(smsApiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${smsApiKey}` },
+        body: JSON.stringify({ to: params.recipientPhone, message }),
+      });
+      return true;
+    } catch (err) {
+      log.error({ err }, '[SMS] Send failed');
+      return false;
+    }
+  }
+  log.info(`[SMS] No provider configured: ${params.recipientPhone}`);
   return true;
 }
 

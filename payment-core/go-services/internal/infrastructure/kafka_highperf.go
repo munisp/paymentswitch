@@ -62,9 +62,21 @@ func DefaultKafkaHighPerfConfig() KafkaHighPerfConfig {
 	}
 }
 
+// KafkaProducerFunc delivers a message to Kafka. Implementations typically wrap
+// a confluent-kafka-go or Sarama producer.
+type KafkaProducerFunc func(topic string, key, value []byte, headers map[string]string) error
+
+// KafkaConsumerPollFunc fetches the next message from Kafka. Returns topic,
+// partition, offset, key, value. Blocks until a message is available or ctx is
+// cancelled.
+type KafkaConsumerPollFunc func(ctx context.Context) (topic string, partition int32, offset int64, key, value []byte, err error)
+
 // KafkaHighPerfProducer is an optimized Kafka producer for 1M+ TPS
 type KafkaHighPerfProducer struct {
 	config KafkaHighPerfConfig
+
+	// Real Kafka producer backend (nil = count-only mode for benchmarks/tests)
+	producerFunc KafkaProducerFunc
 
 	// Batch accumulator
 	batches   map[string]*MessageBatch
@@ -94,11 +106,17 @@ type MessageBatch struct {
 
 // Message represents a Kafka message
 type Message struct {
+	Topic     string
 	Key       []byte
 	Value     []byte
 	Headers   map[string]string
 	Partition int32
 	Timestamp time.Time
+}
+
+// SetProducerFunc attaches a real Kafka producer backend.
+func (p *KafkaHighPerfProducer) SetProducerFunc(fn KafkaProducerFunc) {
+	p.producerFunc = fn
 }
 
 // NewKafkaHighPerfProducer creates a new high-performance producer
@@ -266,17 +284,27 @@ func (p *KafkaHighPerfProducer) batchSender(workerID int) {
 	}
 }
 
-// sendBatch sends a batch to Kafka (simulated - in production use confluent-kafka-go)
+// sendBatch sends a batch to Kafka via the configured producer backend.
+// When KafkaProducerFunc is set, messages are routed through the real Kafka SDK;
+// otherwise the batch is counted locally (useful for benchmarks and tests).
 func (p *KafkaHighPerfProducer) sendBatch(batch *MessageBatch) error {
 	if len(batch.Messages) == 0 {
 		return nil
 	}
 
-	// In production, this would use the actual Kafka producer
-	// For now, we simulate the send
 	var totalBytes uint64
 	for _, msg := range batch.Messages {
 		totalBytes += uint64(len(msg.Key) + len(msg.Value))
+	}
+
+	// Route through real Kafka producer when configured
+	if p.producerFunc != nil {
+		for _, msg := range batch.Messages {
+			if err := p.producerFunc(msg.Topic, msg.Key, msg.Value, msg.Headers); err != nil {
+				atomic.AddUint64(&p.errors, 1)
+				return fmt.Errorf("kafka produce error on topic %s: %w", msg.Topic, err)
+			}
+		}
 	}
 
 	atomic.AddUint64(&p.messagesSent, uint64(len(batch.Messages)))
@@ -306,6 +334,9 @@ type KafkaHighPerfConsumer struct {
 	topics  []string
 	handler MessageHandler
 
+	// Real Kafka consumer backend (nil = idle mode for tests)
+	pollFunc KafkaConsumerPollFunc
+
 	// Stats
 	messagesRecv uint64
 	bytesRecv    uint64
@@ -315,6 +346,11 @@ type KafkaHighPerfConsumer struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+}
+
+// SetPollFunc attaches a real Kafka consumer backend.
+func (c *KafkaHighPerfConsumer) SetPollFunc(fn KafkaConsumerPollFunc) {
+	c.pollFunc = fn
 }
 
 // MessageHandler handles consumed messages
@@ -349,19 +385,32 @@ func (c *KafkaHighPerfConsumer) Start() error {
 	return nil
 }
 
-// consumeWorker consumes messages from Kafka
+// consumeWorker polls messages from Kafka and dispatches to the handler.
+// When ConsumerPollFunc is set, it is used to fetch real messages;
+// otherwise the worker idles (useful for integration tests).
 func (c *KafkaHighPerfConsumer) consumeWorker(workerID int) {
 	defer c.wg.Done()
 
-	// In production, this would use the actual Kafka consumer
-	// For now, we simulate consumption
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		default:
-			// Simulate poll delay
-			time.Sleep(10 * time.Millisecond)
+			if c.pollFunc != nil {
+				topic, partition, offset, key, value, err := c.pollFunc(c.ctx)
+				if err != nil {
+					atomic.AddUint64(&c.errors, 1)
+					time.Sleep(100 * time.Millisecond)
+					continue
+				}
+				atomic.AddUint64(&c.messagesRecv, 1)
+				atomic.AddUint64(&c.bytesRecv, uint64(len(key)+len(value)))
+				if herr := c.handler(topic, partition, offset, key, value); herr != nil {
+					atomic.AddUint64(&c.errors, 1)
+				}
+			} else {
+				time.Sleep(10 * time.Millisecond)
+			}
 		}
 	}
 }

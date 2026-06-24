@@ -230,16 +230,17 @@ class TrinoQueryEngine(QueryEngine):
 
 
 class DemoQueryEngine(QueryEngine):
-    """Demo mode query engine with simulated data"""
+    """Demo mode query engine with deterministic seed data"""
     
     async def execute(self, query: str) -> QueryResult:
         return QueryResult(data=[], row_count=0, execution_time_ms=0, source='demo')
     
     async def get_noc_metrics(self) -> Dict[str, Any]:
-        import random
-        base_tps = 1250 + random.randint(-100, 100)
-        success_rate = 99.2 + random.uniform(-0.5, 0.5)
-        avg_latency = 48 + random.randint(-10, 15)
+        import hashlib
+        seed = int(hashlib.sha256(datetime.now().strftime('%Y-%m-%d-%H').encode()).hexdigest()[:8], 16)
+        base_tps = 1250 + (seed % 201 - 100)
+        success_rate = 99.2 + ((seed >> 8) % 100 - 50) / 100
+        avg_latency = 48 + ((seed >> 16) % 26 - 10)
         
         return {
             'tps': {'label': 'Transactions Per Second', 'value': base_tps, 'change': 5.2, 'trend': 'up'},
@@ -250,11 +251,12 @@ class DemoQueryEngine(QueryEngine):
         }
     
     async def get_fraud_metrics(self) -> Dict[str, Any]:
-        import random
+        import hashlib
+        seed = int(hashlib.sha256(datetime.now().strftime('%Y-%m-%d-%H').encode()).hexdigest()[:8], 16)
         return {
-            'open_alerts': {'label': 'Open Alerts', 'value': random.randint(5, 15), 'change': -15.0, 'trend': 'down'},
-            'critical_alerts': {'label': 'Critical Alerts', 'value': random.randint(1, 5), 'change': 0, 'trend': 'neutral'},
-            'resolved_today': {'label': 'Resolved Today', 'value': random.randint(10, 30), 'change': 25.0, 'trend': 'up'},
+            'open_alerts': {'label': 'Open Alerts', 'value': 5 + (seed % 11), 'change': -15.0, 'trend': 'down'},
+            'critical_alerts': {'label': 'Critical Alerts', 'value': 1 + ((seed >> 4) % 5), 'change': 0, 'trend': 'neutral'},
+            'resolved_today': {'label': 'Resolved Today', 'value': 10 + ((seed >> 8) % 21), 'change': 25.0, 'trend': 'up'},
             'avg_resolution_time': {'label': 'Avg Resolution Time', 'value': "12m", 'change': -8.0, 'trend': 'down'},
             'source': 'demo'
         }

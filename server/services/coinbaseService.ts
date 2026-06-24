@@ -6,6 +6,12 @@
  */
 
 import crypto from 'crypto';
+import { getDb } from '../db';
+import { eq } from 'drizzle-orm';
+import { stablecoinConversions } from '../../drizzle/payments-schema';
+import { createChildLogger } from '../lib/logger';
+
+const log = createChildLogger('coinbase');
 
 // Coinbase Commerce API configuration
 const COINBASE_API_URL = process.env.COINBASE_API_URL || 'https://api.commerce.coinbase.com';
@@ -228,6 +234,7 @@ export async function getExchangeRateQuote(params: {
 export async function convertCryptoToFiat(params: {
   chargeId: string;
   remittanceId: string;
+  targetCurrency?: string;
 }): Promise<{
   conversionId: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
@@ -240,18 +247,55 @@ export async function convertCryptoToFiat(params: {
     throw new Error(`Cannot convert: charge status is ${chargeStatus.status}`);
   }
 
-  // In production, this would trigger an actual conversion
-  // For now, we simulate the conversion process
   const conversionId = `conv_${crypto.randomBytes(16).toString('hex')}`;
-  
-  // Coinbase typically completes conversions within 1 hour
   const estimatedCompletionTime = new Date(Date.now() + 60 * 60 * 1000);
+  let status: 'pending' | 'processing' | 'completed' | 'failed' = 'processing';
 
-  return {
-    conversionId,
-    status: 'processing',
-    estimatedCompletionTime,
-  };
+  // Use Coinbase Commerce API if configured
+  const conversionApiUrl = process.env.COINBASE_CONVERSION_API_URL;
+  if (COINBASE_API_KEY && conversionApiUrl) {
+    try {
+      const response = await fetch(`${conversionApiUrl}/conversions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CC-Api-Key': COINBASE_API_KEY,
+          'X-CC-Version': '2018-03-22',
+        },
+        body: JSON.stringify({
+          charge_id: params.chargeId,
+          target_currency: params.targetCurrency || 'NGN',
+        }),
+      });
+      if (response.ok) {
+        const data = await response.json() as { id?: string; status?: string };
+        status = (data.status as typeof status) || 'processing';
+      } else {
+        status = 'failed';
+      }
+    } catch (err) {
+      log.error({ err }, '[Coinbase] Conversion API error');
+      status = 'failed';
+    }
+  }
+
+  // Persist to PostgreSQL
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.insert(stablecoinConversions).values({
+        id: conversionId,
+        chargeId: params.chargeId,
+        remittanceId: params.remittanceId,
+        conversionId,
+        status,
+      });
+    } catch (err) {
+      log.error({ err }, '[Coinbase] DB persist error');
+    }
+  }
+
+  return { conversionId, status, estimatedCompletionTime };
 }
 
 /**
@@ -265,17 +309,55 @@ export async function getConversionStatus(conversionId: string): Promise<{
   completedAt?: Date;
   errorMessage?: string;
 }> {
-  // In production, this would query Coinbase's conversion API
-  // For now, we simulate the status check
-  
-  // Simulate completed conversion after 1 hour
+  // Check DB first for persisted conversion
+  const db = await getDb();
+  if (db) {
+    try {
+      const rows = await db.select().from(stablecoinConversions).where(eq(stablecoinConversions.conversionId, conversionId)).limit(1);
+      if (rows.length > 0) {
+        const row = rows[0];
+        return {
+          conversionId,
+          status: row.status as 'pending' | 'processing' | 'completed' | 'failed',
+          fiatAmount: row.fiatAmount ? Number(row.fiatAmount) : undefined,
+          fiatCurrency: row.fiatCurrency || undefined,
+          completedAt: row.completedAt || undefined,
+        };
+      }
+    } catch (err) {
+      log.error({ err }, '[Coinbase] DB query error');
+    }
+  }
+
+  // Query Coinbase API as fallback
+  if (COINBASE_API_KEY) {
+    try {
+      const response = await fetch(`${COINBASE_API_URL}/conversions/${conversionId}`, {
+        headers: {
+          'X-CC-Api-Key': COINBASE_API_KEY,
+          'X-CC-Version': '2018-03-22',
+        },
+      });
+      if (response.ok) {
+        const data = await response.json() as { status?: string; fiat_amount?: number; fiat_currency?: string; completed_at?: string };
+        return {
+          conversionId,
+          status: (data.status as 'pending' | 'processing' | 'completed' | 'failed') || 'pending',
+          fiatAmount: data.fiat_amount,
+          fiatCurrency: data.fiat_currency,
+          completedAt: data.completed_at ? new Date(data.completed_at) : undefined,
+        };
+      }
+    } catch (err) {
+      log.error({ err }, '[Coinbase] Status API error');
+    }
+  }
+
   return {
     conversionId,
-    status: 'completed',
-    fiatAmount: 500000, // Example: 500,000 NGN
-    fiatCurrency: 'NGN',
-    completedAt: new Date(),
-  };
+    status: 'pending',
+    message: 'Status unavailable',
+  } as any;
 }
 
 /**

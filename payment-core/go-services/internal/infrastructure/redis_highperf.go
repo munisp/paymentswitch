@@ -62,9 +62,17 @@ func DefaultRedisClusterConfig() RedisClusterConfig {
 	}
 }
 
+// RedisCommandFunc executes a Redis command via the real Redis SDK.
+// cmd is the Redis command (GET, SET, etc.), args are command arguments.
+// Returns the result and any error.
+type RedisCommandFunc func(ctx context.Context, cmd string, args ...interface{}) (interface{}, error)
+
 // RedisHighPerfClient is an optimized Redis cluster client
 type RedisHighPerfClient struct {
 	config RedisClusterConfig
+
+	// Real Redis backend (nil = stub mode for benchmarks/tests)
+	cmdFunc RedisCommandFunc
 
 	// Connection pools per node
 	pools   map[string]*RedisPool
@@ -86,6 +94,11 @@ type RedisHighPerfClient struct {
 	// Control
 	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+// SetCommandFunc attaches a real Redis command backend.
+func (c *RedisHighPerfClient) SetCommandFunc(fn RedisCommandFunc) {
+	c.cmdFunc = fn
 }
 
 // RedisPool represents a connection pool for a single Redis node
@@ -224,78 +237,173 @@ var crc16Table = [256]uint16{
 	// ... (full table would be 256 entries)
 }
 
+// execCmd routes a command through the real Redis backend if available,
+// otherwise returns a stub result.
+func (c *RedisHighPerfClient) execCmd(ctx context.Context, cmd string, args ...interface{}) (interface{}, error) {
+	atomic.AddUint64(&c.commandsExec, 1)
+	if c.cmdFunc != nil {
+		result, err := c.cmdFunc(ctx, cmd, args...)
+		if err != nil {
+			atomic.AddUint64(&c.commandErrors, 1)
+		}
+		return result, err
+	}
+	return nil, nil
+}
+
 // Get retrieves a value from Redis
 func (c *RedisHighPerfClient) Get(ctx context.Context, key string) (string, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
-
-	// In production, this would use actual Redis connection
-	// For now, simulate the operation
-	return "", nil
+	result, err := c.execCmd(ctx, "GET", key)
+	if err != nil {
+		return "", err
+	}
+	if result == nil {
+		return "", nil
+	}
+	if s, ok := result.(string); ok {
+		atomic.AddUint64(&c.cacheHits, 1)
+		return s, nil
+	}
+	atomic.AddUint64(&c.cacheMisses, 1)
+	return fmt.Sprintf("%v", result), nil
 }
 
 // Set stores a value in Redis
 func (c *RedisHighPerfClient) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
-	atomic.AddUint64(&c.commandsExec, 1)
-	return nil
+	if expiration > 0 {
+		_, err := c.execCmd(ctx, "SET", key, value, "PX", int64(expiration/time.Millisecond))
+		return err
+	}
+	_, err := c.execCmd(ctx, "SET", key, value)
+	return err
 }
 
 // SetNX sets a value only if it doesn't exist (for distributed locks)
 func (c *RedisHighPerfClient) SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) (bool, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
-	return true, nil
+	result, err := c.execCmd(ctx, "SET", key, value, "NX", "PX", int64(expiration/time.Millisecond))
+	if err != nil {
+		return false, err
+	}
+	if c.cmdFunc == nil {
+		return true, nil
+	}
+	return result != nil, nil
 }
 
 // Del deletes keys
 func (c *RedisHighPerfClient) Del(ctx context.Context, keys ...string) (int64, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
+	args := make([]interface{}, len(keys))
+	for i, k := range keys {
+		args[i] = k
+	}
+	result, err := c.execCmd(ctx, "DEL", args...)
+	if err != nil {
+		return 0, err
+	}
+	if n, ok := result.(int64); ok {
+		return n, nil
+	}
 	return int64(len(keys)), nil
 }
 
 // MGet retrieves multiple values
 func (c *RedisHighPerfClient) MGet(ctx context.Context, keys ...string) ([]interface{}, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
+	args := make([]interface{}, len(keys))
+	for i, k := range keys {
+		args[i] = k
+	}
+	result, err := c.execCmd(ctx, "MGET", args...)
+	if err != nil {
+		return nil, err
+	}
+	if vals, ok := result.([]interface{}); ok {
+		return vals, nil
+	}
 	return make([]interface{}, len(keys)), nil
 }
 
 // MSet stores multiple values
 func (c *RedisHighPerfClient) MSet(ctx context.Context, pairs ...interface{}) error {
-	atomic.AddUint64(&c.commandsExec, 1)
-	return nil
+	_, err := c.execCmd(ctx, "MSET", pairs...)
+	return err
 }
 
 // HGet retrieves a hash field
 func (c *RedisHighPerfClient) HGet(ctx context.Context, key, field string) (string, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
+	result, err := c.execCmd(ctx, "HGET", key, field)
+	if err != nil {
+		return "", err
+	}
+	if s, ok := result.(string); ok {
+		return s, nil
+	}
 	return "", nil
 }
 
 // HSet stores a hash field
 func (c *RedisHighPerfClient) HSet(ctx context.Context, key string, values ...interface{}) (int64, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
+	args := append([]interface{}{key}, values...)
+	result, err := c.execCmd(ctx, "HSET", args...)
+	if err != nil {
+		return 0, err
+	}
+	if n, ok := result.(int64); ok {
+		return n, nil
+	}
 	return 1, nil
 }
 
 // HGetAll retrieves all hash fields
 func (c *RedisHighPerfClient) HGetAll(ctx context.Context, key string) (map[string]string, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
+	result, err := c.execCmd(ctx, "HGETALL", key)
+	if err != nil {
+		return nil, err
+	}
+	if m, ok := result.(map[string]string); ok {
+		return m, nil
+	}
 	return make(map[string]string), nil
 }
 
 // LPush pushes values to the left of a list
 func (c *RedisHighPerfClient) LPush(ctx context.Context, key string, values ...interface{}) (int64, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
+	args := append([]interface{}{key}, values...)
+	result, err := c.execCmd(ctx, "LPUSH", args...)
+	if err != nil {
+		return 0, err
+	}
+	if n, ok := result.(int64); ok {
+		return n, nil
+	}
 	return int64(len(values)), nil
 }
 
 // RPop pops a value from the right of a list
 func (c *RedisHighPerfClient) RPop(ctx context.Context, key string) (string, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
+	result, err := c.execCmd(ctx, "RPOP", key)
+	if err != nil {
+		return "", err
+	}
+	if s, ok := result.(string); ok {
+		return s, nil
+	}
 	return "", nil
 }
 
 // ZAdd adds members to a sorted set
 func (c *RedisHighPerfClient) ZAdd(ctx context.Context, key string, members ...ZMember) (int64, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
+	args := make([]interface{}, 0, 1+len(members)*2)
+	args = append(args, key)
+	for _, m := range members {
+		args = append(args, m.Score, m.Member)
+	}
+	result, err := c.execCmd(ctx, "ZADD", args...)
+	if err != nil {
+		return 0, err
+	}
+	if n, ok := result.(int64); ok {
+		return n, nil
+	}
 	return int64(len(members)), nil
 }
 
@@ -307,25 +415,49 @@ type ZMember struct {
 
 // ZRangeByScore retrieves members by score range
 func (c *RedisHighPerfClient) ZRangeByScore(ctx context.Context, key string, min, max float64) ([]string, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
+	result, err := c.execCmd(ctx, "ZRANGEBYSCORE", key, min, max)
+	if err != nil {
+		return nil, err
+	}
+	if vals, ok := result.([]string); ok {
+		return vals, nil
+	}
 	return nil, nil
 }
 
 // Incr increments a key
 func (c *RedisHighPerfClient) Incr(ctx context.Context, key string) (int64, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
+	result, err := c.execCmd(ctx, "INCR", key)
+	if err != nil {
+		return 0, err
+	}
+	if n, ok := result.(int64); ok {
+		return n, nil
+	}
 	return 1, nil
 }
 
 // IncrBy increments a key by a value
 func (c *RedisHighPerfClient) IncrBy(ctx context.Context, key string, value int64) (int64, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
+	result, err := c.execCmd(ctx, "INCRBY", key, value)
+	if err != nil {
+		return 0, err
+	}
+	if n, ok := result.(int64); ok {
+		return n, nil
+	}
 	return value, nil
 }
 
 // Expire sets a key's expiration
 func (c *RedisHighPerfClient) Expire(ctx context.Context, key string, expiration time.Duration) (bool, error) {
-	atomic.AddUint64(&c.commandsExec, 1)
+	result, err := c.execCmd(ctx, "EXPIRE", key, int64(expiration.Seconds()))
+	if err != nil {
+		return false, err
+	}
+	if n, ok := result.(int64); ok {
+		return n == 1, nil
+	}
 	return true, nil
 }
 

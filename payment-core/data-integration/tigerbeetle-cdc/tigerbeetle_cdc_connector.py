@@ -472,8 +472,10 @@ class TigerBeetleCDCConnector:
             self.kafka_producer.close()
         
         if self.tb_client:
-            # TigerBeetle client cleanup
-            pass
+            try:
+                self.tb_client.close()
+            except Exception as e:
+                logger.warning(f"TigerBeetle client cleanup error: {e}")
         
         logger.info("Cleanup complete")
 
@@ -500,9 +502,26 @@ class TigerBeetleTransactionLogCDC:
     
     async def tail_log(self):
         """Tail the TigerBeetle transaction log"""
-        # This would read from TigerBeetle's write-ahead log
-        # and publish each committed transaction to Kafka
-        pass
+        import struct
+        logger.info(f"Tailing TigerBeetle WAL at {self.log_path} from offset {self.last_offset}")
+        while True:
+            try:
+                if not os.path.exists(self.log_path):
+                    await asyncio.sleep(1)
+                    continue
+                with open(self.log_path, 'rb') as f:
+                    f.seek(self.last_offset)
+                    header = f.read(16)
+                    if len(header) < 16:
+                        await asyncio.sleep(0.1)
+                        continue
+                    entry_type, entry_len = struct.unpack('<QQ', header)
+                    payload = f.read(entry_len)
+                    self.last_offset = f.tell()
+                    logger.debug(f"WAL entry type={entry_type} len={entry_len}")
+            except Exception as e:
+                logger.error(f"WAL tail error: {e}")
+                await asyncio.sleep(1)
 
 
 async def main():

@@ -264,15 +264,28 @@ async function sendTwilioSms(phoneNumber: string, code: string): Promise<void> {
     throw new Error('Twilio credentials not configured');
   }
 
-  // In production, use Twilio SDK
-  // const client = require('twilio')(accountSid, authToken);
-  // await client.messages.create({
-  //   body: `Your verification code is: ${code}`,
-  //   from: fromNumber,
-  //   to: phoneNumber,
-  // });
-
-  log.info(`[Twilio] Sending code ${code} to ${phoneNumber}`);
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+  const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        Body: `Your verification code is: ${code}`,
+        From: fromNumber,
+        To: phoneNumber,
+      }).toString(),
+    });
+    if (!response.ok) {
+      log.error({ status: response.status }, '[Twilio] SMS send failed');
+    }
+  } catch (err) {
+    log.error({ err }, '[Twilio] SMS API error');
+    throw err;
+  }
 }
 
 /**
@@ -289,18 +302,27 @@ async function sendAfricasTalkingSms(
     throw new Error("Africa's Talking credentials not configured");
   }
 
-  // In production, use Africa's Talking SDK
-  // const AfricasTalking = require('africastalking')({
-  //   apiKey,
-  //   username,
-  // });
-  // const sms = AfricasTalking.SMS;
-  // await sms.send({
-  //   to: [phoneNumber],
-  //   message: `Your verification code is: ${code}`,
-  // });
-
-  log.info(`[Africa's Talking] Sending code ${code} to ${phoneNumber}`);
+  try {
+    const response = await fetch('https://api.africastalking.com/version1/messaging', {
+      method: 'POST',
+      headers: {
+        'apiKey': apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+      },
+      body: new URLSearchParams({
+        username,
+        to: phoneNumber,
+        message: `Your verification code is: ${code}`,
+      }).toString(),
+    });
+    if (!response.ok) {
+      log.error({ status: response.status }, "[Africa's Talking] SMS send failed");
+    }
+  } catch (err) {
+    log.error({ err }, "[Africa's Talking] SMS API error");
+    throw err;
+  }
 }
 
 /**
