@@ -203,7 +203,23 @@ export async function attemptWebhookDelivery(
   }
 
   // Update delivery in database
-  // await db.updateWebhookDelivery(delivery);
+  const db = await getDb();
+  if (db && delivery.id) {
+    try {
+      await db.update(webhookDeliveries)
+        .set({
+          status: delivery.status,
+          responseCode: delivery.responseCode ?? undefined,
+          responseBody: delivery.responseBody ?? undefined,
+          attempts: delivery.attempts,
+          nextRetryAt: delivery.nextRetryAt ?? undefined,
+          deliveredAt: delivery.status === 'delivered' ? new Date() : undefined,
+        })
+        .where(eq(webhookDeliveries.webhookId, delivery.id));
+    } catch (err) {
+      log.error({ err }, '[Webhook] Failed to update delivery status');
+    }
+  }
 
   return delivery;
 }
