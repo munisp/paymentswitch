@@ -2,6 +2,8 @@
 //! Uses rule-based scoring with velocity checks, beneficiary pattern analysis,
 //! and corridor risk profiles. Designed for high-throughput screening at wire speed.
 
+pub mod persistence;
+
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};

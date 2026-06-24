@@ -1,0 +1,176 @@
+---
+# PostgreSQL High-Throughput Configuration (via CloudNativePG)
+# Target: 100K+ queries/sec with Patroni HA and PgBouncer connection pooling
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-tuning-config
+  namespace: payment-switch
+data:
+  postgresql.conf: |
+    # Memory (for 64GB RAM node)
+    shared_buffers = '16384MB'
+    effective_cache_size = '49152MB'
+    work_mem = '256MB'
+    maintenance_work_mem = '2048MB'
+
+    # WAL — critical for write throughput
+    wal_buffers = '64MB'
+    wal_level = 'replica'
+    max_wal_size = '4GB'
+    min_wal_size = '1GB'
+    checkpoint_completion_target = 0.9
+    checkpoint_timeout = '15min'
+
+    # Parallelism (16-core node)
+    max_worker_processes = 16
+    max_parallel_workers_per_gather = 8
+    max_parallel_workers = 16
+    max_parallel_maintenance_workers = 4
+
+    # Connection management (PgBouncer in front)
+    max_connections = 500
+    superuser_reserved_connections = 5
+
+    # Query planner (SSD-optimized)
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+    default_statistics_target = 200
+
+    # Vacuum tuning (prevent bloat under heavy writes)
+    autovacuum_max_workers = 4
+    autovacuum_naptime = '10s'
+    autovacuum_vacuum_scale_factor = 0.01
+    autovacuum_analyze_scale_factor = 0.005
+    autovacuum_vacuum_cost_limit = 2000
+
+    # Logging (minimal for performance)
+    log_min_duration_statement = 500
+    log_checkpoints = on
+    log_lock_waits = on
+
+    # Synchronous commit (on for financial data integrity)
+    synchronous_commit = on
+
+    # JIT (off for OLTP — overhead exceeds benefit)
+    jit = off
+
+    # Huge pages (reduce TLB misses)
+    huge_pages = try
+
+---
+# PgBouncer Connection Pooler ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pgbouncer-config
+  namespace: payment-switch
+data:
+  pgbouncer.ini: |
+    [databases]
+    payment_switch = host=postgres-primary.payment-switch.svc port=5432 dbname=payment_switch
+    central_ledger = host=postgres-primary.payment-switch.svc port=5432 dbname=central_ledger
+    account_lookup = host=postgres-primary.payment-switch.svc port=5432 dbname=account_lookup
+    quoting = host=postgres-primary.payment-switch.svc port=5432 dbname=quoting
+    central_settlements = host=postgres-primary.payment-switch.svc port=5432 dbname=central_settlements
+
+    [pgbouncer]
+    listen_addr = 0.0.0.0
+    listen_port = 6432
+    auth_type = md5
+    pool_mode = transaction
+    max_client_conn = 10000
+    default_pool_size = 100
+    min_pool_size = 20
+    reserve_pool_size = 20
+    reserve_pool_timeout = 5
+    server_idle_timeout = 600
+    server_lifetime = 3600
+    server_check_delay = 30
+    server_check_query = SELECT 1
+    log_connections = 0
+    log_disconnections = 0
+    log_pooler_errors = 1
+    stats_period = 60
+    tcp_keepalive = 1
+    tcp_keepcnt = 5
+    tcp_keepidle = 30
+    tcp_keepintvl = 30
+
+---
+# PgBouncer Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgbouncer
+  namespace: payment-switch
+  labels:
+    app: pgbouncer
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: pgbouncer
+  template:
+    metadata:
+      labels:
+        app: pgbouncer
+    spec:
+      containers:
+        - name: pgbouncer
+          image: bitnami/pgbouncer:1.22.0
+          ports:
+            - containerPort: 6432
+              name: pgbouncer
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "500m"
+            limits:
+              memory: "512Mi"
+              cpu: "1000m"
+          readinessProbe:
+            tcpSocket:
+              port: 6432
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 6432
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /bitnami/pgbouncer/conf
+      volumes:
+        - name: config
+          configMap:
+            name: pgbouncer-config
+
+---
+# PgBouncer Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgbouncer
+  namespace: payment-switch
+spec:
+  ports:
+    - port: 6432
+      targetPort: 6432
+      name: pgbouncer
+  selector:
+    app: pgbouncer
+
+---
+# PodDisruptionBudget for PgBouncer
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pgbouncer-pdb
+  namespace: payment-switch
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: pgbouncer

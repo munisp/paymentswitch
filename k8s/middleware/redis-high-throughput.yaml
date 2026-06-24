@@ -1,0 +1,179 @@
+---
+# Redis Cluster Configuration — Optimized for 500K+ ops/sec per node
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-cluster-config
+  namespace: payment-switch
+data:
+  redis.conf: |
+    # Memory
+    maxmemory 8gb
+    maxmemory-policy allkeys-lfu
+    maxmemory-samples 10
+
+    # Networking
+    tcp-backlog 65535
+    tcp-keepalive 60
+    timeout 300
+    bind 0.0.0.0
+    protected-mode no
+
+    # Cluster mode
+    cluster-enabled yes
+    cluster-config-file nodes.conf
+    cluster-node-timeout 15000
+    cluster-require-full-coverage no
+    cluster-allow-reads-when-down yes
+
+    # Persistence (AOF for durability)
+    appendonly yes
+    appendfsync everysec
+    no-appendfsync-on-rewrite yes
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 512mb
+
+    # Disable RDB for pure cache performance
+    save ""
+
+    # Threading (Redis 6+)
+    io-threads 8
+    io-threads-do-reads yes
+
+    # Lazy free (background memory deallocation)
+    lazyfree-lazy-eviction yes
+    lazyfree-lazy-expire yes
+    lazyfree-lazy-server-del yes
+    replica-lazy-flush yes
+
+    # Slow log
+    slowlog-log-slower-than 10000
+    slowlog-max-len 1024
+
+    # Client limits
+    maxclients 65535
+
+    # Latency monitoring
+    latency-monitor-threshold 50
+
+---
+# Redis Cluster StatefulSet (6 nodes: 3 masters + 3 replicas)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-cluster
+  namespace: payment-switch
+  labels:
+    app: redis-cluster
+spec:
+  serviceName: redis-cluster-headless
+  replicas: 6
+  selector:
+    matchLabels:
+      app: redis-cluster
+  template:
+    metadata:
+      labels:
+        app: redis-cluster
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9121"
+    spec:
+      terminationGracePeriodSeconds: 60
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: redis-cluster
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: redis
+          image: redis:7.2-alpine
+          command: ["redis-server", "/conf/redis.conf"]
+          ports:
+            - containerPort: 6379
+              name: redis
+            - containerPort: 16379
+              name: cluster-bus
+          resources:
+            requests:
+              memory: "10Gi"
+              cpu: "2000m"
+            limits:
+              memory: "12Gi"
+              cpu: "4000m"
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /conf
+      volumes:
+        - name: config
+          configMap:
+            name: redis-cluster-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: gp3-encrypted
+        resources:
+          requests:
+            storage: 50Gi
+
+---
+# Redis Cluster Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster-headless
+  namespace: payment-switch
+spec:
+  clusterIP: None
+  ports:
+    - port: 6379
+      name: redis
+    - port: 16379
+      name: cluster-bus
+  selector:
+    app: redis-cluster
+
+---
+# Redis Cluster Client Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster
+  namespace: payment-switch
+spec:
+  ports:
+    - port: 6379
+      name: redis
+  selector:
+    app: redis-cluster
+
+---
+# PodDisruptionBudget — maintain quorum
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-cluster-pdb
+  namespace: payment-switch
+spec:
+  minAvailable: 4
+  selector:
+    matchLabels:
+      app: redis-cluster

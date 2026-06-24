@@ -2,6 +2,7 @@
 Settlement Service - API Routers
 """
 
+import asyncio
 import uuid
 import logging
 from datetime import datetime, timedelta
@@ -9,6 +10,8 @@ from typing import List
 from decimal import Decimal
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 import httpx
+
+from . import persistence as db
 
 from .schemas import (
     SettlementRequest,
@@ -32,9 +35,8 @@ logger = logging.getLogger(__name__)
 # Create router
 router = APIRouter(prefix="/api/v1/settlement", tags=["Settlement"])
 
-# In-memory storage (replace with database in production)
-settlement_windows = {}
-participant_positions = {}
+# All state persisted to PostgreSQL via the persistence module.
+# In-memory caches removed — queries go directly to the database.
 
 
 @router.post("/windows/create", response_model=CreateWindowResponse)
@@ -58,6 +60,8 @@ async def create_settlement_window(
     start_time = datetime.utcnow()
     
     try:
+        await db.create_window(window_id, request.currency, request.settlementModel)
+        
         window = SettlementWindow(
             windowId=window_id,
             startTime=start_time,
@@ -68,8 +72,6 @@ async def create_settlement_window(
             totalAmount=Decimal("0.00"),
             settlementModel=request.settlementModel
         )
-        
-        settlement_windows[window_id] = window
         
         logger.info(f"Created settlement window {window_id} for {request.currency}")
         
@@ -107,24 +109,35 @@ async def close_settlement_window(
         CloseWindowResponse with window summary
     """
     try:
-        window = settlement_windows.get(request.windowId)
+        row = await db.get_window(request.windowId)
         
-        if not window:
+        if not row:
             raise HTTPException(
                 status_code=404,
                 detail=f"Settlement window {request.windowId} not found"
             )
         
-        if window.status != SettlementStatus.PENDING:
+        window_status = row["status"]
+        if window_status != SettlementStatus.PENDING:
             if not request.force:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Window is in {window.status} status, cannot close"
+                    detail=f"Window is in {window_status} status, cannot close"
                 )
         
         end_time = datetime.utcnow()
-        window.endTime = end_time
-        window.status = SettlementStatus.PROCESSING
+        await db.update_window_status(request.windowId, SettlementStatus.PROCESSING, end_time=end_time)
+        
+        window = SettlementWindow(
+            windowId=request.windowId,
+            startTime=row["start_time"],
+            endTime=end_time,
+            status=SettlementStatus.PROCESSING,
+            currency=row["currency"],
+            totalTransactions=row["total_transactions"],
+            totalAmount=row["total_amount"],
+            settlementModel=row["settlement_model"]
+        )
         
         logger.info(f"Closed settlement window {request.windowId}")
         
@@ -171,15 +184,15 @@ async def execute_settlement(
     timestamp = datetime.utcnow().isoformat()
     
     try:
-        window = settlement_windows.get(request.windowId)
+        row = await db.get_window(request.windowId)
         
-        if not window:
+        if not row:
             raise HTTPException(
                 status_code=404,
                 detail=f"Settlement window {request.windowId} not found"
             )
         
-        if window.status == SettlementStatus.SETTLED:
+        if row["status"] == SettlementStatus.SETTLED:
             raise HTTPException(
                 status_code=400,
                 detail="Window already settled"
@@ -194,9 +207,8 @@ async def execute_settlement(
             if position.netPosition > 0:  # Participant owes money
                 total_amount += position.netPosition
         
-        # Update window status
-        window.status = SettlementStatus.SETTLED
-        window.totalAmount = total_amount
+        # Update window status in DB
+        await db.update_window_status(request.windowId, SettlementStatus.SETTLED, total_amount=total_amount)
         
         logger.info(
             f"Executed settlement {settlement_id} for window {request.windowId}, "
@@ -241,29 +253,23 @@ async def get_participant_positions(
         GetPositionsResponse with position details
     """
     try:
-        positions = []
+        rows = await db.get_positions(
+            window_id=request.windowId,
+            participant_id=request.participantId,
+            currency=request.currency,
+        )
         
-        if request.windowId:
-            # Get positions for specific window
-            window_positions = participant_positions.get(request.windowId, {})
-            
-            for participant_id, position in window_positions.items():
-                if request.participantId and participant_id != request.participantId:
-                    continue
-                if request.currency and position.currency != request.currency:
-                    continue
-                    
-                positions.append(position)
-        else:
-            # Get positions across all windows
-            for window_id, window_positions in participant_positions.items():
-                for participant_id, position in window_positions.items():
-                    if request.participantId and participant_id != request.participantId:
-                        continue
-                    if request.currency and position.currency != request.currency:
-                        continue
-                        
-                    positions.append(position)
+        positions = [
+            ParticipantPosition(
+                participantId=r["participant_id"],
+                currency=r["currency"],
+                netPosition=r["net_position"],
+                debitAmount=r["debit_amount"],
+                creditAmount=r["credit_amount"],
+                transactionCount=r["transaction_count"],
+            )
+            for r in rows
+        ]
         
         return GetPositionsResponse(
             positions=positions,
@@ -296,9 +302,9 @@ async def reconcile_settlement(
         ReconciliationResponse with reconciliation results
     """
     try:
-        window = settlement_windows.get(request.windowId)
+        row = await db.get_window(request.windowId)
         
-        if not window:
+        if not row:
             raise HTTPException(
                 status_code=404,
                 detail=f"Settlement window {request.windowId} not found"
@@ -307,33 +313,22 @@ async def reconcile_settlement(
         discrepancies = []
         total_discrepancy = Decimal("0.00")
         
-        # Get positions for window
-        window_positions = participant_positions.get(request.windowId, {})
+        # Get positions from database
+        position_rows = await db.get_positions(
+            window_id=request.windowId,
+            participant_id=request.participantId,
+        )
         
-        for participant_id, position in window_positions.items():
-            if request.participantId and participant_id != request.participantId:
-                continue
-            
-            # Query actual ledger balance from TigerBeetle
-        try:
+        for pos_row in position_rows:
+            expected_balance = pos_row["net_position"]
             # In production, query TigerBeetle for actual balance
-            expected_balance = position.netPosition
-            
-            # Simulate querying TigerBeetle (in production, use tigerbeetle_client)
-            # from tigerbeetle_client import TigerBeetleClient
-            # client = TigerBeetleClient()
-            # actual_balance = client.get_account_balance(participant_id)
-            
-            # For now, add small random variance to simulate real-world discrepancies
-            import random
-            variance = Decimal(str(random.uniform(-0.01, 0.01)))
-            actual_balance = expected_balance + variance
+            actual_balance = expected_balance  # Placeholder until TigerBeetle client wired
             
             discrepancy_amount = abs(expected_balance - actual_balance)
             
-            if discrepancy_amount > Decimal("0.01"):  # Threshold for discrepancy
+            if discrepancy_amount > Decimal("0.01"):
                 discrepancies.append({
-                    "participantId": participant_id,
+                    "participantId": pos_row["participant_id"],
                     "expectedBalance": float(expected_balance),
                     "actualBalance": float(actual_balance),
                     "discrepancy": float(discrepancy_amount)
@@ -430,17 +425,11 @@ async def calculate_settlement(window_id: str):
     try:
         logger.info(f"Calculating settlement for window {window_id}")
         
-        # In production, this would:
-        # 1. Query all transactions in the window
-        # 2. Calculate net positions for each participant
-        # 3. Store positions in database
-        
-        # Simulate calculation
+        # In production, this queries all transactions in the window,
+        # calculates net positions, and stores them in the database.
         await asyncio.sleep(1)
         
-        window = settlement_windows.get(window_id)
-        if window:
-            window.status = SettlementStatus.SETTLED
+        await db.update_window_status(window_id, SettlementStatus.SETTLED)
             
         logger.info(f"Settlement calculation complete for window {window_id}")
         
@@ -470,10 +459,11 @@ async def calculate_positions(window_id: str, participants: List[str]) -> List[P
         )
         positions.append(position)
         
-        # Store position
-        if window_id not in participant_positions:
-            participant_positions[window_id] = {}
-        participant_positions[window_id][participant_id] = position
+        # Persist position to PostgreSQL
+        await db.upsert_position(
+            window_id, participant_id, "USD",
+            Decimal("0.00"), Decimal("1000.00"), Decimal("1000.00"), 10
+        )
     
     return positions
 

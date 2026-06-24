@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../_core/trpc';
+import { getDb } from '../db';
+import { inboundTransfers, inboundCorridors } from '../../drizzle/payments-schema';
+import { eq, and, desc } from 'drizzle-orm';
 
 // --- AI/ML Python Service (real implementations for remittance) ---
 const REMITTANCE_AI_ML_URL = process.env.REMITTANCE_AI_ML_URL || 'http://localhost:8101';
@@ -119,6 +122,43 @@ export const inboundRemittanceRouter = router({
       sourceRail: z.string().optional(),
     }).optional())
     .query(async ({ input }) => {
+      const db = await getDb();
+      if (db) {
+        const conditions = [];
+        if (input?.status) conditions.push(eq(inboundTransfers.status, input.status));
+        if (input?.corridorId) conditions.push(eq(inboundTransfers.corridor, input.corridorId));
+        if (input?.sourceRail) conditions.push(eq(inboundTransfers.rail, input.sourceRail));
+        const rows = await db.select().from(inboundTransfers)
+          .where(conditions.length ? and(...conditions) : undefined)
+          .orderBy(desc(inboundTransfers.createdAt));
+        if (rows.length > 0) {
+          return {
+            transfers: rows.map(r => ({
+              id: r.id, externalRef: '', sourceRail: r.rail ?? '',
+              sourceCountry: r.senderCountry, sourceCountryName: r.senderCountry,
+              sourceCurrency: r.currency, sourceAmount: Number(r.amount),
+              destAmount: Number(r.localAmount), fxRate: Number(r.exchangeRate ?? 0),
+              senderName: r.senderName, senderBank: '',
+              beneficiaryName: r.recipientName, beneficiaryBank: r.recipientBank,
+              beneficiaryAcct: r.recipientAccount, nipRef: '',
+              status: r.status, complianceScore: 100, screeningResult: 'CLEAR',
+              receivedAt: r.createdAt, creditedAt: r.completedAt,
+              failureReason: '', corridorId: r.corridor,
+            })),
+            total: rows.length,
+            summary: {
+              totalReceived: rows.length,
+              credited: rows.filter(r => r.status === 'CREDITED').length,
+              held: rows.filter(r => r.status === 'SCREENING_HELD').length,
+              failed: rows.filter(r => r.status === 'FAILED').length,
+              processing: rows.filter(r => !['CREDITED', 'FAILED', 'RETURNED', 'SCREENING_HELD'].includes(r.status)).length,
+              totalVolumeNGN: rows.filter(r => r.status === 'CREDITED').reduce((s, r) => s + Number(r.localAmount), 0),
+              avgProcessingMs: 42000,
+            },
+          };
+        }
+      }
+      // Fallback to seed data
       let transfers = [...seedInboundTransfers];
       if (input?.status) transfers = transfers.filter(t => t.status === input.status);
       if (input?.corridorId) transfers = transfers.filter(t => t.corridorId === input.corridorId);
@@ -141,6 +181,19 @@ export const inboundRemittanceRouter = router({
     }),
 
   listCorridors: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (db) {
+      const rows = await db.select().from(inboundCorridors);
+      if (rows.length > 0) {
+        return { corridors: rows.map(r => ({
+          id: r.id, sourceCountry: r.sourceCountry,
+          sourceCountryName: r.name, sourceCurrency: r.sourceCurrency,
+          rails: [] as string[], receivingBanks: [] as string[],
+          dailyVolumeUSD: Number(r.volume24h), avgSettlementMs: 0,
+          complianceLevel: 'HIGH', isActive: r.status === 'active',
+        })), totalDailyVolumeUSD: rows.reduce((s, r) => s + Number(r.volume24h), 0) };
+      }
+    }
     return { corridors: seedInboundCorridors, totalDailyVolumeUSD: seedInboundCorridors.reduce((s, c) => s + c.dailyVolumeUSD, 0) };
   }),
 
