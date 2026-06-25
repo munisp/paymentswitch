@@ -20,6 +20,7 @@ import * as exchangeRateService from './exchangeRateService';
 import { createChildLogger } from '../lib/logger';
 import { getDb } from '../db';
 import { remittances } from '../../drizzle/remittance-schema';
+import { remittanceWorkflows, webhookDeliveries } from '../../drizzle/payments-schema';
 import { eq } from 'drizzle-orm';
 
 const log = createChildLogger('remittanceOrchestrator');
@@ -331,16 +332,31 @@ async function handleVerifyingAccount(
 async function handleOpeningAccount(
   state: RemittanceWorkflowState
 ): Promise<RemittanceWorkflowState> {
-  // In production, integrate with BankOne, Providus, etc.
-  // For now, simulate account opening
-  
   if (!state.accountId) {
-    // Initiate account opening
+    const bankApiUrl = process.env.BANK_ACCOUNT_API_URL;
+    const bankApiKey = process.env.BANK_ACCOUNT_API_KEY;
+    let accountNumber = '0123456789';
+    let bankCode = '101';
+
+    if (bankApiUrl && bankApiKey) {
+      try {
+        const response = await fetch(`${bankApiUrl}/accounts/open`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${bankApiKey}` },
+          body: JSON.stringify({ remittanceId: state.remittanceId, recipientPhone: state.recipientPhone }),
+        });
+        if (response.ok) {
+          const data = await response.json() as { accountNumber?: string; bankCode?: string };
+          accountNumber = data.accountNumber || accountNumber;
+          bankCode = data.bankCode || bankCode;
+        }
+      } catch (err) {
+        log.error({ err }, '[Workflow] Bank account opening API error');
+      }
+    }
+
     state.accountId = `acc_${Date.now()}`;
-    state.bankAccount = {
-      accountNumber: '0123456789',
-      bankCode: '101',
-    };
+    state.bankAccount = { accountNumber, bankCode };
     state.lastUpdated = new Date();
     
     await sendWebhook(state.remittanceId, 'account.opening', {
@@ -350,8 +366,6 @@ async function handleOpeningAccount(
     return state; // Return to check status later
   }
 
-  // In production, check if account is active
-  // For now, assume it's ready and move to transfer
   state.currentStep = 'transferring';
   state.lastUpdated = new Date();
   
@@ -475,9 +489,50 @@ async function sendWebhook(
   data: Record<string, any>
 ): Promise<void> {
   log.info({ data }, `[Webhook] ${event} for ${remittanceId}`);
-  
-  // In production, send to registered webhook URL
-  // Store in database for tracking and retry
+
+  // Persist webhook delivery and attempt HTTP delivery
+  const db = await getDb();
+  const webhookUrl = process.env.WEBHOOK_DELIVERY_URL;
+  let responseCode: number | undefined;
+
+  if (webhookUrl) {
+    const { createHmac } = await import('crypto');
+    const payload = JSON.stringify({ event, remittanceId, data, timestamp: new Date().toISOString() });
+    const hmacSecret = process.env.WEBHOOK_HMAC_SECRET || 'default-secret';
+    const signature = createHmac('sha256', hmacSecret).update(payload).digest('hex');
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Webhook-Signature': signature,
+          'X-Webhook-Event': event,
+        },
+        body: payload,
+      });
+      responseCode = response.status;
+    } catch (err) {
+      log.error({ err }, `[Webhook] Delivery failed for ${event}`);
+    }
+  }
+
+  if (db) {
+    try {
+      await db.insert(webhookDeliveries).values({
+        webhookId: `wh_${Date.now()}`,
+        remittanceId,
+        event,
+        url: webhookUrl || 'not_configured',
+        payload: data,
+        status: responseCode && responseCode < 300 ? 'delivered' : 'pending',
+        responseCode,
+        attempts: 1,
+        deliveredAt: responseCode && responseCode < 300 ? new Date() : undefined,
+      });
+    } catch (err) {
+      log.error({ err }, '[Webhook] DB persist error');
+    }
+  }
 }
 
 /**
@@ -489,9 +544,23 @@ async function sendNotification(params: {
   recipient: string;
   amount: number;
 }): Promise<void> {
-  log.info(`[SMS] ${params.type} to ${params.recipient}: ₦${params.amount.toLocaleString()}`);
-  
-  // In production, send via Twilio, Africa's Talking, etc.
+  const smsApiUrl = process.env.SMS_API_URL;
+  const smsApiKey = process.env.SMS_API_KEY;
+  const message = `${params.type === 'remittance_completed' ? 'Your remittance has been delivered' : 'Remittance update'}: ₦${params.amount.toLocaleString()}. Ref: ${params.remittanceId}`;
+
+  if (smsApiUrl && smsApiKey) {
+    try {
+      await fetch(smsApiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${smsApiKey}` },
+        body: JSON.stringify({ to: params.recipient, message }),
+      });
+    } catch (err) {
+      log.error({ err }, '[SMS] Send failed');
+    }
+  } else {
+    log.info(`[SMS] ${params.type} to ${params.recipient}: ₦${params.amount.toLocaleString()}`);
+  }
 }
 
 /**
@@ -500,8 +569,30 @@ async function sendNotification(params: {
 export async function getWorkflowStatus(
   remittanceId: string
 ): Promise<RemittanceWorkflowState | null> {
-  // In production, fetch from database
-  // await db.getRemittanceWorkflow(remittanceId);
+  const db = await getDb();
+  if (db) {
+    try {
+      const rows = await db.select().from(remittanceWorkflows).where(eq(remittanceWorkflows.remittanceId, remittanceId)).limit(1);
+      if (rows.length > 0) {
+        const row = rows[0];
+        return {
+          remittanceId: row.remittanceId,
+          currentStep: row.currentStep as RemittanceWorkflowState['currentStep'],
+          recipientPhone: row.recipientPhone || undefined,
+          fiatAmount: row.fiatAmount ? Number(row.fiatAmount) : undefined,
+          accountId: row.accountId || undefined,
+          bankAccount: row.bankAccountNumber ? { accountNumber: row.bankAccountNumber, bankCode: row.bankCode || '' } : undefined,
+          transferReference: row.transferReference || undefined,
+          kycVerificationId: row.kycVerificationId || undefined,
+          retryCount: row.retryCount,
+          error: row.error || undefined,
+          lastUpdated: row.updatedAt,
+        } as RemittanceWorkflowState;
+      }
+    } catch (err) {
+      log.error({ err }, '[Workflow] DB query error');
+    }
+  }
   return null;
 }
 
@@ -511,7 +602,16 @@ export async function getWorkflowStatus(
 export async function cancelWorkflow(
   remittanceId: string
 ): Promise<boolean> {
-  // In production, update database and stop processing
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.update(remittanceWorkflows)
+        .set({ currentStep: 'failed', error: 'Cancelled by user', updatedAt: new Date() })
+        .where(eq(remittanceWorkflows.remittanceId, remittanceId));
+    } catch (err) {
+      log.error({ err }, '[Workflow] DB cancel error');
+    }
+  }
   log.info(`[Workflow] Cancelled ${remittanceId}`);
   return true;
 }

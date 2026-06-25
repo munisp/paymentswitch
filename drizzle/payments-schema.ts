@@ -226,3 +226,132 @@ export const customsDutyPayments = pgTable("customs_duty_payments", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   paidAt: timestamp("paid_at"),
 });
+
+// --- Bill Payments ---
+
+export const billPayments = pgTable("bill_payments", {
+  id: text("id").primaryKey(),
+  remittanceId: text("remittance_id"),
+  reference: text("reference").notNull(),
+  providerId: text("provider_id").notNull(),
+  categoryId: text("category_id").notNull(),
+  amount: decimal("amount", { precision: 20, scale: 4 }).notNull(),
+  fee: decimal("fee", { precision: 20, scale: 4 }).notNull().default("0"),
+  status: text("status").notNull().default("pending"),
+  token: text("token"),
+  customerRef: text("customer_ref"),
+  customerName: text("customer_name"),
+  providerResponse: jsonb("provider_response"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
+// --- Mobile Money ---
+
+export const mobileMoneyTransfers = pgTable("mobile_money_transfers", {
+  id: text("id").primaryKey(),
+  remittanceId: text("remittance_id"),
+  reference: text("reference").notNull(),
+  provider: text("provider").notNull(),
+  recipientPhone: text("recipient_phone").notNull(),
+  amount: decimal("amount", { precision: 20, scale: 4 }).notNull(),
+  fee: decimal("fee", { precision: 20, scale: 4 }).notNull().default("0"),
+  status: text("status").notNull().default("pending"),
+  transactionId: text("transaction_id"),
+  providerResponse: jsonb("provider_response"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
+// --- Agent Cash Collection ---
+
+export const collectionCodes = pgTable("collection_codes", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull(),
+  remittanceId: text("remittance_id").notNull(),
+  amount: decimal("amount", { precision: 20, scale: 4 }).notNull(),
+  currency: text("currency").notNull().default("NGN"),
+  recipientPhone: text("recipient_phone").notNull(),
+  provider: text("provider").notNull(),
+  qrCodeUrl: text("qr_code_url"),
+  status: text("status").notNull().default("active"),
+  collectedAt: timestamp("collected_at"),
+  agentId: text("agent_id"),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// --- Stablecoin Conversions ---
+
+export const stablecoinConversions = pgTable("stablecoin_conversions", {
+  id: text("id").primaryKey(),
+  chargeId: text("charge_id").notNull(),
+  remittanceId: text("remittance_id"),
+  conversionId: text("conversion_id").notNull(),
+  cryptoAmount: decimal("crypto_amount", { precision: 20, scale: 8 }),
+  cryptoCurrency: text("crypto_currency"),
+  fiatAmount: decimal("fiat_amount", { precision: 20, scale: 4 }),
+  fiatCurrency: text("fiat_currency").default("NGN"),
+  exchangeRate: decimal("exchange_rate", { precision: 16, scale: 8 }),
+  status: text("status").notNull().default("pending"),
+  providerResponse: jsonb("provider_response"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+});
+
+// --- Remittance Workflows ---
+
+export const remittanceWorkflows = pgTable("remittance_workflows", {
+  id: text("id").primaryKey(),
+  remittanceId: text("remittance_id").notNull(),
+  currentStep: text("current_step").notNull().default("waiting_payment"),
+  recipientPhone: text("recipient_phone"),
+  fiatAmount: decimal("fiat_amount", { precision: 20, scale: 4 }),
+  accountId: text("account_id"),
+  bankAccountNumber: text("bank_account_number"),
+  bankCode: text("bank_code"),
+  transferReference: text("transfer_reference"),
+  kycVerificationId: text("kyc_verification_id"),
+  retryCount: integer("retry_count").notNull().default(0),
+  error: text("error"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// --- AML/Sanctions Screening ---
+
+export const amlScreeningResults = pgTable("aml_screening_results", {
+  id: serial("id").primaryKey(),
+  entityType: text("entity_type").notNull(), // individual, business
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  businessName: text("business_name"),
+  dateOfBirth: text("date_of_birth"),
+  nationality: text("nationality"),
+  riskScore: decimal("risk_score", { precision: 5, scale: 2 }).notNull(),
+  riskLevel: text("risk_level").notNull(), // low, medium, high
+  screeningProvider: text("screening_provider").notNull(),
+  matches: jsonb("matches").default([]),
+  sanctionsPassed: boolean("sanctions_passed"),
+  sanctionsMatches: jsonb("sanctions_matches").default([]),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// --- Webhook Deliveries ---
+
+export const webhookDeliveries = pgTable("webhook_deliveries", {
+  id: serial("id").primaryKey(),
+  webhookId: text("webhook_id").notNull(),
+  remittanceId: text("remittance_id"),
+  event: text("event").notNull(),
+  url: text("url").notNull(),
+  payload: jsonb("payload"),
+  status: text("status").notNull().default("pending"),
+  responseCode: integer("response_code"),
+  responseBody: text("response_body"),
+  attempts: integer("attempts").notNull().default(0),
+  nextRetryAt: timestamp("next_retry_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  deliveredAt: timestamp("delivered_at"),
+});

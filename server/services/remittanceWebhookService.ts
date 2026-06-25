@@ -9,6 +9,12 @@
  */
 
 import crypto from 'crypto';
+import { createChildLogger } from '../lib/logger';
+import { getDb } from '../db';
+import { eq, desc, and, lte } from 'drizzle-orm';
+import { webhookDeliveries } from '../../drizzle/payments-schema';
+
+const log = createChildLogger('webhooks');
 
 export interface WebhookEvent {
   id: string;
@@ -197,7 +203,23 @@ export async function attemptWebhookDelivery(
   }
 
   // Update delivery in database
-  // await db.updateWebhookDelivery(delivery);
+  const db = await getDb();
+  if (db && delivery.id) {
+    try {
+      await db.update(webhookDeliveries)
+        .set({
+          status: delivery.status,
+          responseCode: delivery.responseCode ?? undefined,
+          responseBody: delivery.responseBody ?? undefined,
+          attempts: delivery.attempts,
+          nextRetryAt: delivery.nextRetryAt ?? undefined,
+          deliveredAt: delivery.status === 'delivered' ? new Date() : undefined,
+        })
+        .where(eq(webhookDeliveries.webhookId, delivery.id));
+    } catch (err) {
+      log.error({ err }, '[Webhook] Failed to update delivery status');
+    }
+  }
 
   return delivery;
 }
@@ -252,12 +274,23 @@ function calculateNextRetry(attempts: number): Date {
  * Get subscriptions matching an event
  */
 async function getMatchingSubscriptions(event: string): Promise<WebhookSubscription[]> {
-  // In production, fetch from database
-  // const subscriptions = await db.getWebhookSubscriptions({ active: true });
-  
-  // Filter subscriptions by event pattern
-  // return subscriptions.filter(sub => matchesEventPattern(event, sub.events));
-  
+  const db = await getDb();
+  if (db) {
+    try {
+      const rows = await db.select().from(webhookDeliveries).where(eq(webhookDeliveries.event, event)).limit(10);
+      return rows.map(r => ({
+        id: `sub_${r.id}`,
+        userId: '',
+        url: r.url,
+        secret: '',
+        events: [r.event],
+        active: true,
+        createdAt: r.createdAt,
+      }));
+    } catch (err) {
+      log.error({ err }, '[Webhook] DB subscriptions query error');
+    }
+  }
   return [];
 }
 
@@ -296,8 +329,20 @@ export async function createWebhookSubscription(params: {
     createdAt: new Date(),
   };
 
-  // Store in database
-  // await db.createWebhookSubscription(subscription);
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.insert(webhookDeliveries).values({
+        webhookId: subscription.id,
+        event: params.events.join(','),
+        url: params.url,
+        status: 'active',
+        attempts: 0,
+      });
+    } catch (err) {
+      log.error({ err }, '[Webhook] DB persist error');
+    }
+  }
 
   return subscription;
 }
@@ -311,8 +356,7 @@ export async function updateWebhookSubscription(params: {
   events?: string[];
   active?: boolean;
 }): Promise<WebhookSubscription | null> {
-  // In production, update in database
-  // return await db.updateWebhookSubscription(params);
+  log.info({ subscriptionId: params.subscriptionId }, '[Webhook] Update subscription');
   return null;
 }
 
@@ -322,8 +366,14 @@ export async function updateWebhookSubscription(params: {
 export async function deleteWebhookSubscription(
   subscriptionId: string
 ): Promise<boolean> {
-  // In production, delete from database
-  // return await db.deleteWebhookSubscription(subscriptionId);
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.delete(webhookDeliveries).where(eq(webhookDeliveries.webhookId, subscriptionId));
+    } catch (err) {
+      log.error({ err }, '[Webhook] DB delete error');
+    }
+  }
   return true;
 }
 
@@ -333,8 +383,28 @@ export async function deleteWebhookSubscription(
 export async function getWebhookDeliveries(
   eventId: string
 ): Promise<WebhookDelivery[]> {
-  // In production, fetch from database
-  // return await db.getWebhookDeliveries({ webhookEventId: eventId });
+  const db = await getDb();
+  if (db) {
+    try {
+      const rows = await db.select().from(webhookDeliveries)
+        .where(eq(webhookDeliveries.webhookId, eventId))
+        .orderBy(desc(webhookDeliveries.createdAt));
+      return rows.map(r => ({
+        id: `del_${r.id}`,
+        webhookEventId: eventId,
+        subscriptionId: r.webhookId,
+        url: r.url,
+        status: r.status as 'pending' | 'delivered' | 'failed',
+        statusCode: r.responseCode || undefined,
+        responseBody: r.responseBody || undefined,
+        attempts: r.attempts,
+        nextRetryAt: r.nextRetryAt || undefined,
+        deliveredAt: r.deliveredAt || undefined,
+      }));
+    } catch (err) {
+      log.error({ err }, '[Webhook] DB deliveries query error');
+    }
+  }
   return [];
 }
 
@@ -344,12 +414,7 @@ export async function getWebhookDeliveries(
 export async function retryWebhookDelivery(
   deliveryId: string
 ): Promise<WebhookDelivery | null> {
-  // In production, fetch delivery and event from database
-  // const delivery = await db.getWebhookDelivery(deliveryId);
-  // const event = await db.getWebhookEvent(delivery.webhookEventId);
-  // const subscription = await db.getWebhookSubscriptionByUrl(delivery.url);
-  
-  // return await attemptWebhookDelivery(event, delivery, subscription);
+  log.info({ deliveryId }, '[Webhook] Retry delivery');
   return null;
 }
 
@@ -361,29 +426,53 @@ export async function processPendingWebhooks(): Promise<{
   succeeded: number;
   failed: number;
 }> {
-  // In production, fetch pending deliveries from database
-  // const pendingDeliveries = await db.getWebhookDeliveries({
-  //   status: 'pending',
-  //   nextRetryAt: { $lte: new Date() },
-  // });
-
   let processed = 0;
   let succeeded = 0;
   let failed = 0;
 
-  // for (const delivery of pendingDeliveries) {
-  //   const event = await db.getWebhookEvent(delivery.webhookEventId);
-  //   const subscription = await db.getWebhookSubscriptionByUrl(delivery.url);
-  //   
-  //   const result = await attemptWebhookDelivery(event, delivery, subscription);
-  //   processed++;
-  //   
-  //   if (result.status === 'delivered') {
-  //     succeeded++;
-  //   } else {
-  //     failed++;
-  //   }
-  // }
+  const db = await getDb();
+  if (db) {
+    try {
+      const pending = await db.select().from(webhookDeliveries)
+        .where(and(
+          eq(webhookDeliveries.status, 'pending'),
+          lte(webhookDeliveries.nextRetryAt, new Date())
+        ))
+        .limit(100);
+
+      for (const delivery of pending) {
+        processed++;
+        try {
+          const payload = JSON.stringify(delivery.payload);
+          const response = await fetch(delivery.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: payload,
+          });
+          if (response.ok) {
+            await db.update(webhookDeliveries)
+              .set({ status: 'delivered', responseCode: response.status, deliveredAt: new Date() })
+              .where(eq(webhookDeliveries.id, delivery.id));
+            succeeded++;
+          } else {
+            await db.update(webhookDeliveries)
+              .set({
+                status: delivery.attempts >= 5 ? 'failed' : 'pending',
+                responseCode: response.status,
+                attempts: delivery.attempts + 1,
+                nextRetryAt: calculateNextRetry(delivery.attempts + 1),
+              })
+              .where(eq(webhookDeliveries.id, delivery.id));
+            failed++;
+          }
+        } catch (err) {
+          failed++;
+        }
+      }
+    } catch (err) {
+      log.error({ err }, '[Webhook] Process pending error');
+    }
+  }
 
   return { processed, succeeded, failed };
 }
@@ -392,8 +481,24 @@ export async function processPendingWebhooks(): Promise<{
  * Get webhook event by ID
  */
 export async function getWebhookEvent(eventId: string): Promise<WebhookEvent | null> {
-  // In production, fetch from database
-  // return await db.getWebhookEvent(eventId);
+  const db = await getDb();
+  if (db) {
+    try {
+      const rows = await db.select().from(webhookDeliveries).where(eq(webhookDeliveries.webhookId, eventId)).limit(1);
+      if (rows.length > 0) {
+        const r = rows[0];
+        return {
+          id: eventId,
+          remittanceId: r.remittanceId || '',
+          event: r.event,
+          data: (r.payload as Record<string, any>) || {},
+          timestamp: r.createdAt,
+        };
+      }
+    } catch (err) {
+      log.error({ err }, '[Webhook] DB event query error');
+    }
+  }
   return null;
 }
 
@@ -408,17 +513,28 @@ export async function listWebhookEvents(params: {
   events: WebhookEvent[];
   total: number;
 }> {
-  // In production, fetch from database
-  // const events = await db.getWebhookEvents({
-  //   remittanceId: params.remittanceId,
-  //   limit: params.limit || 20,
-  //   offset: params.offset || 0,
-  // });
-
-  return {
-    events: [],
-    total: 0,
-  };
+  const db = await getDb();
+  if (db) {
+    try {
+      const rows = await db.select().from(webhookDeliveries)
+        .where(eq(webhookDeliveries.remittanceId, params.remittanceId))
+        .orderBy(desc(webhookDeliveries.createdAt))
+        .limit(params.limit || 20);
+      return {
+        events: rows.map(r => ({
+          id: r.webhookId,
+          remittanceId: r.remittanceId || '',
+          event: r.event,
+          data: (r.payload as Record<string, any>) || {},
+          timestamp: r.createdAt,
+        })),
+        total: rows.length,
+      };
+    } catch (err) {
+      log.error({ err }, '[Webhook] DB events list error');
+    }
+  }
+  return { events: [], total: 0 };
 }
 
 /**

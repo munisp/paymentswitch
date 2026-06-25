@@ -194,8 +194,17 @@ class FeatureStore:
     
     def _persist_features(self, entity_id: str, features: Dict[str, Any], timestamp: datetime) -> None:
         """Persist features to database"""
-        # Implementation would write to feature store tables
-        pass
+        if not self.db:
+            return
+        try:
+            self.db.execute(
+                """INSERT INTO feature_store (entity_id, features, computed_at)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (entity_id) DO UPDATE SET features = EXCLUDED.features, computed_at = EXCLUDED.computed_at""",
+                (entity_id, json.dumps(features, default=str), timestamp)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to persist features for {entity_id}: {e}")
     
     def get_feature_metadata(self, feature_name: str) -> Optional['FeatureDefinition']:
         """Get feature metadata"""

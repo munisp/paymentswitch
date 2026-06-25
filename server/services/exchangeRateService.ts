@@ -210,8 +210,30 @@ export async function getHistoricalRates(params: {
   rate: number;
   provider: string;
 }>> {
-  // In production, this would query a time-series database
-  // For now, return empty array
+  // Query PostgreSQL for historical rate data
+  const { getDb } = await import('../db');
+  const db = await getDb();
+  if (db) {
+    try {
+      const { sql } = await import('drizzle-orm');
+      const rows = await db.execute(
+        sql`SELECT created_at, rate, provider FROM exchange_rate_history
+            WHERE from_currency = ${params.fromCurrency}
+            AND to_currency = ${params.toCurrency}
+            AND created_at BETWEEN ${params.startDate} AND ${params.endDate}
+            ORDER BY created_at ASC`
+      );
+      if (Array.isArray(rows) && rows.length > 0) {
+        return rows.map((r: Record<string, unknown>) => ({
+          date: new Date(r.created_at as string),
+          rate: Number(r.rate),
+          provider: String(r.provider),
+        }));
+      }
+    } catch {
+      // Table may not exist yet
+    }
+  }
   return [];
 }
 
