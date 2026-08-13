@@ -14,7 +14,7 @@ services:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./db/postgres:/docker-entrypoint-initdb.d:ro
     networks:
       - remittance-network
     healthcheck:
@@ -115,7 +115,7 @@ services:
     networks:
       - remittance-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3

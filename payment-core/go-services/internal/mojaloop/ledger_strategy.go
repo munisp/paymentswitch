@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"math/big"
 	"net/http"
 	"os"
 	"sync"
@@ -119,6 +121,22 @@ type ExecuteTransferRequest struct {
 
 // ExecuteTransfer executes a transfer using the configured ledger strategy
 func (o *LedgerOrchestrator) ExecuteTransfer(ctx context.Context, req *ExecuteTransferRequest) (bool, *TransferRecord, error) {
+	if req == nil {
+		return false, nil, fmt.Errorf("transfer request is required")
+	}
+	if req.TransferID == "" {
+		return false, nil, fmt.Errorf("transfer ID is required")
+	}
+	if req.Amount <= 0 {
+		return false, nil, fmt.Errorf("transfer amount must be positive")
+	}
+	if req.PayerAccountID == 0 || req.PayeeAccountID == 0 || req.PayerAccountID == req.PayeeAccountID {
+		return false, nil, fmt.Errorf("payer and payee must be distinct nonzero accounts")
+	}
+	if req.Currency == "" {
+		return false, nil, fmt.Errorf("transfer currency is required")
+	}
+
 	record := &TransferRecord{
 		TransferID:           req.TransferID,
 		PayerAccountID:       fmt.Sprintf("%d", req.PayerAccountID),
@@ -215,13 +233,14 @@ func (o *LedgerOrchestrator) executeInTigerBeetle(ctx context.Context, req *Exec
 }
 
 func (o *LedgerOrchestrator) recordInMojaloop(ctx context.Context, req *ExecuteTransferRequest) bool {
+	amountDecimal := fmt.Sprintf("%d.%02d", req.Amount/100, req.Amount%100)
 	transferRequest := map[string]interface{}{
 		"transferId": req.TransferID,
 		"payerFsp":   req.PayerFSP,
 		"payeeFsp":   req.PayeeFSP,
 		"amount": map[string]interface{}{
 			"currency": req.Currency,
-			"amount":   fmt.Sprintf("%.2f", float64(req.Amount)/100),
+			"amount":   amountDecimal,
 		},
 		"ilpPacket":  req.ILPPacket,
 		"condition":  req.Condition,
@@ -259,21 +278,23 @@ func (o *LedgerOrchestrator) recordInMojaloop(ctx context.Context, req *ExecuteT
 
 // GetBalance gets the account balance from the specified ledger
 func (o *LedgerOrchestrator) GetBalance(ctx context.Context, accountID uint64, ledger LedgerType) (int64, error) {
+	if accountID == 0 {
+		return 0, fmt.Errorf("account ID must be nonzero")
+	}
 	switch ledger {
 	case LedgerTypeTigerBeetle:
 		return o.getTigerBeetleBalance(ctx, accountID)
 	case LedgerTypeMojaloop:
 		return o.getMojaLoopBalance(ctx, accountID)
 	default:
-		// Return TigerBeetle balance as authoritative
-		return o.getTigerBeetleBalance(ctx, accountID)
+		return 0, fmt.Errorf("unsupported ledger type %q", ledger)
 	}
 }
 
 func (o *LedgerOrchestrator) getTigerBeetleBalance(ctx context.Context, accountID uint64) (int64, error) {
-	// In production, this would query TigerBeetle
-	// For now, return a simulated balance
-	return 1000000, nil // $10,000.00 in cents
+	// Never invent a ledger balance. The configured TigerBeetle client must be
+	// wired before this strategy is made available to callers.
+	return 0, fmt.Errorf("TigerBeetle balance lookup is not configured for account %d", accountID)
 }
 
 func (o *LedgerOrchestrator) getMojaLoopBalance(ctx context.Context, accountID uint64) (int64, error) {
@@ -295,13 +316,29 @@ func (o *LedgerOrchestrator) getMojaLoopBalance(ctx context.Context, accountID u
 	}
 
 	var data struct {
-		Value float64 `json:"value"`
+		Value json.Number `json:"value"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	decoder := json.NewDecoder(io.LimitReader(resp.Body, 1<<20))
+	decoder.UseNumber()
+	if err := decoder.Decode(&data); err != nil {
 		return 0, err
 	}
+	if data.Value == "" {
+		return 0, fmt.Errorf("mojaloop balance response omitted value")
+	}
 
-	return int64(data.Value * 100), nil
+	amount, ok := new(big.Rat).SetString(data.Value.String())
+	if !ok || amount.Sign() < 0 {
+		return 0, fmt.Errorf("mojaloop returned invalid balance %q", data.Value.String())
+	}
+	cents := new(big.Rat).Mul(amount, big.NewRat(100, 1))
+	if !cents.IsInt() {
+		return 0, fmt.Errorf("mojaloop balance %q is not representable in cents", data.Value.String())
+	}
+	if !cents.Num().IsInt64() {
+		return 0, fmt.Errorf("mojaloop balance %q overflows cents", data.Value.String())
+	}
+	return cents.Num().Int64(), nil
 }
 
 // ReconciliationResult contains the result of reconciling an account
@@ -364,10 +401,17 @@ func (o *LedgerOrchestrator) ReconcileAccount(ctx context.Context, accountID uin
 		}
 	}
 
-	drift := tbBalance - mlBalance
-	if drift < 0 {
-		drift = -drift
+	driftBig := new(big.Int).Sub(big.NewInt(tbBalance), big.NewInt(mlBalance))
+	driftBig.Abs(driftBig)
+	if !driftBig.IsInt64() {
+		return &ReconciliationResult{
+			Status:             ReconciliationStatusUnknown,
+			TigerBeetleBalance: tbBalance,
+			MojaLoopBalance:    mlBalance,
+			Error:              "reconciliation drift exceeds representable range",
+		}
 	}
+	drift := driftBig.Int64()
 
 	var status ReconciliationStatus
 	if drift == 0 {

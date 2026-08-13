@@ -35,11 +35,11 @@ upstreams:
   - id: fraud-detection
     type: roundrobin
     nodes:
-      "fraud-detection:8081": 1
+      "fraud-detection:8002": 1
     checks:
       active:
         type: http
-        http_path: /health
+        http_path: /healthz
         healthy:
           interval: 5
           successes: 2
@@ -114,15 +114,18 @@ routes:
         burst: 50
         key: remote_addr
       cors:
-        allow_origins: "*"
+        allow_origins: "https://portal.payment-switch.local"
         allow_methods: "GET,POST,OPTIONS"
         allow_headers: "Content-Type,Authorization,X-Request-ID"
         expose_headers: "X-Request-ID"
         max_age: 3600
 
-  # Protected API endpoints (Keycloak auth required)
-  - id: protected-api
-    uri: /api/*
+  # Mobile tRPC endpoints (Keycloak auth required). This explicit higher-priority
+  # route prevents the mobile application from depending on an implicit generic
+  # /api/* match and forwards the original procedure path unchanged.
+  - id: mobile-trpc
+    uri: /api/trpc/*
+    priority: 100
     upstream_id: web-portal
     plugins:
       openid-connect:
@@ -133,14 +136,41 @@ routes:
         realm: payment-switch
         introspection_endpoint_auth_method: client_secret_post
         token_signing_alg_values_expected: RS256
-        set_userinfo_header: true
-        set_id_token_header: true
+        set_userinfo_header: false
+        set_id_token_header: false
       limit-req:
         rate: 1000
         burst: 500
         key: consumer_name
       cors:
-        allow_origins: "*"
+        allow_origins: "https://portal.payment-switch.local"
+        allow_methods: "GET,POST,OPTIONS"
+        allow_headers: "Content-Type,Authorization,X-Request-ID"
+        expose_headers: "X-Request-ID"
+        max_age: 3600
+
+  # Protected API endpoints (Keycloak auth required)
+  - id: protected-api
+    uri: /api/*
+    priority: 100
+    upstream_id: web-portal
+    plugins:
+      openid-connect:
+        client_id: apisix-gateway
+        client_secret: ${KEYCLOAK_APISIX_CLIENT_SECRET}
+        discovery: http://keycloak:8080/realms/payment-switch/.well-known/openid-configuration
+        bearer_only: true
+        realm: payment-switch
+        introspection_endpoint_auth_method: client_secret_post
+        token_signing_alg_values_expected: RS256
+        set_userinfo_header: false
+        set_id_token_header: false
+      limit-req:
+        rate: 1000
+        burst: 500
+        key: consumer_name
+      cors:
+        allow_origins: "https://portal.payment-switch.local"
         allow_methods: "GET,POST,PUT,DELETE,PATCH,OPTIONS"
         allow_headers: "Content-Type,Authorization,X-Request-ID"
         expose_headers: "X-Request-ID"
@@ -149,6 +179,7 @@ routes:
   # Ledger API (Go service)
   - id: ledger-api
     uri: /api/v1/ledger/*
+    priority: 300
     upstream_id: go-ledger
     plugins:
       openid-connect:
@@ -158,6 +189,7 @@ routes:
         bearer_only: true
         realm: payment-switch
         introspection_endpoint_auth_method: client_secret_post
+        token_signing_alg_values_expected: RS256
       proxy-rewrite:
         regex_uri: ["^/api/v1/ledger/(.*)", "/api/v1/$1"]
       limit-req:
@@ -168,6 +200,7 @@ routes:
   # Fraud Detection API (Python service)
   - id: fraud-api
     uri: /api/v1/fraud/*
+    priority: 290
     upstream_id: fraud-detection
     plugins:
       openid-connect:
@@ -177,8 +210,7 @@ routes:
         bearer_only: true
         realm: payment-switch
         introspection_endpoint_auth_method: client_secret_post
-      proxy-rewrite:
-        regex_uri: ["^/api/v1/fraud/(.*)", "/api/v1/$1"]
+        token_signing_alg_values_expected: RS256
       limit-req:
         rate: 2000
         burst: 1000
@@ -187,6 +219,7 @@ routes:
   # Analytics API (Python service)
   - id: analytics-api
     uri: /api/v1/analytics/*
+    priority: 280
     upstream_id: data-pipeline
     plugins:
       openid-connect:
@@ -196,6 +229,7 @@ routes:
         bearer_only: true
         realm: payment-switch
         introspection_endpoint_auth_method: client_secret_post
+        token_signing_alg_values_expected: RS256
       proxy-rewrite:
         regex_uri: ["^/api/v1/analytics/(.*)", "/api/v1/$1"]
       limit-req:
@@ -206,6 +240,7 @@ routes:
   # Admin API (requires admin role)
   - id: admin-api
     uri: /api/admin/*
+    priority: 310
     upstream_id: web-portal
     plugins:
       openid-connect:
@@ -215,6 +250,7 @@ routes:
         bearer_only: true
         realm: payment-switch
         introspection_endpoint_auth_method: client_secret_post
+        token_signing_alg_values_expected: RS256
       authz-keycloak:
         client_id: payment-switch-api
         client_secret: ${KEYCLOAK_API_CLIENT_SECRET}
@@ -230,6 +266,7 @@ routes:
   # Permify authorization API
   - id: permify-api
     uri: /api/v1/permissions/*
+    priority: 270
     upstream_id: permify
     plugins:
       openid-connect:
@@ -239,6 +276,7 @@ routes:
         bearer_only: true
         realm: payment-switch
         introspection_endpoint_auth_method: client_secret_post
+        token_signing_alg_values_expected: RS256
       proxy-rewrite:
         regex_uri: ["^/api/v1/permissions/(.*)", "/v1/$1"]
 

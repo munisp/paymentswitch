@@ -18,7 +18,7 @@ export interface MetricCard {
 export interface ParticipantHealth {
   id: string;
   name: string;
-  status: 'healthy' | 'degraded' | 'down';
+  status: string;
   tps: number;
   success_rate: number;
   latency_ms: number;
@@ -40,7 +40,7 @@ export interface FraudAlert {
   transaction_id: string;
   alert_type: string;
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-  status: 'OPEN' | 'INVESTIGATING' | 'ESCALATED' | 'RESOLVED';
+  status: string;
   risk_score: number;
   ml_confidence: number;
   payer: string;
@@ -59,7 +59,7 @@ export interface Settlement {
   approvals_received: number;
   approvals_required: number;
   opened_at: string;
-  closed_at: string;
+  closed_at?: string | null;
 }
 
 export interface KillSwitch {

@@ -74,18 +74,14 @@ function Breadcrumb({ pathname }: { pathname: string }) {
 
   return (
     <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-xs text-muted-foreground px-6 pt-3">
-      <Link href="/">
-        <a className="hover:text-foreground transition-colors">Home</a>
-      </Link>
+      <Link href="/" className="hover:text-foreground transition-colors">Home</Link>
       {crumbs.map((crumb, i) => (
         <React.Fragment key={crumb.href}>
           <ChevronRight className="h-3 w-3" />
           {i === crumbs.length - 1 ? (
             <span className="text-foreground font-medium">{crumb.label}</span>
           ) : (
-            <Link href={crumb.href}>
-              <a className="hover:text-foreground transition-colors">{crumb.label}</a>
-            </Link>
+            <Link href={crumb.href} className="hover:text-foreground transition-colors">{crumb.label}</Link>
           )}
         </React.Fragment>
       ))}
@@ -228,33 +224,31 @@ export default function AppShell({ children }: AppShellProps) {
             {items.map(item => {
               const isActive = location === item.href || (item.href !== '/' && location.startsWith(item.href));
               return (
-                <Link key={item.id} href={item.href}>
-                  <a
-                    title={collapsed ? item.label : undefined}
-                    aria-label={item.label}
-                    aria-current={isActive ? 'page' : undefined}
-                    role="link"
-                    tabIndex={0}
-                    className={cn(
-                      'flex items-center gap-2.5 w-full rounded-md text-left text-[13px] font-medium transition-colors',
-                      collapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2',
-                      isActive
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'text-foreground/80 hover:bg-accent hover:text-foreground'
-                    )}
-                  >
-                    <item.icon className="h-4 w-4 flex-shrink-0" />
-                    {!collapsed && (
-                      <>
-                        <span className="truncate flex-1">{item.label}</span>
-                        {item.badge !== undefined && item.badge > 0 && (
-                          <span className="ml-auto rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold text-white leading-none">
-                            {item.badge}
-                          </span>
-                        )}
-                      </>
-                    )}
-                  </a>
+                <Link
+                  key={item.id}
+                  href={item.href}
+                  title={collapsed ? item.label : undefined}
+                  aria-label={item.label}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={cn(
+                    'flex items-center gap-2.5 w-full rounded-md text-left text-[13px] font-medium transition-colors',
+                    collapsed ? 'justify-center px-2 py-2.5' : 'px-3 py-2',
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-foreground/80 hover:bg-accent hover:text-foreground'
+                  )}
+                >
+                  <item.icon className="h-4 w-4 flex-shrink-0" />
+                  {!collapsed && (
+                    <>
+                      <span className="truncate flex-1">{item.label}</span>
+                      {item.badge !== undefined && item.badge > 0 && (
+                        <span className="ml-auto rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold text-white leading-none">
+                          {item.badge}
+                        </span>
+                      )}
+                    </>
+                  )}
                 </Link>
               );
             })}

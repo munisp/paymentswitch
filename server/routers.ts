@@ -65,6 +65,7 @@ import { mobileMoneyRouter } from './routers/mobileMoneyRouter';
 import { reconciliationRouter } from './routers/reconciliationRouter';
 import { fxRiskRouter } from './routers/fxRiskRouter';
 import { agentCashRouter } from './routers/agentCashRouter';
+import { dashboardRouter, transactionsRouter } from './routers/mobileRouter';
 import { startRateAlertMonitor, getRateAlertMonitorStatus } from './jobs/rateAlertMonitor';
 import { exportToCSV, exportToExcel, exportToPDF, formatRemittanceForExport, getRemittanceExportColumns, formatRateAlertsForExport, getRateAlertExportColumns } from './services/exportService';
 import { createChildLogger } from './lib/logger';
@@ -152,6 +153,8 @@ export const appRouter = router({
     reconciliation: reconciliationRouter,
     fxRisk: fxRiskRouter,
     agentCash: agentCashRouter,
+    transactions: transactionsRouter,
+    dashboard: dashboardRouter,
   
     // Rate Alerts
   rateAlerts: router({

@@ -2,225 +2,273 @@ import { getDb } from '../db';
 import { sql } from 'drizzle-orm';
 import crypto from 'crypto';
 
-/**
- * Provision a sandbox environment for integration development
- */
+const TEST_TIMEOUT_MS = Number.parseInt(process.env.INTEGRATION_TEST_TIMEOUT_MS ?? '10000', 10);
+const SANDBOX_BASE_URL = process.env.SANDBOX_BASE_URL;
+
+function assertSafeIntegrationUrl(value: string, field: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${field} must be a valid absolute URL`);
+  }
+
+  if (url.protocol !== 'https:' && process.env.ALLOW_INSECURE_INTEGRATION_TESTS !== 'true') {
+    throw new Error(`${field} must use HTTPS outside explicitly configured local testing`);
+  }
+  if (/^(localhost|127\.|0\.0\.0\.0|169\.254\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)$/i.test(url.hostname)) {
+    throw new Error(`${field} cannot target a loopback, link-local, or private network address`);
+  }
+  return url;
+}
+
+function buildSandboxEndpoint(sandboxId: string): string {
+  if (!SANDBOX_BASE_URL) {
+    throw new Error('SANDBOX_BASE_URL must be configured before provisioning a sandbox environment');
+  }
+  const base = assertSafeIntegrationUrl(SANDBOX_BASE_URL, 'SANDBOX_BASE_URL');
+  return new URL(`/api/v1/sandboxes/${sandboxId}`, base).toString();
+}
+
+async function requireApplicationOwner(applicationId: number): Promise<number> {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  const result = await db.execute<{ user_id: number }>(sql`
+    SELECT user_id FROM participant_applications WHERE id = ${applicationId} LIMIT 1
+  `);
+  const ownerId = Number(result.rows[0]?.user_id ?? 0);
+  if (!ownerId) throw new Error(`Participant application ${applicationId} was not found`);
+  return ownerId;
+}
+
+/** Provision a sandbox only when an actual gateway base URL is configured. */
 export async function provisionSandboxEnvironment(applicationId: number) {
   const db = await getDb();
   if (!db) throw new Error('Database not available');
 
-  // Generate unique sandbox endpoint
-  const sandboxId = crypto.randomBytes(8).toString('hex');
-  const apiEndpoint = `https://sandbox-${sandboxId}.payment-switch.dev`;
-
-  // Create sandbox environment
+  await requireApplicationOwner(applicationId);
+  const sandboxId = crypto.randomBytes(16).toString('hex');
+  const apiEndpoint = buildSandboxEndpoint(sandboxId);
   const result = await db.execute<{ id: number }>(sql`
-    INSERT INTO integration_environments (application_id, environment_type, api_endpoint, status)
-    VALUES (${applicationId}, 'sandbox', ${apiEndpoint}, 'active')
+    INSERT INTO integration_environments (application_id, environment_type, api_endpoint, status, provisioned_at)
+    VALUES (${applicationId}, 'sandbox', ${apiEndpoint}, 'provisioning', NOW())
     RETURNING id
   `);
-
   const environmentId = Number(result.rows[0]?.id ?? 0);
+  if (!environmentId) throw new Error('Sandbox environment could not be persisted');
 
-  // Generate API credentials for sandbox
   const credentials = await generateApiCredentials(applicationId, environmentId);
-
-  return {
-    environmentId,
-    apiEndpoint,
-    credentials,
-    status: 'active',
-    expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
-  };
+  return { environmentId, apiEndpoint, credentials, status: 'provisioning' as const };
 }
 
-/**
- * Generate API credentials for an environment
- */
+/** Generate an API secret once, store only a digest, and bind it to a real environment. */
 export async function generateApiCredentials(applicationId: number, environmentId: number) {
   const db = await getDb();
   if (!db) throw new Error('Database not available');
+  const ownerId = await requireApplicationOwner(applicationId);
 
-  // Generate secure API key and secret
+  const environment = await db.execute<{ id: number }>(sql`
+    SELECT id FROM integration_environments
+    WHERE id = ${environmentId} AND application_id = ${applicationId}
+    LIMIT 1
+  `);
+  if (!environment.rows[0]) throw new Error('Integration environment does not belong to the application');
+
   const apiKey = `pk_${crypto.randomBytes(24).toString('hex')}`;
   const apiSecret = `sk_${crypto.randomBytes(32).toString('hex')}`;
-
-  // Hash the secret before storing
-  const hashedSecret = crypto.createHash('sha256').update(apiSecret).digest('hex');
+  const secretDigest = crypto.createHash('sha256').update(apiSecret).digest('hex');
 
   await db.execute(sql`
-    INSERT INTO api_credentials (application_id, environment_id, api_key, api_secret, status)
-    VALUES (${applicationId}, ${environmentId}, ${apiKey}, ${hashedSecret}, 'active')
+    INSERT INTO api_credentials (environment_id, api_key, api_secret, key_version, is_active, created_by)
+    VALUES (${environmentId}, ${apiKey}, ${secretDigest}, 1, true, ${ownerId})
   `);
 
-  return {
-    apiKey,
-    apiSecret, // Return plain secret only once
-  };
+  return { apiKey, apiSecret };
 }
 
-/**
- * Get integration environment details
- */
 export async function getIntegrationEnvironment(applicationId: number, environmentType: string) {
   const db = await getDb();
   if (!db) throw new Error('Database not available');
-
   const result = await db.execute(sql`
     SELECT * FROM integration_environments
     WHERE application_id = ${applicationId} AND environment_type = ${environmentType}
-    LIMIT 1
+    ORDER BY created_at DESC LIMIT 1
   `);
-
-  return result.rows.length > 0 ? result.rows[0] : null;
+  return result.rows[0] ?? null;
 }
 
-/**
- * Get API credentials for an environment
- */
 export async function getApiCredentials(environmentId: number) {
   const db = await getDb();
   if (!db) throw new Error('Database not available');
-
   const result = await db.execute(sql`
-    SELECT api_key, created_at, last_used_at, status
+    SELECT api_key, key_version, created_at, last_used_at, expires_at
     FROM api_credentials
-    WHERE environment_id = ${environmentId} AND status = 'active'
-    ORDER BY created_at DESC
-    LIMIT 1
+    WHERE environment_id = ${environmentId} AND is_active = true
+    ORDER BY created_at DESC LIMIT 1
   `);
-
-  return result.rows.length > 0 ? result.rows[0] : null;
+  return result.rows[0] ?? null;
 }
 
-/**
- * Record SDK download
- */
 export async function recordSdkDownload(applicationId: number, sdkType: string, version: string) {
   const db = await getDb();
   if (!db) throw new Error('Database not available');
-
+  await requireApplicationOwner(applicationId);
   await db.execute(sql`
     INSERT INTO sdk_downloads (application_id, sdk_type, version)
     VALUES (${applicationId}, ${sdkType}, ${version})
   `);
-
   return { success: true };
 }
 
-/**
- * Run integration test
- */
+type TestResult = {
+  passed: boolean;
+  duration: number;
+  message: string;
+  details: Record<string, unknown>;
+};
+
+type IntegrationTargets = {
+  primaryEndpoint: string | null;
+  webhookUrl: string | null;
+};
+
+async function resolveIntegrationTargets(applicationId: number): Promise<IntegrationTargets> {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  const result = await db.execute<{ primary_endpoint: string | null; webhook_url: string | null }>(sql`
+    SELECT primary_endpoint, webhook_url
+    FROM technical_configurations
+    WHERE application_id = ${applicationId}
+    ORDER BY updated_at DESC LIMIT 1
+  `);
+  return {
+    primaryEndpoint: result.rows[0]?.primary_endpoint ?? null,
+    webhookUrl: result.rows[0]?.webhook_url ?? null,
+  };
+}
+
+async function request(url: URL, init: RequestInit): Promise<{ status: number; body: string; duration: number }> {
+  const startedAt = Date.now();
+  const response = await fetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(TEST_TIMEOUT_MS) });
+  return { status: response.status, body: await response.text(), duration: Date.now() - startedAt };
+}
+
+async function executeTest(applicationId: number, testType: string, testName: string): Promise<TestResult> {
+  const targets = await resolveIntegrationTargets(applicationId);
+  const unsupported = (reason: string): TestResult => ({
+    passed: false,
+    duration: 0,
+    message: reason,
+    details: { testType, testName, execution: 'not-performed' },
+  });
+
+  if (testType === 'api_connectivity' || testType === 'authentication' || testType === 'data_format' || testType === 'idempotency' || testType === 'rate_limiting') {
+    if (!targets.primaryEndpoint) return unsupported('No primary endpoint is configured for this application');
+    const endpoint = assertSafeIntegrationUrl(targets.primaryEndpoint, 'technical_configurations.primary_endpoint');
+
+    if (testType === 'api_connectivity') {
+      const result = await request(endpoint, { method: 'GET', headers: { Accept: 'application/json' } });
+      return {
+        passed: result.status >= 200 && result.status < 400,
+        duration: result.duration,
+        message: `Endpoint returned HTTP ${result.status}`,
+        details: { testType, testName, endpoint: endpoint.origin, httpStatus: result.status },
+      };
+    }
+
+    if (testType === 'authentication') {
+      const result = await request(endpoint, { method: 'GET', headers: { Authorization: 'Bearer invalid-integration-test-token', Accept: 'application/json' } });
+      return {
+        passed: result.status === 401 || result.status === 403,
+        duration: result.duration,
+        message: result.status === 401 || result.status === 403 ? 'Endpoint rejected the invalid bearer token' : `Endpoint returned HTTP ${result.status}; expected 401 or 403`,
+        details: { testType, testName, endpoint: endpoint.origin, httpStatus: result.status },
+      };
+    }
+
+    if (testType === 'data_format') {
+      const result = await request(endpoint, { method: 'GET', headers: { Accept: 'application/json' } });
+      let validJson = false;
+      try { JSON.parse(result.body); validJson = true; } catch { validJson = false; }
+      return {
+        passed: result.status >= 200 && result.status < 400 && validJson,
+        duration: result.duration,
+        message: validJson ? `Endpoint returned JSON with HTTP ${result.status}` : 'Endpoint did not return valid JSON',
+        details: { testType, testName, endpoint: endpoint.origin, httpStatus: result.status, validJson },
+      };
+    }
+
+    return unsupported(`${testType} requires a provider-specific scenario definition; it cannot be certified by a generic request without risking a real financial operation`);
+  }
+
+  if (testType === 'webhook_delivery') {
+    if (!targets.webhookUrl) return unsupported('No webhook URL is configured for this application');
+    const webhookUrl = assertSafeIntegrationUrl(targets.webhookUrl, 'technical_configurations.webhook_url');
+    const testEvent = { event: 'integration.test', id: crypto.randomUUID(), occurredAt: new Date().toISOString() };
+    const result = await request(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Payment-Switch-Test': 'true' },
+      body: JSON.stringify(testEvent),
+    });
+    return {
+      passed: result.status >= 200 && result.status < 300,
+      duration: result.duration,
+      message: `Webhook returned HTTP ${result.status}`,
+      details: { testType, testName, endpoint: webhookUrl.origin, httpStatus: result.status, eventId: testEvent.id },
+    };
+  }
+
+  return unsupported(`Unsupported integration test type: ${testType}`);
+}
+
+/** Run a bounded real integration test and persist its raw outcome. */
 export async function runIntegrationTest(applicationId: number, testType: string, testName: string) {
   const db = await getDb();
   if (!db) throw new Error('Database not available');
+  await requireApplicationOwner(applicationId);
 
-  // Create test record
-  const testResult2 = await db.execute<{ id: number }>(sql`
-    INSERT INTO integration_tests (application_id, test_type, test_name, status)
-    VALUES (${applicationId}, ${testType}, ${testName}, 'running')
+  const inserted = await db.execute<{ id: number }>(sql`
+    INSERT INTO integration_tests (application_id, test_type, test_name, status, started_at)
+    VALUES (${applicationId}, ${testType}, ${testName}, 'running', NOW())
     RETURNING id
   `);
+  const testId = Number(inserted.rows[0]?.id ?? 0);
+  if (!testId) throw new Error('Integration test record could not be created');
 
-  const testId = Number(testResult2.rows[0]?.id ?? 0);
+  let result: TestResult;
+  try {
+    result = await executeTest(applicationId, testType, testName);
+  } catch (error) {
+    result = {
+      passed: false,
+      duration: 0,
+      message: error instanceof Error ? error.message : 'Integration test execution failed',
+      details: { testType, testName, execution: 'failed' },
+    };
+  }
 
-  // Simulate test execution (in real implementation, this would call actual test framework)
-  const testResult = await executeTest(testType, testName);
-
-  // Update test result
   await db.execute(sql`
     UPDATE integration_tests
-    SET status = ${testResult.passed ? 'passed' : 'failed'},
-        result_data = ${JSON.stringify(testResult)},
-        executed_at = NOW()
+    SET status = ${result.passed ? 'passed' : 'failed'}, result_data = ${JSON.stringify(result)}::jsonb, executed_at = NOW(), completed_at = NOW()
     WHERE id = ${testId}
   `);
-
-  return {
-    testId,
-    ...testResult,
-  };
+  return { testId, ...result };
 }
 
-/**
- * Execute integration test against onboarded application
- * Validates connectivity, authentication, and data format compliance
- */
-async function executeTest(testType: string, testName: string) {
-  const startTime = Date.now();
-
-  const testChecks: Record<string, () => { passed: boolean; message: string }> = {
-    'api_connectivity': () => {
-      // Verify API endpoint is reachable and returns valid JSON
-      return { passed: true, message: 'API endpoint responded with 200 OK within SLA' };
-    },
-    'authentication': () => {
-      // Verify OAuth2/API key authentication flow
-      return { passed: true, message: 'Authentication token issued and validated successfully' };
-    },
-    'webhook_delivery': () => {
-      // Verify webhook endpoint can receive POST and returns 2xx
-      return { passed: true, message: 'Webhook endpoint accepted test payload (HTTP 200)' };
-    },
-    'data_format': () => {
-      // Validate ISO 20022 / FSPIOP message format compliance
-      return { passed: true, message: 'Request/response payloads conform to FSPIOP v1.1 schema' };
-    },
-    'idempotency': () => {
-      // Verify duplicate request handling
-      return { passed: true, message: 'Duplicate transfer request correctly returned existing result' };
-    },
-    'rate_limiting': () => {
-      // Verify rate limits are enforced
-      return { passed: true, message: 'Rate limiter returned 429 after exceeding 100 req/min threshold' };
-    },
-  };
-
-  const check = testChecks[testType] || testChecks['api_connectivity'];
-  const result = check();
-  const duration = Date.now() - startTime;
-
-  return {
-    passed: result.passed,
-    duration: duration < 50 ? 500 : duration,
-    message: result.message,
-    details: {
-      testType,
-      testName,
-      timestamp: new Date().toISOString(),
-      checks: [testType],
-    },
-  };
-}
-
-/**
- * Get all integration tests for an application
- */
 export async function getIntegrationTests(applicationId: number) {
   const db = await getDb();
   if (!db) throw new Error('Database not available');
-
   const result = await db.execute(sql`
-    SELECT * FROM integration_tests
-    WHERE application_id = ${applicationId}
-    ORDER BY created_at DESC
+    SELECT * FROM integration_tests WHERE application_id = ${applicationId} ORDER BY created_at DESC
   `);
-
-  return result.rows as any[];
+  return result.rows;
 }
 
-/**
- * Get SDK download history
- */
 export async function getSdkDownloads(applicationId: number) {
   const db = await getDb();
   if (!db) throw new Error('Database not available');
-
   const result = await db.execute(sql`
-    SELECT * FROM sdk_downloads
-    WHERE application_id = ${applicationId}
-    ORDER BY downloaded_at DESC
+    SELECT * FROM sdk_downloads WHERE application_id = ${applicationId} ORDER BY downloaded_at DESC
   `);
-
-  return result.rows as any[];
+  return result.rows;
 }

@@ -38,7 +38,7 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./payment-core/services/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./db/postgres:/docker-entrypoint-initdb.d:ro
     ports:
       - "5432:5432"
     healthcheck:
@@ -144,15 +144,18 @@ services:
       
       # Authentication (Keycloak)
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
-      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_URL: ${KEYCLOAK_ISSUER_URL:?Set the externally issued Keycloak realm URL}
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-payment-switch}
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-payment-switch-portal}
-      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:?Set the portal Keycloak client secret}
       # APISIX Gateway
       APISIX_ADMIN_URL: http://apisix:9180
-      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY}
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?Set the APISIX admin key}
       # Permify RBAC
-      PERMIFY_URL: http://permify:3476
+      PERMIFY_URL: http://permify:3478
+      PERMIFY_ENFORCEMENT_REQUIRED: "true"
+      PERMIFY_TENANT_ID: ${PERMIFY_TENANT_ID:-t1}
+      PERMIFY_SCHEMA_VERSION: ${PERMIFY_SCHEMA_VERSION:-}
       # OpenAppSec WAF
       OPENAPPSEC_URL: http://openappsec:8080
       
@@ -179,14 +182,12 @@ services:
       
       # Payment Core Integration
       PAYMENT_CORE_URL: http://go-ledger:8080
-      FRAUD_DETECTION_URL: http://fraud-detection:8081
+      FRAUD_DETECTION_URL: http://fraud-detection:8002
       ANALYTICS_URL: http://data-pipeline:8082
       
       # Node Environment
       NODE_ENV: production
       PORT: 3000
-    ports:
-      - "3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -198,7 +199,7 @@ services:
       - ./storage:/app/storage
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -230,8 +231,12 @@ services:
       # Service Config
       SERVICE_PORT: 8080
       LOG_LEVEL: info
-    ports:
-      - "8080:8080"
+      # Independent Keycloak RS256 verification for direct/internal requests
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:?Set the exact external Keycloak realm issuer URL}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-payment-switch}
+      KEYCLOAK_LEDGER_CLIENT_ID: payment-switch-api
+      KEYCLOAK_LEDGER_AUDIENCE: payment-switch-api
     depends_on:
       - tigerbeetle
       - postgres
@@ -252,43 +257,23 @@ services:
   
   fraud-detection:
     build:
-      context: ./payment-core/fraud-detection
-      dockerfile: Dockerfile
+      context: ./payment-core
+      dockerfile: services/fraud-detection-service/Dockerfile
     container_name: fraud-detection-service
     environment:
-      # PostgreSQL
-      DATABASE_URL: postgresql://payment_user:payment_pass_2024@postgres:5432/payment_switch
-      
-      # Redis
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_pass_2024}
-      
-      # Kafka
-      KAFKA_BROKERS: kafka:9092
-      
-      # ML Models
-      MODEL_PATH: /app/models
-      GNN_MODEL_PATH: /app/models/gnn
-      ML_MODEL_PATH: /app/models/ml
-      
-      # Service Config
-      SERVICE_PORT: 8081
-      LOG_LEVEL: info
+      # Redis supplies optional behavior context; model availability does not
+      # downgrade to a synthetic score if Redis is unavailable.
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2024}@redis:6379/0
+      FRAUD_MODEL_BUNDLE_DIR: /app/ml-platform/weights
       PYTHONUNBUFFERED: 1
-    ports:
-      - "8081:8081"
     depends_on:
-      - postgres
-      - redis
-      - kafka
+      redis:
+        condition: service_healthy
     networks:
       - payment-switch-network
-    volumes:
-      - ./payment-core/fraud-detection/models:/app/models
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8002/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -316,9 +301,6 @@ services:
       SERVICE_PORT: 8082
       LOG_LEVEL: info
       PYTHONUNBUFFERED: 1
-    ports:
-      - "8082:8082"
-      - "4040:4040"  # Spark UI
     depends_on:
       - postgres
       - kafka
@@ -340,6 +322,7 @@ services:
   api-gateway:
     image: nginx:alpine
     container_name: api-gateway
+    profiles: ["legacy"]
     ports:
       - "80:80"
       - "443:443"
@@ -434,18 +417,21 @@ services:
   keycloak:
     image: quay.io/keycloak/keycloak:23.0
     container_name: keycloak
-    command: start-dev
+    command: start --import-realm --http-enabled=true --proxy-headers=xforwarded
     environment:
-      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_change_me}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:?Set a Keycloak bootstrap admin username}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set a Keycloak bootstrap admin password}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:?Set the externally reachable Keycloak hostname or gateway auth URL}
+      KC_HOSTNAME_STRICT: "true"
+      KC_PROXY_HEADERS: xforwarded
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: payment_user
       KC_DB_PASSWORD: payment_pass_2024
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
-    ports:
-      - "8180:8080"
+    volumes:
+      - ./config/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -464,11 +450,11 @@ services:
     container_name: apisix
     environment:
       APISIX_STAND_ALONE: "true"
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?Set the APISIX admin key}
+      KEYCLOAK_APISIX_CLIENT_SECRET: ${KEYCLOAK_APISIX_CLIENT_SECRET:?Set the APISIX Keycloak client secret}
+      KEYCLOAK_API_CLIENT_SECRET: ${KEYCLOAK_API_CLIENT_SECRET:?Set the Keycloak authorization client secret}
     ports:
-      - "9080:9080"   # HTTP
-      - "9443:9443"   # HTTPS
-      - "9180:9180"   # Admin API
-      - "9091:9091"   # Prometheus metrics
+      - "9443:9443"
     volumes:
       - ./config/apisix/config.yaml:/usr/local/apisix/conf/config.yaml
       - ./config/apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml
@@ -563,7 +549,7 @@ services:
       CLEDG_KAFKA__CONSUMER__BROKER_LIST: kafka:9092
       LOG_LEVEL: info
     ports:
-      - "3000:3001"  # Admin API
+      - "3003:3001"  # Admin API; host 3000 is reserved for web-portal
     depends_on:
       mojaloop-postgres:
         condition: service_healthy

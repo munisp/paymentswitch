@@ -1,4 +1,4 @@
-import { serial, integer, pgEnum, pgTable, text, timestamp, varchar, decimal, boolean } from "drizzle-orm/pg-core";
+import { serial, integer, pgEnum, pgTable, text, timestamp, varchar, decimal, boolean, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 // PostgreSQL Enum Definitions
 // Note: In PostgreSQL, enums must be defined separately before use in tables
@@ -157,6 +157,55 @@ export const transactions = pgTable("transactions", {
 
 export type Transaction = typeof transactions.$inferSelect;
 export type InsertTransaction = typeof transactions.$inferInsert;
+
+/**
+ * Canonical settlement batches exposed to the operational portal. A batch never
+ * becomes settled merely because it was created locally; external execution and
+ * reconciliation outcomes are recorded as immutable settlement events.
+ */
+export const settlementBatches = pgTable("settlement_batches", {
+  id: serial("id").primaryKey(),
+  settlementId: varchar("settlement_id", { length: 64 }).notNull().unique(),
+  participantId: integer("participant_id").references(() => switchParticipants.id),
+  bankCode: varchar("bank_code", { length: 32 }).notNull(),
+  bankName: varchar("bank_name", { length: 256 }).notNull(),
+  channel: varchar("channel", { length: 16 }).notNull(),
+  settlementWindow: varchar("settlement_window", { length: 8 }).notNull(),
+  status: varchar("status", { length: 32 }).default("pending").notNull(),
+  totalTransactions: integer("total_transactions").default(0).notNull(),
+  grossAmount: decimal("gross_amount", { precision: 20, scale: 2 }).default("0").notNull(),
+  fees: decimal("fees", { precision: 20, scale: 2 }).default("0").notNull(),
+  netAmount: decimal("net_amount", { precision: 20, scale: 2 }).default("0").notNull(),
+  settlementRef: varchar("settlement_ref", { length: 128 }).notNull().unique(),
+  windowOpenedAt: timestamp("window_opened_at").defaultNow().notNull(),
+  windowClosedAt: timestamp("window_closed_at"),
+  reconciledAt: timestamp("reconciled_at"),
+  reconciledBy: integer("reconciled_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("settlement_batches_status_window_idx").on(table.status, table.windowOpenedAt),
+  index("settlement_batches_participant_window_idx").on(table.participantId, table.windowOpenedAt),
+  index("settlement_batches_bank_window_idx").on(table.bankCode, table.windowOpenedAt),
+]);
+
+export type SettlementBatch = typeof settlementBatches.$inferSelect;
+export type InsertSettlementBatch = typeof settlementBatches.$inferInsert;
+
+/** Immutable lifecycle evidence for each settlement batch. */
+export const settlementEvents = pgTable("settlement_events", {
+  id: serial("id").primaryKey(),
+  settlementBatchId: integer("settlement_batch_id").notNull().references(() => settlementBatches.id),
+  eventType: varchar("event_type", { length: 64 }).notNull(),
+  eventPayload: jsonb("event_payload"),
+  actorUserId: integer("actor_user_id").references(() => users.id),
+  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+}, (table) => [
+  index("settlement_events_batch_time_idx").on(table.settlementBatchId, table.occurredAt),
+]);
+
+export type SettlementEvent = typeof settlementEvents.$inferSelect;
+export type InsertSettlementEvent = typeof settlementEvents.$inferInsert;
 
 /**
  * Refunds issued for transactions
@@ -406,6 +455,64 @@ export const apiCredentials = pgTable("api_credentials", {
 
 export type ApiCredential = typeof apiCredentials.$inferSelect;
 export type InsertApiCredential = typeof apiCredentials.$inferInsert;
+
+/**
+ * Durable key-value state for operational workflows. This replaces process-local
+ * storage so gateway and orchestration results survive restarts.
+ */
+export const persistentStore = pgTable("persistent_store", {
+  id: serial("id").primaryKey(),
+  namespace: varchar("namespace", { length: 100 }).notNull(),
+  key: varchar("key", { length: 500 }).notNull(),
+  data: jsonb("data").notNull().default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at"),
+}, (table) => [
+  uniqueIndex("uq_persistent_store_namespace_key").on(table.namespace, table.key),
+  index("idx_persistent_store_namespace_expiry").on(table.namespace, table.expiresAt),
+]);
+
+export type PersistentStoreRecord = typeof persistentStore.$inferSelect;
+export type InsertPersistentStoreRecord = typeof persistentStore.$inferInsert;
+
+/**
+ * Real execution outcomes for onboarding integration checks. A failed or
+ * unsupported test is retained as evidence and cannot be represented as passed.
+ */
+export const integrationTests = pgTable("integration_tests", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull(),
+  testType: varchar("test_type", { length: 100 }).notNull(),
+  testName: varchar("test_name", { length: 255 }).notNull(),
+  status: testStatusEnum("status").default("pending").notNull(),
+  resultData: jsonb("result_data"),
+  startedAt: timestamp("started_at"),
+  executedAt: timestamp("executed_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_integration_tests_application_created").on(table.applicationId, table.createdAt),
+  index("idx_integration_tests_application_status").on(table.applicationId, table.status),
+]);
+
+export type IntegrationTest = typeof integrationTests.$inferSelect;
+export type InsertIntegrationTest = typeof integrationTests.$inferInsert;
+
+/** SDK artifact download audit trail for participant applications. */
+export const sdkDownloads = pgTable("sdk_downloads", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull(),
+  sdkType: sdkTypeEnum("sdk_type").notNull(),
+  version: varchar("version", { length: 64 }).notNull(),
+  downloadedAt: timestamp("downloaded_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_sdk_downloads_application_downloaded").on(table.applicationId, table.downloadedAt),
+]);
+
+export type SdkDownload = typeof sdkDownloads.$inferSelect;
+export type InsertSdkDownload = typeof sdkDownloads.$inferInsert;
 
 /**
  * Participant applications for onboarding

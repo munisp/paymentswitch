@@ -3,7 +3,9 @@ package integration
 
 import (
 	"context"
+	"crypto"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -305,8 +307,8 @@ func (v *KeycloakJWTValidator) getPublicKey(kid string) (*rsa.PublicKey, error) 
 
 // parseRSAPublicKey parses a JWK into an RSA public key
 func (v *KeycloakJWTValidator) parseRSAPublicKey(jwk *JWK) (*rsa.PublicKey, error) {
-	if jwk.Kty != "RSA" {
-		return nil, fmt.Errorf("unsupported key type: %s", jwk.Kty)
+	if jwk.Kty != "RSA" || (jwk.Use != "" && jwk.Use != "sig") || (jwk.Alg != "" && jwk.Alg != "RS256") {
+		return nil, fmt.Errorf("unsupported signing key: kty=%s use=%s alg=%s", jwk.Kty, jwk.Use, jwk.Alg)
 	}
 
 	// Decode modulus
@@ -326,23 +328,25 @@ func (v *KeycloakJWTValidator) parseRSAPublicKey(jwk *JWK) (*rsa.PublicKey, erro
 		e = e<<8 + int(b)
 	}
 
+	if n.Sign() <= 0 || e < 3 || e%2 == 0 {
+		return nil, fmt.Errorf("invalid RSA public key")
+	}
 	return &rsa.PublicKey{N: n, E: e}, nil
 }
 
-// verifySignature verifies the JWT signature
+// verifySignature verifies an RS256 signature over the exact JWS signing input.
 func (v *KeycloakJWTValidator) verifySignature(message, signature string, publicKey *rsa.PublicKey) error {
-	// Decode signature
 	sigBytes, err := base64.RawURLEncoding.DecodeString(signature)
 	if err != nil {
 		return fmt.Errorf("failed to decode signature: %w", err)
 	}
-
-	// In production: use crypto/rsa.VerifyPKCS1v15 with SHA256
-	// For now, we trust the signature if we have the key
-	_ = sigBytes
-	_ = publicKey
-	_ = message
-
+	if publicKey == nil {
+		return fmt.Errorf("missing RSA public key")
+	}
+	digest := sha256.Sum256([]byte(message))
+	if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, digest[:], sigBytes); err != nil {
+		return fmt.Errorf("invalid RS256 signature: %w", err)
+	}
 	return nil
 }
 
@@ -372,7 +376,7 @@ func (v *KeycloakJWTValidator) refreshJWKS(ctx context.Context) error {
 		return fmt.Errorf("JWKS endpoint returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return fmt.Errorf("failed to read response: %w", err)
 	}

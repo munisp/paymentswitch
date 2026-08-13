@@ -79,8 +79,10 @@ function parseJwt(token: string): Record<string, unknown> | null {
 
 // Check if token is expired
 function isTokenExpired(token: string): boolean {
-  // Demo token is never expired
-  if (token === 'demo-token') return false;
+  // A demo token is only accepted when explicitly enabled in a development build.
+  if (token === 'demo-token') {
+    return !(process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_ENABLE_DEMO_LOGIN === 'true');
+  }
   
   const payload = parseJwt(token);
   if (!payload || typeof payload.exp !== 'number') return true;
@@ -218,9 +220,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
       try {
-        // Demo mode: only available in development environment
-        const isDemoMode = process.env.NEXT_PUBLIC_ENABLE_DEMO_LOGIN === 'true' ||
-          process.env.NODE_ENV === 'development';
+        // Demo credentials require an explicit development-only feature flag.
+        const isDemoMode = process.env.NODE_ENV === 'development' &&
+          process.env.NEXT_PUBLIC_ENABLE_DEMO_LOGIN === 'true';
         if (isDemoMode && username === 'demo' && password === 'demo') {
           const demoUser: User = {
             id: 'demo-user-001',

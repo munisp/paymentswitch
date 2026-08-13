@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/payment-switch/go-services/internal/integration"
 	"github.com/payment-switch/go-services/internal/mojaloop"
-	"github.com/payment-switch/go-services/pkg/middleware"
 )
 
 // Server configuration
@@ -116,18 +116,33 @@ func main() {
 	// TigerBeetle endpoints
 	mux.HandleFunc("/api/v1/tigerbeetle/transfer", tigerBeetleTransferHandler)
 
-	// RBAC auth middleware — skips health/ready endpoints
-	rbac := middleware.NewRBACMiddleware(&middleware.RBACConfig{
-		JWTSecret:          getEnv("JWT_SECRET", "payment-switch-secret"),
-		JWTIssuer:          getEnv("JWT_ISSUER", "payment-switch"),
-		SkipPaths:          []string{"/health", "/ready"},
-		EnableAuditLogging: true,
+	// Every non-health ledger route independently verifies a Keycloak RS256
+	// bearer token. APISIX remains the edge enforcement point, but no direct
+	// internal request may substitute a shared-secret token.
+	issuer := os.Getenv("KEYCLOAK_ISSUER_URL")
+	if issuer == "" {
+		log.Fatal("KEYCLOAK_ISSUER_URL is required for ledger authentication")
+	}
+	validator, err := integration.NewKeycloakJWTValidator(&integration.KeycloakConfig{
+		BaseURL:             getEnv("KEYCLOAK_INTERNAL_URL", "http://keycloak:8080"),
+		Realm:               getEnv("KEYCLOAK_REALM", "payment-switch"),
+		ClientID:            getEnv("KEYCLOAK_LEDGER_CLIENT_ID", "payment-switch-api"),
+		JWKSRefreshInterval: 5 * time.Minute,
+		RequiredAudience:    getEnv("KEYCLOAK_LEDGER_AUDIENCE", "payment-switch-api"),
+		RequiredIssuer:      issuer,
+		ClockSkew:           30 * time.Second,
 	})
+	if err != nil {
+		log.Fatalf("failed to initialize Keycloak JWT validator: %v", err)
+	}
+	auth := integration.NewJWTMiddleware(validator).
+		ExcludePath("/health").
+		ExcludePath("/ready")
 
 	// Create server
 	server := &http.Server{
 		Addr:         ":" + port,
-		Handler:      loggingMiddleware(corsMiddleware(rbac.Authenticate(mux))),
+		Handler:      loggingMiddleware(corsMiddleware(auth.Middleware(mux))),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -395,7 +410,8 @@ func getBalanceHandler(w http.ResponseWriter, r *http.Request) {
 	case "mojaloop":
 		lt = mojaloop.LedgerTypeMojaloop
 	default:
-		lt = mojaloop.LedgerTypeTigerBeetle
+		writeError(w, http.StatusBadRequest, "Invalid ledger", "ledger must be tigerbeetle or mojaloop")
+		return
 	}
 
 	balance, err := orchestrator.GetBalance(ctx, accountID, lt)

@@ -1,107 +1,48 @@
-#!/usr/bin/env python3
-"""
-Lakehouse API Service
-FastAPI service exposing REST endpoints for admin dashboard to query Delta Lake data
+"""Payment Switch Lakehouse API.
+
+This service deliberately serves only persisted operational-read-model data. It
+never returns generated dashboard values. Deploy a CDC/Delta pipeline upstream
+and point ``LAKEHOUSE_READ_MODEL_URL`` at its PostgreSQL-compatible serving
+layer, or use the platform PostgreSQL database while the lakehouse projection is
+being populated.
 """
 
 import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timedelta
-from decimal import Decimal
-from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+import asyncpg
 import redis.asyncio as redis
-from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from prometheus_client import Counter, Gauge, Histogram, CONTENT_TYPE_LATEST, generate_latest
 from starlette.responses import Response
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Prometheus metrics
 REQUEST_COUNT = Counter('lakehouse_api_requests_total', 'Total API requests', ['endpoint', 'status'])
 REQUEST_LATENCY = Histogram('lakehouse_api_request_latency_seconds', 'Request latency', ['endpoint'])
 ACTIVE_WEBSOCKETS = Gauge('lakehouse_api_active_websockets', 'Active WebSocket connections')
 
-# Configuration
 REDIS_URL = os.getenv('REDIS_URL', 'redis://redis:6379/0')
-DELTA_BASE_PATH = os.getenv('DELTA_BASE_PATH', 's3a://lakehouse/delta')
-PROMETHEUS_URL = os.getenv('PROMETHEUS_URL', 'http://prometheus:9090')
+READ_MODEL_URL = os.getenv('LAKEHOUSE_READ_MODEL_URL') or os.getenv('DATABASE_URL')
 CACHE_TTL = int(os.getenv('CACHE_TTL', '30'))
 
-# WebSocket connection manager
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-    
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        ACTIVE_WEBSOCKETS.inc()
-    
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-        ACTIVE_WEBSOCKETS.dec()
-    
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except Exception as e:
-                logger.error(f"WebSocket broadcast error: {e}")
 
-manager = ConnectionManager()
-
-# Redis client
-redis_client: Optional[redis.Redis] = None
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global redis_client
-    try:
-        redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-        await redis_client.ping()
-        logger.info("Redis connected")
-    except Exception as e:
-        logger.warning(f"Redis connection failed: {e}")
-        redis_client = None
-    
-    # Start background metrics broadcaster
-    asyncio.create_task(metrics_broadcaster())
-    
-    yield
-    
-    if redis_client:
-        await redis_client.close()
-
-app = FastAPI(
-    title="Payment Switch Lakehouse API",
-    description="REST API for querying Delta Lake analytics data",
-    version="1.0.0",
-    lifespan=lifespan
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ALLOWED_ORIGINS", "https://app.paymentswitch.ng,https://admin.paymentswitch.ng").split(","),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Pydantic models
 class MetricCard(BaseModel):
     label: str
     value: Any
     change: Optional[float] = None
-    change_label: str = "vs last hour"
-    trend: str = "up"
+    change_label: str = 'vs prior period'
+    trend: str = 'neutral'
+
 
 class ParticipantHealth(BaseModel):
     id: str
@@ -111,15 +52,17 @@ class ParticipantHealth(BaseModel):
     success_rate: float
     latency_ms: int
 
+
 class Transaction(BaseModel):
     id: str
     payer: str
     payee: str
     amount: float
-    currency: str = "NGN"
+    currency: str = 'NGN'
     status: str
     latency_ms: Optional[int] = None
     timestamp: str
+
 
 class FraudAlert(BaseModel):
     id: str
@@ -134,6 +77,7 @@ class FraudAlert(BaseModel):
     amount: float
     timestamp: str
 
+
 class Settlement(BaseModel):
     id: str
     window_id: str
@@ -144,451 +88,421 @@ class Settlement(BaseModel):
     approvals_received: int
     approvals_required: int
     opened_at: str
-    closed_at: str
+    closed_at: Optional[str]
+
 
 class NOCMetrics(BaseModel):
     tps: MetricCard
     success_rate: MetricCard
     avg_latency: MetricCard
     daily_volume: MetricCard
-    participant_health: List[ParticipantHealth]
-    recent_transactions: List[Transaction]
-    kill_switches: List[Dict[str, Any]]
+    participant_health: list[ParticipantHealth]
+    recent_transactions: list[Transaction]
+    kill_switches: list[dict[str, Any]]
+    source: str
+
 
 class FraudMetrics(BaseModel):
     open_alerts: MetricCard
     critical_alerts: MetricCard
     resolved_today: MetricCard
     avg_resolution_time: MetricCard
-    alerts: List[FraudAlert]
-    alerts_over_time: List[Dict[str, Any]]
+    alerts: list[FraudAlert]
+    alerts_over_time: list[dict[str, Any]]
+    source: str
+
 
 class SettlementMetrics(BaseModel):
     pending_settlements: MetricCard
     pending_amount: MetricCard
     settled_today: MetricCard
     active_participants: MetricCard
-    settlements: List[Settlement]
+    settlements: list[Settlement]
+    source: str
 
-# Cache helper
-async def get_cached(key: str) -> Optional[Dict]:
+
+class ConnectionManager:
+    def __init__(self) -> None:
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        ACTIVE_WEBSOCKETS.inc()
+
+    def disconnect(self, websocket: WebSocket) -> None:
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            ACTIVE_WEBSOCKETS.dec()
+
+    async def broadcast(self, message: dict[str, Any]) -> None:
+        disconnected: list[WebSocket] = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                disconnected.append(connection)
+        for connection in disconnected:
+            self.disconnect(connection)
+
+
+manager = ConnectionManager()
+redis_client: Optional[redis.Redis] = None
+read_pool: Optional[asyncpg.Pool] = None
+
+
+def decimal_to_float(value: Any) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, Decimal):
+        return float(value)
+    return float(value)
+
+
+def iso(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat()
+    return str(value)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    global redis_client, read_pool
+    if not READ_MODEL_URL:
+        logger.error('LAKEHOUSE_READ_MODEL_URL or DATABASE_URL is required; analytics endpoints will return 503')
+    else:
+        try:
+            read_pool = await asyncpg.create_pool(READ_MODEL_URL, min_size=1, max_size=10, command_timeout=10)
+            async with read_pool.acquire() as connection:
+                await connection.execute('SELECT 1')
+            logger.info('Lakehouse read model connected')
+        except Exception as error:
+            logger.error('Lakehouse read model connection failed: %s', error)
+            read_pool = None
+
+    try:
+        redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+        await redis_client.ping()
+    except Exception as error:
+        logger.warning('Redis cache unavailable: %s', error)
+        redis_client = None
+
+    broadcaster = asyncio.create_task(metrics_broadcaster())
+    yield
+    broadcaster.cancel()
+    if redis_client:
+        await redis_client.aclose()
+    if read_pool:
+        await read_pool.close()
+
+
+app = FastAPI(title='Payment Switch Lakehouse API', version='2.0.0', lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.environ.get('CORS_ALLOWED_ORIGINS', 'https://app.paymentswitch.ng,https://admin.paymentswitch.ng').split(','),
+    allow_credentials=True,
+    allow_methods=['GET'],
+    allow_headers=['Authorization', 'Content-Type'],
+)
+
+
+async def require_read_pool() -> asyncpg.Pool:
+    if not read_pool:
+        raise HTTPException(status_code=503, detail='Lakehouse read model is unavailable or not configured')
+    return read_pool
+
+
+async def get_cached(key: str) -> Optional[dict[str, Any]]:
     if not redis_client:
         return None
     try:
-        data = await redis_client.get(key)
-        return json.loads(data) if data else None
-    except Exception as e:
-        logger.warning(f"Cache read error: {e}")
+        value = await redis_client.get(key)
+        return json.loads(value) if value else None
+    except Exception as error:
+        logger.warning('Cache read failed: %s', error)
         return None
 
-async def set_cached(key: str, data: Dict, ttl: int = CACHE_TTL):
+
+async def set_cached(key: str, data: dict[str, Any]) -> None:
     if not redis_client:
         return
     try:
-        await redis_client.setex(key, ttl, json.dumps(data, default=str))
-    except Exception as e:
-        logger.warning(f"Cache write error: {e}")
+        await redis_client.setex(key, CACHE_TTL, json.dumps(data, default=str))
+    except Exception as error:
+        logger.warning('Cache write failed: %s', error)
 
-# Lakehouse query functions (with fallback to simulated data for demo)
+
 async def query_noc_metrics() -> NOCMetrics:
-    """Query NOC metrics from lakehouse gold layer"""
-    cache_key = "lakehouse:noc_metrics"
-    cached = await get_cached(cache_key)
+    cached = await get_cached('lakehouse:noc_metrics')
     if cached:
         return NOCMetrics(**cached)
-    
-    # Query Delta Lake gold_transaction_metrics table
-    # In production, this would use Spark/Trino/DuckDB
-    # For now, we simulate realistic data that would come from lakehouse
-    
-    import random
-    base_tps = 1250 + random.randint(-100, 100)
-    success_rate = 99.2 + random.uniform(-0.5, 0.5)
-    avg_latency = 48 + random.randint(-10, 15)
-    
-    participants = [
-        {"id": "firstbank", "name": "FirstBank", "status": "healthy", "tps": 156.3, "success_rate": 99.8, "latency_ms": 42},
-        {"id": "gtbank", "name": "GTBank", "status": "healthy", "tps": 142.1, "success_rate": 99.5, "latency_ms": 38},
-        {"id": "zenith", "name": "Zenith Bank", "status": "healthy", "tps": 134.8, "success_rate": 99.7, "latency_ms": 45},
-        {"id": "uba", "name": "UBA", "status": "degraded", "tps": 89.2, "success_rate": 97.2, "latency_ms": 78},
-        {"id": "access", "name": "Access Bank", "status": "healthy", "tps": 128.5, "success_rate": 99.4, "latency_ms": 41},
-        {"id": "stanbic", "name": "Stanbic IBTC", "status": "healthy", "tps": 67.3, "success_rate": 99.9, "latency_ms": 35},
-        {"id": "fidelity", "name": "Fidelity Bank", "status": "healthy", "tps": 54.2, "success_rate": 99.6, "latency_ms": 48},
-        {"id": "sterling", "name": "Sterling Bank", "status": "down", "tps": 0.0, "success_rate": 0.0, "latency_ms": 0},
-        {"id": "wema", "name": "Wema Bank", "status": "healthy", "tps": 45.8, "success_rate": 99.3, "latency_ms": 52},
-        {"id": "fcmb", "name": "FCMB", "status": "healthy", "tps": 78.4, "success_rate": 99.5, "latency_ms": 44},
-        {"id": "ecobank", "name": "Ecobank", "status": "healthy", "tps": 62.1, "success_rate": 99.7, "latency_ms": 39},
-        {"id": "keystone", "name": "Keystone Bank", "status": "healthy", "tps": 34.5, "success_rate": 99.4, "latency_ms": 55},
-    ]
-    
-    recent_txns = [
-        {"id": f"TRF-2024-{str(i).zfill(6)}", "payer": random.choice(["firstbank", "gtbank", "zenith", "access"]),
-         "payee": random.choice(["uba", "stanbic", "fidelity", "wema"]), "amount": random.randint(10000, 500000),
-         "currency": "NGN", "status": random.choice(["COMMITTED", "COMMITTED", "COMMITTED", "RESERVED", "FAILED"]),
-         "latency_ms": random.randint(30, 80) if random.random() > 0.1 else None,
-         "timestamp": (datetime.utcnow() - timedelta(seconds=i*3)).isoformat()}
-        for i in range(10)
-    ]
-    
-    kill_switches = [
-        {"id": "global-halt", "name": "Global Transaction Halt", "type": "GLOBAL", "scope": "All", "active": False},
-        {"id": "sterling-suspend", "name": "Sterling Bank Suspend", "type": "PARTICIPANT", "scope": "sterling", "active": True, "activated_at": datetime.utcnow().isoformat(), "activated_by": "admin@payment-switch.com"},
-        {"id": "usd-halt", "name": "USD Transactions", "type": "CURRENCY", "scope": "USD", "active": False},
-        {"id": "crossborder-halt", "name": "Cross-border Transfers", "type": "TRANSACTION_TYPE", "scope": "CROSS_BORDER", "active": False},
-    ]
-    
+    pool = await require_read_pool()
+
+    async with pool.acquire() as connection:
+        aggregate = await connection.fetchrow('''
+            SELECT
+              COUNT(*) FILTER (WHERE submitted_at >= NOW() - INTERVAL '1 minute')::float / 60.0 AS tps,
+              COALESCE(100.0 * COUNT(*) FILTER (WHERE status = 'completed' AND submitted_at >= date_trunc('day', NOW()))
+                / NULLIF(COUNT(*) FILTER (WHERE submitted_at >= date_trunc('day', NOW())), 0), 0) AS success_rate,
+              COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - submitted_at)) * 1000)
+                FILTER (WHERE completed_at IS NOT NULL), 0) AS avg_latency_ms,
+              COALESCE(SUM(amount_ngn) FILTER (WHERE submitted_at >= date_trunc('day', NOW())), 0) AS daily_volume
+            FROM outbound_transfers
+        ''')
+        participant_rows = await connection.fetch('''
+            SELECT p.id, p.name, p.status,
+              COALESCE(COUNT(t.id) FILTER (WHERE t.submitted_at >= NOW() - INTERVAL '1 minute')::float / 60.0, 0) AS tps,
+              COALESCE(100.0 * COUNT(t.id) FILTER (WHERE t.status = 'completed' AND t.submitted_at >= NOW() - INTERVAL '1 hour')
+                / NULLIF(COUNT(t.id) FILTER (WHERE t.submitted_at >= NOW() - INTERVAL '1 hour'), 0), 0) AS success_rate,
+              COALESCE(AVG(EXTRACT(EPOCH FROM (t.completed_at - t.submitted_at)) * 1000)
+                FILTER (WHERE t.completed_at IS NOT NULL AND t.submitted_at >= NOW() - INTERVAL '1 hour'), 0) AS latency_ms
+            FROM switch_participants p
+            LEFT JOIN outbound_transfers t ON t.participant_id = p.id
+            GROUP BY p.id, p.name, p.status ORDER BY p.name LIMIT 100
+        ''')
+        transaction_rows = await connection.fetch('''
+            SELECT t.transfer_ref, COALESCE(p.name, t.sender_ref) AS payer, t.beneficiary_name,
+              t.amount_ngn, t.dest_currency, t.status, t.submitted_at,
+              CASE WHEN t.completed_at IS NULL THEN NULL ELSE EXTRACT(EPOCH FROM (t.completed_at - t.submitted_at)) * 1000 END AS latency_ms
+            FROM outbound_transfers t LEFT JOIN switch_participants p ON p.id = t.participant_id
+            ORDER BY t.submitted_at DESC LIMIT 20
+        ''')
+
     metrics = NOCMetrics(
-        tps=MetricCard(label="Transactions Per Second", value=base_tps, change=5.2, trend="up"),
-        success_rate=MetricCard(label="Success Rate", value=f"{success_rate:.1f}%", change=0.3, trend="up"),
-        avg_latency=MetricCard(label="Avg Latency", value=f"{avg_latency}ms", change=-2.1, trend="down"),
-        daily_volume=MetricCard(label="Today's Volume", value="₦15.2B", change=12.5, trend="up"),
-        participant_health=[ParticipantHealth(**p) for p in participants],
-        recent_transactions=[Transaction(**t) for t in recent_txns],
-        kill_switches=kill_switches
+        tps=MetricCard(label='Transactions Per Second', value=round(decimal_to_float(aggregate['tps']), 2)),
+        success_rate=MetricCard(label='Success Rate', value=round(decimal_to_float(aggregate['success_rate']), 2)),
+        avg_latency=MetricCard(label='Average Latency (ms)', value=round(decimal_to_float(aggregate['avg_latency_ms']), 2)),
+        daily_volume=MetricCard(label='Today\'s Volume (NGN)', value=decimal_to_float(aggregate['daily_volume'])),
+        participant_health=[ParticipantHealth(
+            id=str(row['id']), name=row['name'], status=str(row['status']), tps=round(decimal_to_float(row['tps']), 2),
+            success_rate=round(decimal_to_float(row['success_rate']), 2), latency_ms=round(decimal_to_float(row['latency_ms']))
+        ) for row in participant_rows],
+        recent_transactions=[Transaction(
+            id=row['transfer_ref'], payer=row['payer'], payee=row['beneficiary_name'], amount=decimal_to_float(row['amount_ngn']),
+            currency=row['dest_currency'], status=str(row['status']), latency_ms=None if row['latency_ms'] is None else round(decimal_to_float(row['latency_ms'])),
+            timestamp=iso(row['submitted_at']) or ''
+        ) for row in transaction_rows],
+        kill_switches=[],
+        source='postgresql_operational_read_model',
     )
-    
-    await set_cached(cache_key, metrics.model_dump())
+    await set_cached('lakehouse:noc_metrics', metrics.model_dump())
     return metrics
+
 
 async def query_fraud_metrics() -> FraudMetrics:
-    """Query fraud metrics from lakehouse gold layer"""
-    cache_key = "lakehouse:fraud_metrics"
-    cached = await get_cached(cache_key)
+    cached = await get_cached('lakehouse:fraud_metrics')
     if cached:
         return FraudMetrics(**cached)
-    
-    import random
-    
-    alerts = [
-        {"id": f"ALT-{i}", "transaction_id": f"TRF-2024-00123{i}", "alert_type": random.choice(["VELOCITY_BREACH", "ML_DETECTION", "SANCTIONS_HIT", "AMOUNT_ANOMALY", "PATTERN_MATCH"]),
-         "severity": random.choice(["CRITICAL", "HIGH", "MEDIUM", "LOW"]), "status": random.choice(["OPEN", "INVESTIGATING", "ESCALATED", "RESOLVED"]),
-         "risk_score": random.randint(45, 99), "ml_confidence": random.randint(65, 100),
-         "payer": random.choice(["firstbank", "gtbank", "zenith"]), "payee": random.choice(["uba", "stanbic", "access"]),
-         "amount": random.randint(25000, 500000), "timestamp": (datetime.utcnow() - timedelta(minutes=i*5)).isoformat()}
-        for i in range(12)
-    ]
-    
-    alerts_over_time = [
-        {"hour": f"{h:02d}:00", "count": random.randint(5, 25)}
-        for h in range(24)
-    ]
-    
-    open_count = len([a for a in alerts if a["status"] in ["OPEN", "INVESTIGATING"]])
-    critical_count = len([a for a in alerts if a["severity"] == "CRITICAL"])
-    
+    pool = await require_read_pool()
+
+    async with pool.acquire() as connection:
+        rows = await connection.fetch('''
+            SELECT cs.id, t.transfer_ref, cs.screening_type, cs.decision, cs.match_score,
+              COALESCE(p.name, t.sender_ref) AS payer, t.beneficiary_name AS payee, t.amount_ngn, cs.created_at
+            FROM compliance_screenings cs
+            JOIN outbound_transfers t ON t.id = cs.transfer_id
+            LEFT JOIN switch_participants p ON p.id = cs.participant_id
+            ORDER BY cs.created_at DESC LIMIT 100
+        ''')
+        hourly = await connection.fetch('''
+            SELECT date_trunc('hour', created_at) AS hour, COUNT(*)::integer AS count
+            FROM compliance_screenings
+            WHERE created_at >= NOW() - INTERVAL '24 hours'
+            GROUP BY 1 ORDER BY 1
+        ''')
+
+    alerts = []
+    for row in rows:
+        score = decimal_to_float(row['match_score']) * 100
+        decision = str(row['decision']).upper()
+        alerts.append(FraudAlert(
+            id=str(row['id']), transaction_id=row['transfer_ref'], alert_type=row['screening_type'],
+            severity='CRITICAL' if score >= 90 else 'HIGH' if score >= 70 else 'MEDIUM' if score >= 40 else 'LOW',
+            status=decision, risk_score=round(score, 2), ml_confidence=round(score, 2), payer=row['payer'], payee=row['payee'],
+            amount=decimal_to_float(row['amount_ngn']), timestamp=iso(row['created_at']) or '',
+        ))
+    open_alerts = [alert for alert in alerts if alert.status not in {'APPROVED', 'CLEAR', 'RESOLVED'}]
     metrics = FraudMetrics(
-        open_alerts=MetricCard(label="Open Alerts", value=open_count, change=-15.0, trend="down"),
-        critical_alerts=MetricCard(label="Critical Alerts", value=critical_count, change=0, trend="neutral"),
-        resolved_today=MetricCard(label="Resolved Today", value=len([a for a in alerts if a["status"] == "RESOLVED"]), change=25.0, trend="up"),
-        avg_resolution_time=MetricCard(label="Avg Resolution Time", value="12m", change=-8.0, trend="down"),
-        alerts=[FraudAlert(**a) for a in alerts],
-        alerts_over_time=alerts_over_time
+        open_alerts=MetricCard(label='Open Screening Alerts', value=len(open_alerts)),
+        critical_alerts=MetricCard(label='Critical Alerts', value=sum(alert.severity == 'CRITICAL' for alert in open_alerts)),
+        resolved_today=MetricCard(label='Resolved Today', value=sum(alert.status in {'APPROVED', 'CLEAR', 'RESOLVED'} for alert in alerts)),
+        avg_resolution_time=MetricCard(label='Average Resolution Time', value=None),
+        alerts=alerts,
+        alerts_over_time=[{'hour': iso(row['hour']), 'count': row['count']} for row in hourly],
+        source='postgresql_operational_read_model',
     )
-    
-    await set_cached(cache_key, metrics.model_dump())
+    await set_cached('lakehouse:fraud_metrics', metrics.model_dump())
     return metrics
+
 
 async def query_settlement_metrics() -> SettlementMetrics:
-    """Query settlement metrics from lakehouse gold layer"""
-    cache_key = "lakehouse:settlement_metrics"
-    cached = await get_cached(cache_key)
-    if cached:
-        return SettlementMetrics(**cached)
-    
-    settlements = [
-        {"id": "stl-001", "window_id": "sw-001", "status": "PENDING_SETTLEMENT", "total_transactions": 284739,
-         "total_amount": 152345678.00, "participants": 4, "approvals_received": 1, "approvals_required": 2,
-         "opened_at": (datetime.utcnow() - timedelta(hours=24)).isoformat(), "closed_at": (datetime.utcnow() - timedelta(hours=1)).isoformat()},
-        {"id": "stl-002", "window_id": "sw-002", "status": "SETTLED", "total_transactions": 267834,
-         "total_amount": 145678900.00, "participants": 2, "approvals_received": 2, "approvals_required": 2,
-         "opened_at": (datetime.utcnow() - timedelta(hours=48)).isoformat(), "closed_at": (datetime.utcnow() - timedelta(hours=25)).isoformat()},
-    ]
-    
-    pending_count = len([s for s in settlements if s["status"] == "PENDING_SETTLEMENT"])
-    settled_count = len([s for s in settlements if s["status"] == "SETTLED"])
-    
-    metrics = SettlementMetrics(
-        pending_settlements=MetricCard(label="Pending Settlements", value=pending_count, change=0, trend="neutral"),
-        pending_amount=MetricCard(label="Pending Amount", value="₦15.2B", change=0, trend="neutral"),
-        settled_today=MetricCard(label="Settled Today", value=settled_count, change=0, trend="neutral"),
-        active_participants=MetricCard(label="Active Participants", value=24, change=0, trend="neutral"),
-        settlements=[Settlement(**s) for s in settlements]
-    )
-    
-    await set_cached(cache_key, metrics.model_dump())
-    return metrics
+    # The active platform schema has no settlement-window read model. Returning a
+    # 503 is intentional: fabricated settlement dashboards are unacceptable.
+    raise HTTPException(status_code=503, detail='Settlement read model is not implemented in the active PostgreSQL schema')
 
-async def query_participant_metrics():
-    """Query participant metrics from lakehouse"""
-    cache_key = "lakehouse:participant_metrics"
-    cached = await get_cached(cache_key)
-    if cached:
-        return cached
-    
-    participants = [
-        {"id": "firstbank", "name": "First Bank of Nigeria", "code": "firstbank", "type": "BANK", "status": "ACTIVE",
-         "kyc_status": "APPROVED", "net_debit_cap": 500000000.00, "current_position": 123456789.00, "position_usage": 24.7},
-        {"id": "gtbank", "name": "Guaranty Trust Bank", "code": "gtbank", "type": "BANK", "status": "ACTIVE",
-         "kyc_status": "APPROVED", "net_debit_cap": 450000000.00, "current_position": 98765432.00, "position_usage": 21.9},
-        {"id": "mtn-momo", "name": "MTN Mobile Money", "code": "mtn-momo", "type": "MOBILE_MONEY", "status": "ACTIVE",
-         "kyc_status": "APPROVED", "net_debit_cap": 200000000.00, "current_position": 54321098.00, "position_usage": 27.2},
-        {"id": "newbank", "name": "New Digital Bank", "code": "newbank", "type": "BANK", "status": "PENDING",
-         "kyc_status": "PENDING", "net_debit_cap": 100000000.00, "current_position": 0.00, "position_usage": 0.0},
-    ]
-    
-    result = {
-        "total": len(participants),
-        "active": len([p for p in participants if p["status"] == "ACTIVE"]),
-        "pending": len([p for p in participants if p["status"] == "PENDING"]),
-        "suspended": 0,
-        "participants": participants
+
+async def query_participant_metrics() -> dict[str, Any]:
+    pool = await require_read_pool()
+    async with pool.acquire() as connection:
+        rows = await connection.fetch('''
+            SELECT p.id, p.name, p.short_code, p.type, p.status, p.tier, p.daily_limit,
+              COALESCE(a.balance, 0) AS current_position
+            FROM switch_participants p
+            LEFT JOIN prefund_accounts a ON a.participant_id = p.id
+            ORDER BY p.name
+        ''')
+    participants = [{
+        'id': str(row['id']), 'name': row['name'], 'code': row['short_code'], 'type': row['type'], 'status': str(row['status']),
+        'tier': str(row['tier']), 'daily_limit': decimal_to_float(row['daily_limit']) if row['daily_limit'] is not None else None,
+        'current_position': decimal_to_float(row['current_position']),
+    } for row in rows]
+    return {
+        'total': len(participants),
+        'active': sum(row['status'] == 'active' for row in participants),
+        'pending': sum(row['status'] == 'pending' for row in participants),
+        'suspended': sum(row['status'] == 'suspended' for row in participants),
+        'participants': participants,
+        'source': 'postgresql_operational_read_model',
     }
-    
-    await set_cached(cache_key, result)
-    return result
 
-async def query_reports_metrics():
-    """Query reports metrics from lakehouse"""
-    cache_key = "lakehouse:reports_metrics"
-    cached = await get_cached(cache_key)
-    if cached:
-        return cached
-    
-    reports = [
-        {"id": "rpt-001", "name": "Daily Transaction Summary", "type": "DAILY_TRANSACTION", "format": "PDF",
-         "size": "2.3 MB", "status": "READY", "generated_at": datetime.utcnow().isoformat()},
-        {"id": "rpt-002", "name": "CBN Monthly Report - November 2024", "type": "CBN_REGULATORY", "format": "EXCEL",
-         "size": "5.4 MB", "status": "SUBMITTED", "generated_at": (datetime.utcnow() - timedelta(days=1)).isoformat()},
-        {"id": "rpt-003", "name": "Settlement Report - Week 51", "type": "SETTLEMENT", "format": "PDF",
-         "size": None, "status": "GENERATING", "generated_at": None},
-        {"id": "rpt-004", "name": "Fraud Summary - December 2024", "type": "FRAUD_SUMMARY", "format": "PDF",
-         "size": None, "status": "SCHEDULED", "scheduled_at": (datetime.utcnow() + timedelta(hours=1)).isoformat()},
-        {"id": "rpt-005", "name": "Participant Activity Report", "type": "PARTICIPANT_ACTIVITY", "format": "CSV",
-         "size": None, "status": "FAILED", "generated_at": (datetime.utcnow() - timedelta(hours=2)).isoformat()},
-    ]
-    
-    result = {
-        "ready": len([r for r in reports if r["status"] == "READY"]),
-        "pending": len([r for r in reports if r["status"] in ["GENERATING", "SCHEDULED"]]),
-        "submitted": len([r for r in reports if r["status"] == "SUBMITTED"]),
-        "total": len(reports),
-        "reports": reports
+
+async def query_reports_metrics() -> dict[str, Any]:
+    pool = await require_read_pool()
+    async with pool.acquire() as connection:
+        rows = await connection.fetch('SELECT id, report_type, status, created_at, generated_at FROM compliance_reports ORDER BY created_at DESC LIMIT 100')
+    reports = [{
+        'id': str(row['id']), 'name': row['report_type'], 'type': row['report_type'], 'status': row['status'],
+        'generated_at': iso(row['generated_at']), 'created_at': iso(row['created_at']),
+    } for row in rows]
+    return {'ready': sum(r['status'] == 'ready' for r in reports), 'pending': sum(r['status'] in {'pending', 'generating'} for r in reports), 'submitted': sum(r['status'] == 'submitted' for r in reports), 'total': len(reports), 'reports': reports, 'source': 'postgresql_operational_read_model'}
+
+
+async def query_developer_metrics() -> dict[str, Any]:
+    pool = await require_read_pool()
+    async with pool.acquire() as connection:
+        key_rows = await connection.fetch('SELECT id, api_key, is_active, last_used_at, created_at FROM api_credentials ORDER BY created_at DESC LIMIT 100')
+        webhook_rows = await connection.fetch('SELECT id, webhook_url, enabled, created_at FROM api_key_webhooks ORDER BY created_at DESC LIMIT 100')
+    return {
+        'active_keys': sum(bool(row['is_active']) for row in key_rows),
+        'api_keys': [{'id': str(row['id']), 'key_prefix': str(row['api_key'])[:8], 'status': 'active' if row['is_active'] else 'inactive', 'last_used': iso(row['last_used_at'])} for row in key_rows],
+        'webhooks': [{'id': str(row['id']), 'url': row['webhook_url'], 'status': 'active' if row['enabled'] else 'disabled', 'created_at': iso(row['created_at'])} for row in webhook_rows],
+        'source': 'postgresql_operational_read_model',
     }
-    
-    await set_cached(cache_key, result)
-    return result
 
-async def query_developer_metrics():
-    """Query developer portal metrics from lakehouse"""
-    cache_key = "lakehouse:developer_metrics"
-    cached = await get_cached(cache_key)
-    if cached:
-        return cached
-    
-    import random
-    
-    api_usage = [
-        {"date": (datetime.utcnow() - timedelta(days=30-i)).strftime("%b %d"), "requests": random.randint(40000, 80000)}
-        for i in range(30)
-    ]
-    
-    api_keys = [
-        {"id": "key-001", "name": "Production API Key", "key": "pk_live_************************", "status": "ACTIVE",
-         "permissions": ["transfers:read", "transfers:write", "participants:read"], "rate_limit": 1000,
-         "usage": 1234567, "last_used": datetime.utcnow().isoformat()},
-        {"id": "key-002", "name": "Sandbox API Key", "key": "pk_test_************************", "status": "ACTIVE",
-         "permissions": ["transfers:read", "transfers:write", "participants:read", "sandbox:all"], "rate_limit": 100,
-         "usage": 45678, "last_used": (datetime.utcnow() - timedelta(minutes=10)).isoformat()},
-        {"id": "key-003", "name": "Legacy API Key", "key": "pk_live_************************", "status": "REVOKED",
-         "permissions": ["transfers:read"], "rate_limit": 500, "usage": 987654, "last_used": None},
-    ]
-    
-    webhooks = [
-        {"id": "wh-001", "url": "https://api.merchant.com/webhooks/payments", "events": ["transfer.completed", "transfer.failed"],
-         "status": "ACTIVE", "success_rate": 99.8, "last_delivery": datetime.utcnow().isoformat()},
-        {"id": "wh-002", "url": "https://api.partner.com/callbacks", "events": ["settlement.completed"],
-         "status": "ACTIVE", "success_rate": 100.0, "last_delivery": (datetime.utcnow() - timedelta(hours=1)).isoformat()},
-    ]
-    
-    result = {
-        "total_requests": "2.3M",
-        "active_keys": len([k for k in api_keys if k["status"] == "ACTIVE"]),
-        "webhook_success_rate": 99.9,
-        "avg_response_time": 45,
-        "api_usage": api_usage,
-        "api_keys": api_keys,
-        "webhooks": webhooks
-    }
-    
-    await set_cached(cache_key, result)
-    return result
 
-# Background task to broadcast real-time metrics
-async def metrics_broadcaster():
-    """Broadcast real-time metrics to WebSocket clients"""
+async def metrics_broadcaster() -> None:
     while True:
         try:
             if manager.active_connections:
-                import random
-                metrics = {
-                    "type": "realtime_metrics",
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "data": {
-                        "tps": 1250 + random.randint(-100, 100),
-                        "success_rate": 99.2 + random.uniform(-0.5, 0.5),
-                        "avg_latency_ms": 48 + random.randint(-10, 15),
-                        "active_transactions": random.randint(50, 150),
-                    }
-                }
-                await manager.broadcast(metrics)
-        except Exception as e:
-            logger.error(f"Metrics broadcast error: {e}")
-        await asyncio.sleep(1)
+                metrics = await query_noc_metrics()
+                await manager.broadcast({'type': 'realtime_metrics', 'timestamp': datetime.now(timezone.utc).isoformat(), 'data': {'tps': metrics.tps.value, 'success_rate': metrics.success_rate.value, 'avg_latency_ms': metrics.avg_latency.value, 'active_transactions': None}, 'source': metrics.source})
+        except Exception as error:
+            logger.warning('Realtime metrics broadcast skipped: %s', error)
+        await asyncio.sleep(5)
 
-# API Endpoints
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
-@app.get("/metrics")
-async def prometheus_metrics():
+@app.get('/health')
+async def health_check() -> dict[str, Any]:
+    if not read_pool:
+        raise HTTPException(status_code=503, detail='Lakehouse read model unavailable')
+    return {'status': 'healthy', 'source': 'postgresql_operational_read_model', 'timestamp': datetime.now(timezone.utc).isoformat()}
+
+
+@app.get('/metrics')
+async def prometheus_metrics() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
-@app.get("/api/v1/noc/metrics", response_model=NOCMetrics)
-async def get_noc_metrics():
-    """Get NOC dashboard metrics from lakehouse"""
-    REQUEST_COUNT.labels(endpoint="noc_metrics", status="success").inc()
-    with REQUEST_LATENCY.labels(endpoint="noc_metrics").time():
+
+@app.get('/api/v1/noc/metrics', response_model=NOCMetrics)
+async def get_noc_metrics() -> NOCMetrics:
+    REQUEST_COUNT.labels(endpoint='noc_metrics', status='requested').inc()
+    with REQUEST_LATENCY.labels(endpoint='noc_metrics').time():
         return await query_noc_metrics()
 
-@app.get("/api/v1/fraud/metrics", response_model=FraudMetrics)
-async def get_fraud_metrics():
-    """Get fraud dashboard metrics from lakehouse"""
-    REQUEST_COUNT.labels(endpoint="fraud_metrics", status="success").inc()
-    with REQUEST_LATENCY.labels(endpoint="fraud_metrics").time():
+
+@app.get('/api/v1/fraud/metrics', response_model=FraudMetrics)
+async def get_fraud_metrics() -> FraudMetrics:
+    REQUEST_COUNT.labels(endpoint='fraud_metrics', status='requested').inc()
+    with REQUEST_LATENCY.labels(endpoint='fraud_metrics').time():
         return await query_fraud_metrics()
 
-@app.get("/api/v1/settlements/metrics", response_model=SettlementMetrics)
-async def get_settlement_metrics():
-    """Get settlement dashboard metrics from lakehouse"""
-    REQUEST_COUNT.labels(endpoint="settlement_metrics", status="success").inc()
-    with REQUEST_LATENCY.labels(endpoint="settlement_metrics").time():
-        return await query_settlement_metrics()
 
-@app.get("/api/v1/participants/metrics")
-async def get_participant_metrics():
-    """Get participant management metrics from lakehouse"""
-    REQUEST_COUNT.labels(endpoint="participant_metrics", status="success").inc()
-    with REQUEST_LATENCY.labels(endpoint="participant_metrics").time():
-        return await query_participant_metrics()
+@app.get('/api/v1/settlements/metrics', response_model=SettlementMetrics)
+async def get_settlement_metrics() -> SettlementMetrics:
+    return await query_settlement_metrics()
 
-@app.get("/api/v1/reports/metrics")
-async def get_reports_metrics():
-    """Get regulatory reports metrics from lakehouse"""
-    REQUEST_COUNT.labels(endpoint="reports_metrics", status="success").inc()
-    with REQUEST_LATENCY.labels(endpoint="reports_metrics").time():
-        return await query_reports_metrics()
 
-@app.get("/api/v1/developer/metrics")
-async def get_developer_metrics():
-    """Get developer portal metrics from lakehouse"""
-    REQUEST_COUNT.labels(endpoint="developer_metrics", status="success").inc()
-    with REQUEST_LATENCY.labels(endpoint="developer_metrics").time():
-        return await query_developer_metrics()
+@app.get('/api/v1/participants/metrics')
+async def get_participant_metrics() -> dict[str, Any]:
+    return await query_participant_metrics()
 
-@app.get("/api/v1/analytics/transactions")
-async def get_transaction_analytics(
-    start_date: str = Query(default=None),
-    end_date: str = Query(default=None),
-    participant: str = Query(default=None)
-):
-    """Get transaction analytics from lakehouse"""
-    REQUEST_COUNT.labels(endpoint="transaction_analytics", status="success").inc()
-    # This would query Delta Lake silver/gold tables
-    return {
-        "period": {"start": start_date, "end": end_date},
-        "total_transactions": 2847390,
-        "total_volume": 15234567800.00,
-        "success_rate": 99.2,
-        "avg_latency_ms": 48,
-        "by_participant": {},
-        "source": "lakehouse"
-    }
 
-@app.get("/api/v1/analytics/fraud")
-async def get_fraud_analytics(
-    start_date: str = Query(default=None),
-    end_date: str = Query(default=None)
-):
-    """Get fraud analytics from lakehouse"""
-    REQUEST_COUNT.labels(endpoint="fraud_analytics", status="success").inc()
-    return {
-        "period": {"start": start_date, "end": end_date},
-        "total_scored": 2847390,
-        "avg_fraud_score": 0.12,
-        "block_rate": 0.002,
-        "review_rate": 0.015,
-        "allow_rate": 0.983,
-        "source": "lakehouse"
-    }
+@app.get('/api/v1/reports/metrics')
+async def get_reports_metrics() -> dict[str, Any]:
+    return await query_reports_metrics()
 
-@app.get("/api/v1/analytics/settlements")
-async def get_settlement_analytics(
-    start_date: str = Query(default=None),
-    end_date: str = Query(default=None)
-):
-    """Get settlement analytics from lakehouse"""
-    REQUEST_COUNT.labels(endpoint="settlement_analytics", status="success").inc()
-    return {
-        "period": {"start": start_date, "end": end_date},
-        "total_settlements": 48,
-        "total_settled_amount": 145678900000.00,
-        "avg_settlement_time_hours": 2.5,
-        "success_rate": 99.8,
-        "source": "lakehouse"
-    }
 
-# WebSocket endpoint for real-time updates
-@app.websocket("/ws/realtime")
-async def websocket_endpoint(websocket: WebSocket):
+@app.get('/api/v1/developer/metrics')
+async def get_developer_metrics() -> dict[str, Any]:
+    return await query_developer_metrics()
+
+
+@app.get('/api/v1/analytics/transactions')
+async def get_transaction_analytics(start_date: Optional[str] = Query(default=None), end_date: Optional[str] = Query(default=None), participant: Optional[int] = Query(default=None)) -> dict[str, Any]:
+    pool = await require_read_pool()
+    async with pool.acquire() as connection:
+        row = await connection.fetchrow('''
+            SELECT COUNT(*)::integer AS total_transactions, COALESCE(SUM(amount_ngn), 0) AS total_volume,
+              COALESCE(100.0 * COUNT(*) FILTER (WHERE status = 'completed') / NULLIF(COUNT(*), 0), 0) AS success_rate
+            FROM outbound_transfers
+            WHERE ($1::timestamptz IS NULL OR submitted_at >= $1::timestamptz)
+              AND ($2::timestamptz IS NULL OR submitted_at <= $2::timestamptz)
+              AND ($3::integer IS NULL OR participant_id = $3)
+        ''', start_date, end_date, participant)
+    return {'period': {'start': start_date, 'end': end_date}, 'total_transactions': row['total_transactions'], 'total_volume': decimal_to_float(row['total_volume']), 'success_rate': decimal_to_float(row['success_rate']), 'source': 'postgresql_operational_read_model'}
+
+
+@app.get('/api/v1/analytics/fraud')
+async def get_fraud_analytics(start_date: Optional[str] = Query(default=None), end_date: Optional[str] = Query(default=None)) -> dict[str, Any]:
+    pool = await require_read_pool()
+    async with pool.acquire() as connection:
+        row = await connection.fetchrow('''
+            SELECT COUNT(*)::integer AS total_screened, COALESCE(AVG(match_score), 0) AS average_match_score,
+              COALESCE(100.0 * COUNT(*) FILTER (WHERE decision NOT IN ('approved', 'clear', 'resolved')) / NULLIF(COUNT(*), 0), 0) AS review_rate
+            FROM compliance_screenings
+            WHERE ($1::timestamptz IS NULL OR created_at >= $1::timestamptz)
+              AND ($2::timestamptz IS NULL OR created_at <= $2::timestamptz)
+        ''', start_date, end_date)
+    return {'period': {'start': start_date, 'end': end_date}, 'total_screened': row['total_screened'], 'average_match_score': decimal_to_float(row['average_match_score']), 'review_rate': decimal_to_float(row['review_rate']), 'source': 'postgresql_operational_read_model'}
+
+
+@app.get('/api/v1/analytics/settlements')
+async def get_settlement_analytics() -> dict[str, Any]:
+    raise HTTPException(status_code=503, detail='Settlement read model is not implemented in the active PostgreSQL schema')
+
+
+@app.websocket('/ws/realtime')
+async def websocket_endpoint(websocket: WebSocket) -> None:
     await manager.connect(websocket)
     try:
         while True:
-            data = await websocket.receive_text()
-            # Handle client messages if needed
-            if data == "ping":
-                await websocket.send_json({"type": "pong", "timestamp": datetime.utcnow().isoformat()})
+            if await websocket.receive_text() == 'ping':
+                await websocket.send_json({'type': 'pong', 'timestamp': datetime.now(timezone.utc).isoformat()})
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-# Kill switch endpoints
-@app.post("/api/v1/killswitch/{switch_id}/activate")
-async def activate_kill_switch(switch_id: str, reason: str = Query(default="Manual activation")):
-    """Activate a kill switch"""
-    return {"status": "activated", "switch_id": switch_id, "reason": reason, "activated_at": datetime.utcnow().isoformat()}
 
-@app.post("/api/v1/killswitch/{switch_id}/deactivate")
-async def deactivate_kill_switch(switch_id: str):
-    """Deactivate a kill switch"""
-    return {"status": "deactivated", "switch_id": switch_id, "deactivated_at": datetime.utcnow().isoformat()}
+@app.post('/api/v1/killswitch/{switch_id}/activate')
+@app.post('/api/v1/killswitch/{switch_id}/deactivate')
+@app.post('/api/v1/settlements/{settlement_id}/approve')
+@app.post('/api/v1/settlements/{settlement_id}/reject')
+@app.post('/api/v1/fraud/alerts/{alert_id}/resolve')
+async def unsupported_mutation(**_: str) -> None:
+    raise HTTPException(status_code=501, detail='This read-only analytics service does not mutate payment, settlement, or security state')
 
-# Settlement approval endpoints
-@app.post("/api/v1/settlements/{settlement_id}/approve")
-async def approve_settlement(settlement_id: str):
-    """Approve a settlement"""
-    return {"status": "approved", "settlement_id": settlement_id, "approved_at": datetime.utcnow().isoformat()}
 
-@app.post("/api/v1/settlements/{settlement_id}/reject")
-async def reject_settlement(settlement_id: str, reason: str = Query(default="Rejected")):
-    """Reject a settlement"""
-    return {"status": "rejected", "settlement_id": settlement_id, "reason": reason, "rejected_at": datetime.utcnow().isoformat()}
-
-# Fraud alert endpoints
-@app.post("/api/v1/fraud/alerts/{alert_id}/resolve")
-async def resolve_fraud_alert(alert_id: str, resolution: str = Query(default="false_positive")):
-    """Resolve a fraud alert"""
-    return {"status": "resolved", "alert_id": alert_id, "resolution": resolution, "resolved_at": datetime.utcnow().isoformat()}
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host='0.0.0.0', port=8080)

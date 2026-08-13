@@ -1,15 +1,13 @@
-"""
-Fraud Detection Service - Pydantic Schemas
-"""
+"""Pydantic contracts for the verified CPU-local fraud scoring API."""
 
-from typing import Dict, List, Optional
-from pydantic import BaseModel, Field, validator
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class RiskLevel(str, Enum):
-    """Risk level enumeration."""
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -17,60 +15,72 @@ class RiskLevel(str, Enum):
 
 
 class LocationSchema(BaseModel):
-    """Location schema."""
-    lat: float = Field(..., ge=-90, le=90, description="Latitude")
-    lon: float = Field(..., ge=-180, le=180, description="Longitude")
-    country: Optional[str] = Field(None, description="Country code")
-    city: Optional[str] = Field(None, description="City name")
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
+    country: Optional[str] = None
+    city: Optional[str] = None
 
 
 class TransactionRequest(BaseModel):
-    """Transaction scoring request."""
+    """Required live input for the approved `fraud-tabular-v1` contract."""
+
     transaction_id: str = Field(..., min_length=1, max_length=100)
     payer_id: str = Field(..., min_length=1, max_length=100)
     payee_id: str = Field(..., min_length=1, max_length=100)
-    amount: float = Field(..., gt=0, description="Transaction amount")
-    currency: str = Field(..., min_length=3, max_length=3, description="ISO 4217 currency code")
-    channel: str = Field(..., description="Transaction channel: POS, ATM, WEB, MOBILE, QR")
+    amount: float = Field(..., gt=0)
+    currency: str = Field(..., min_length=3, max_length=3)
+    channel: str = Field(..., description="NIP, NEFT, POS, ATM, MOBILE, USSD, QR, or WEB")
+    source_bank_code: str = Field(..., min_length=3, max_length=32)
+    destination_bank_code: str = Field(..., min_length=3, max_length=32)
+    narration: str = Field(..., min_length=1, max_length=256)
+    sender_balance: float = Field(..., ge=0)
+    sender_age_days: int = Field(..., ge=0)
+    sender_is_mule: bool
     merchant_id: Optional[str] = Field(None, max_length=100)
     device_id: Optional[str] = Field(None, max_length=100)
     location: Optional[LocationSchema] = None
-    timestamp: str = Field(..., description="ISO 8601 timestamp")
-    
-    @validator('channel')
-    def validate_channel(cls, v):
-        """Validate channel."""
-        allowed_channels = ['POS', 'ATM', 'WEB', 'MOBILE', 'QR']
-        if v not in allowed_channels:
-            raise ValueError(f"Channel must be one of {allowed_channels}")
-        return v
-    
-    @validator('currency')
-    def validate_currency(cls, v):
-        """Validate currency code."""
-        return v.upper()
+    timestamp: datetime
+
+    @field_validator("channel")
+    @classmethod
+    def validate_channel(cls, value: str) -> str:
+        normalized = value.upper()
+        allowed = {"NIP", "NEFT", "POS", "ATM", "MOBILE", "USSD", "QR", "WEB"}
+        if normalized not in allowed:
+            raise ValueError(f"Channel must be one of {sorted(allowed)}")
+        return normalized
+
+    @field_validator("currency")
+    @classmethod
+    def validate_currency(cls, value: str) -> str:
+        normalized = value.upper()
+        if normalized != "NGN":
+            raise ValueError("The approved fraud-tabular-v1 model currently supports NGN only")
+        return normalized
 
 
 class FraudScoreResponse(BaseModel):
-    """Fraud score response."""
+    model_config = {"protected_namespaces": ()}
+
     transaction_id: str
-    fraud_score: float = Field(..., ge=0, le=1, description="Overall fraud score (0-1)")
+    fraud_score: float = Field(..., ge=0, le=1)
     risk_level: RiskLevel
-    gnn_score: float = Field(..., ge=0, le=1, description="GNN model score")
-    ml_score: float = Field(..., ge=0, le=1, description="ML model score")
-    rule_score: float = Field(..., ge=0, le=1, description="Rule-based score")
-    explanation: List[str] = Field(..., description="Explanation of the score")
-    processing_time_ms: float = Field(..., description="Processing time in milliseconds")
-    features: Optional[Dict] = Field(None, description="Extracted features")
+    gnn_score: Optional[float] = Field(None, ge=0, le=1)
+    ml_score: float = Field(..., ge=0, le=1)
+    rule_score: float = Field(..., ge=0, le=1)
+    model_id: str
+    model_version: str
+    model_decision: str
+    explanation: List[str]
+    processing_time_ms: float
+    features: Optional[Dict] = None
 
 
 class BatchScoreRequest(BaseModel):
-    """Batch scoring request."""
-    transactions: List[TransactionRequest] = Field(..., min_items=1, max_items=100)
+    transactions: List[TransactionRequest] = Field(..., min_length=1, max_length=100)
 
 
 class BatchScoreResponse(BaseModel):
-    """Batch scoring response."""
     results: List[FraudScoreResponse]
     total_count: int
     success_count: int
@@ -79,7 +89,6 @@ class BatchScoreResponse(BaseModel):
 
 
 class ModelStatsResponse(BaseModel):
-    """Model statistics response."""
     gnn_model_loaded: bool
     gnn_model_version: str
     ml_model_loaded: bool
@@ -90,7 +99,6 @@ class ModelStatsResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    """Health check response."""
     status: str
     timestamp: str
     redis_connected: bool
@@ -99,7 +107,6 @@ class HealthResponse(BaseModel):
 
 
 class ErrorResponse(BaseModel):
-    """Error response."""
     error: str
     detail: str
     transaction_id: Optional[str] = None

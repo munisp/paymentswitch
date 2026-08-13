@@ -16,17 +16,6 @@ interface Transaction {
   date: string;
 }
 
-const SEED_TRANSACTIONS: Transaction[] = [
-  { id: 'TXN001', type: 'NIP', amount: 250000, currency: 'NGN', status: 'completed', sender: 'GTBank', receiver: 'Access Bank', reference: 'NIP/2025/001234', date: '2025-05-02 14:30' },
-  { id: 'TXN002', type: 'NEFT', amount: 1500000, currency: 'NGN', status: 'completed', sender: 'Zenith Bank', receiver: 'UBA', reference: 'NEFT/2025/005678', date: '2025-05-02 14:25' },
-  { id: 'TXN003', type: 'Card', amount: 45000, currency: 'NGN', status: 'pending', sender: 'Merchant POS', receiver: 'First Bank', reference: 'CARD/2025/009012', date: '2025-05-02 14:20' },
-  { id: 'TXN004', type: 'Remittance', amount: 2500, currency: 'USD', status: 'completed', sender: 'WorldRemit', receiver: 'Fidelity Bank', reference: 'RMT/2025/003456', date: '2025-05-02 14:15' },
-  { id: 'TXN005', type: 'NIP', amount: 75000, currency: 'NGN', status: 'failed', sender: 'Stanbic IBTC', receiver: 'Sterling Bank', reference: 'NIP/2025/007890', date: '2025-05-02 14:10' },
-  { id: 'TXN006', type: 'Government', amount: 180000, currency: 'NGN', status: 'completed', sender: 'FIRS', receiver: 'TSA', reference: 'GOV/2025/002345', date: '2025-05-02 14:05' },
-  { id: 'TXN007', type: 'Trade', amount: 3500000, currency: 'NGN', status: 'completed', sender: 'Trade Corp', receiver: 'Wema Bank', reference: 'TRD/2025/006789', date: '2025-05-02 14:00' },
-  { id: 'TXN008', type: 'NIP', amount: 120000, currency: 'NGN', status: 'reversed', sender: 'GTBank', receiver: 'Keystone Bank', reference: 'NIP/2025/001235', date: '2025-05-02 13:55' },
-];
-
 type FilterStatus = 'all' | 'completed' | 'pending' | 'failed';
 const FILTERS: { label: string; value: FilterStatus }[] = [
   { label: 'All', value: 'all' },
@@ -43,21 +32,25 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function TransactionsScreen() {
-  const [transactions, setTransactions] = useState<Transaction[]>(SEED_TRANSACTIONS);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [search, setSearch] = useState('');
 
   const loadTransactions = useCallback(async () => {
     try {
+      setError(null);
       const res = await fetch('/api/trpc/transactions.list');
+      if (!res.ok) throw new Error(`Live transactions request failed with ${res.status}`);
       const data = await res.json();
-      if (data?.result?.data && Array.isArray(data.result.data)) {
-        setTransactions(data.result.data);
-      }
-    } catch {
-      // Graceful fallback to seed
+      const result = data?.result?.data?.json ?? data?.result?.data;
+      if (!Array.isArray(result)) throw new Error('Live transactions response is not an array');
+      setTransactions(result);
+    } catch (err) {
+      setTransactions([]);
+      setError(err instanceof Error ? err.message : 'Live transactions are unavailable');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -137,6 +130,7 @@ export default function TransactionsScreen() {
         ))}
       </View>
 
+      {error && <Text style={styles.error}>{error}</Text>}
       {loading ? (
         <ActivityIndicator size="large" color="#2563eb" style={{ marginTop: 32 }} />
       ) : (
@@ -189,4 +183,5 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 11, fontWeight: '600', textTransform: 'capitalize' },
   txDate: { fontSize: 11, color: '#9ca3af', marginTop: 6 },
   empty: { textAlign: 'center', padding: 32, color: '#9ca3af', fontSize: 14 },
+  error: { color: '#b91c1c', backgroundColor: '#fee2e2', marginHorizontal: 16, marginBottom: 8, borderRadius: 6, padding: 10, fontSize: 13 },
 });

@@ -340,7 +340,7 @@ export default function IntegrationDevelopment() {
                     )}
                     <div>
                       <p className="font-medium">{test.name}</p>
-                      <p className="text-sm text-muted-foreground capitalize">{status}</p>
+                      <p className="text-sm text-muted-foreground capitalize">{String(status)}</p>
                     </div>
                   </div>
                   <Button

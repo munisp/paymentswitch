@@ -2,6 +2,7 @@ import type { CreateExpressContextOptions } from "@trpc/server/adapters/express"
 import type { User } from "../../drizzle/schema";
 import { COOKIE_NAME } from "@shared/const";
 import { sdk } from "./sdk";
+import { authenticateKeycloakBearer } from '../security/keycloakAuth';
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -17,7 +18,13 @@ export async function createContext(
   let session: { openId: string; appId: string; name: string; twoFactorVerified: boolean } | null = null;
 
   try {
-    user = await sdk.authenticateRequest(opts.req);
+    // A presented bearer token is validated against Keycloak's realm JWKS. The
+    // legacy signed-session route remains available only when no bearer token
+    // was supplied, so an invalid Keycloak token cannot be silently bypassed.
+    user = await authenticateKeycloakBearer(opts.req);
+    if (!user) {
+      user = await sdk.authenticateRequest(opts.req);
+    }
     // Also get session information for 2FA status
     // Use the same COOKIE_NAME constant that oauth.ts uses to set the cookie
     const cookies = opts.req.headers.cookie;

@@ -112,26 +112,14 @@ export async function validateMobileMoneyAccount(params: {
       }
       return { valid: false, error: `Provider returned ${response.status}` };
     } catch (err) {
-      log.error({ err }, '[Mobile Money] Provider API error, using fallback');
+      log.error({ err, provider: params.provider }, '[Mobile Money] Provider account validation failed');
+      return { valid: false, error: 'Provider account validation is unavailable' };
     }
   }
 
-  // Deterministic fallback
-  const { createHash } = await import('crypto');
-  const phoneDigits = params.phoneNumber.replace(/\D/g, '');
-  const hash = createHash('sha256').update(phoneDigits).digest();
-  const providerNames: Record<string, string[]> = {
-    mtn_momo: ['Adebayo Ogundimu', 'Chioma Nwosu', 'Emeka Ibe', 'Fatima Bello', 'Gbenga Adeola'],
-    airtel_money: ['Ibrahim Musa', 'Jumoke Adeyemi', 'Kelechi Okoro', 'Lola Akinwunmi', 'Musa Abdullahi'],
-    glo_cash: ['Ngozi Obi', 'Oluwaseun Bakare', 'Precious Eze', 'Rasheed Adegoke', 'Shade Olowookere'],
-  };
-  const names = providerNames[params.provider] || providerNames.mtn_momo;
-  const nameIndex = hash[0] % names.length;
-
   return {
-    valid: true,
-    accountName: names[nameIndex],
-    accountStatus: 'active',
+    valid: false,
+    error: `Mobile money provider ${params.provider} is not configured`,
   };
 }
 
@@ -161,6 +149,21 @@ export async function sendMobileMoneyTransfer(params: {
 
   log.info(params, '[Mobile Money] Sending transfer');
 
+  const providerApiUrls: Record<string, string | undefined> = {
+    mtn_momo: process.env.MTN_MOMO_API_URL,
+    airtel_money: process.env.AIRTEL_MONEY_API_URL,
+    glo_cash: process.env.GLO_CASH_API_URL,
+  };
+  const apiUrl = providerApiUrls[params.provider];
+  const apiKey = process.env.MOBILE_MONEY_API_KEY;
+  const db = await getDb();
+  if (!db) {
+    throw new Error('Mobile money transfer persistence is unavailable');
+  }
+  if (!apiUrl || !apiKey) {
+    throw new Error(`Mobile money provider ${params.provider} is not configured`);
+  }
+
   const fee = calculateMobileMoneyFee(params.amount, params.provider);
   const result: MobileMoneyTransfer = {
     reference,
@@ -173,59 +176,45 @@ export async function sendMobileMoneyTransfer(params: {
     transactionId: undefined,
   };
 
-  const providerApiUrls: Record<string, string | undefined> = {
-    mtn_momo: process.env.MTN_MOMO_API_URL,
-    airtel_money: process.env.AIRTEL_MONEY_API_URL,
-    glo_cash: process.env.GLO_CASH_API_URL,
-  };
-  const apiUrl = providerApiUrls[params.provider];
-  const apiKey = process.env.MOBILE_MONEY_API_KEY;
-
-  if (apiUrl && apiKey) {
-    try {
-      const response = await fetch(`${apiUrl}/transfers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          reference,
-          recipientPhone: params.recipientPhone,
-          amount: params.amount,
-          narration: params.narration,
-        }),
-      });
-      const data = await response.json() as { status?: string; transactionId?: string; message?: string };
-      result.status = data.status === 'successful' ? 'successful' : data.status === 'failed' ? 'failed' : 'pending';
-      result.transactionId = data.transactionId;
-      result.message = data.message || result.message;
-    } catch (err) {
-      log.error({ err }, '[Mobile Money] Provider API error');
-      result.status = 'failed';
-      result.message = 'Provider communication error';
+  try {
+    const response = await fetch(`${apiUrl}/transfers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        reference,
+        recipientPhone: params.recipientPhone,
+        amount: params.amount,
+        narration: params.narration,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`Provider rejected transfer with HTTP ${response.status}`);
     }
-  } else {
-    result.status = 'successful';
-    result.message = 'Transfer successful';
-    result.transactionId = `TXN${Date.now()}`;
+    const data = await response.json() as { status?: string; transactionId?: string; message?: string };
+    result.status = data.status === 'successful' ? 'successful' : data.status === 'failed' ? 'failed' : 'pending';
+    result.transactionId = data.transactionId;
+    result.message = data.message || result.message;
+  } catch (err) {
+    log.error({ err, provider: params.provider, reference }, '[Mobile Money] Provider transfer failed');
+    result.status = 'failed';
+    result.message = 'Provider communication failed';
   }
 
-  // Persist to PostgreSQL
-  const db = await getDb();
-  if (db) {
-    try {
-      await db.insert(mobileMoneyTransfers).values({
-        id: reference,
-        remittanceId: params.remittanceId,
-        reference,
-        provider: params.provider,
-        recipientPhone: params.recipientPhone,
-        amount: String(params.amount),
-        fee: String(fee),
-        status: result.status,
-        transactionId: result.transactionId,
-      });
-    } catch (err) {
-      log.error({ err }, '[Mobile Money] DB persist error');
-    }
+  try {
+    await db.insert(mobileMoneyTransfers).values({
+      id: reference,
+      remittanceId: params.remittanceId,
+      reference,
+      provider: params.provider,
+      recipientPhone: params.recipientPhone,
+      amount: String(params.amount),
+      fee: String(fee),
+      status: result.status,
+      transactionId: result.transactionId,
+    });
+  } catch (err) {
+    log.error({ err, reference }, '[Mobile Money] DB persist error');
+    throw new Error('Mobile money transfer result could not be persisted');
   }
 
   return result;
@@ -256,11 +245,7 @@ export async function getMobileMoneyTransferStatus(reference: string): Promise<{
       log.error({ err }, '[Mobile Money] DB query error');
     }
   }
-  return {
-    reference,
-    status: 'pending',
-    message: 'Status unavailable',
-  };
+  throw new Error(`Mobile money transfer status is unavailable for ${reference}`);
 }
 
 /**
@@ -344,8 +329,8 @@ export async function sendMobileMoneyReceipt(params: {
       return false;
     }
   }
-  log.info(`[SMS] No provider configured: ${params.recipientPhone}`);
-  return true;
+  log.error({ provider: params.provider, reference: params.reference }, '[SMS] Provider is not configured');
+  return false;
 }
 
 /**
@@ -378,7 +363,7 @@ export async function checkMobileMoneyBalance(params: {
       log.error({ err }, '[Mobile Money] Balance check error');
     }
   }
-  return { balance: 0, currency: 'NGN' };
+  throw new Error(`Mobile money balance is unavailable for provider ${params.provider}`);
 }
 
 /**
@@ -412,7 +397,7 @@ export async function getMobileMoneyHistory(params: {
       log.error({ err }, '[Mobile Money] DB history error');
     }
   }
-  return [];
+  throw new Error('Mobile money transfer history is unavailable');
 }
 
 /**
@@ -423,23 +408,34 @@ export async function reverseMobileMoneyTransfer(reference: string): Promise<{
   reversalReference?: string;
   message: string;
 }> {
-  log.info({ reference }, '[Mobile Money] Reversing transfer');
-
   const db = await getDb();
-  if (db) {
-    try {
-      await db.update(mobileMoneyTransfers)
-        .set({ status: 'failed' })
-        .where(eq(mobileMoneyTransfers.reference, reference));
-    } catch (err) {
-      log.error({ err }, '[Mobile Money] DB reversal update error');
-    }
-  }
+  if (!db) throw new Error('Mobile money reversal persistence is unavailable');
+  const rows = await db.select().from(mobileMoneyTransfers).where(eq(mobileMoneyTransfers.reference, reference)).limit(1);
+  const transfer = rows[0];
+  if (!transfer) throw new Error(`Mobile money transfer ${reference} was not found`);
 
+  const providerUrls: Record<string, string | undefined> = {
+    mtn_momo: process.env.MTN_MOMO_API_URL,
+    airtel_money: process.env.AIRTEL_MONEY_API_URL,
+    glo_cash: process.env.GLO_CASH_API_URL,
+  };
+  const apiUrl = providerUrls[transfer.provider];
+  const apiKey = process.env.MOBILE_MONEY_API_KEY;
+  if (!apiUrl || !apiKey) throw new Error(`Mobile money reversal provider ${transfer.provider} is not configured`);
+
+  const response = await fetch(`${apiUrl}/transfers/${encodeURIComponent(reference)}/reversal`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+  });
+  if (!response.ok) throw new Error(`Mobile money reversal was rejected with HTTP ${response.status}`);
+  const body = await response.json() as { reversalReference?: string; message?: string; status?: string };
+  if (body.status === 'failed') throw new Error(body.message || 'Mobile money provider rejected the reversal');
+
+  await db.update(mobileMoneyTransfers).set({ status: 'failed' }).where(eq(mobileMoneyTransfers.reference, reference));
   return {
     success: true,
-    reversalReference: `REV_${reference}`,
-    message: 'Transfer reversed successfully',
+    reversalReference: body.reversalReference,
+    message: body.message || 'Provider-confirmed reversal submitted',
   };
 }
 

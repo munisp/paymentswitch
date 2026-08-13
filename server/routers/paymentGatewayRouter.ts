@@ -36,6 +36,46 @@ type GatewayConfig = {
 
 // Persistent store (PostgreSQL-backed with in-memory fallback)
 const sessionStore = getStore('gateway_sessions');
+const PAYMENT_PROVIDER_URL = process.env.PAYMENT_PROVIDER_URL;
+const PAYMENT_PROVIDER_API_KEY = process.env.PAYMENT_PROVIDER_API_KEY;
+
+async function submitPaymentToProvider(input: {
+  sessionId: string;
+  amount: number;
+  currency: string;
+  paymentMethod: string;
+  paymentDetails?: Record<string, string>;
+  callbackUrl: string;
+  customerEmail: string | null;
+}): Promise<{ accepted: boolean; providerReference?: string; redirectUrl?: string; error?: string }> {
+  if (!PAYMENT_PROVIDER_URL || !PAYMENT_PROVIDER_API_KEY) {
+    return { accepted: false, error: 'PAYMENT_PROVIDER_URL and PAYMENT_PROVIDER_API_KEY must be configured before payments can be submitted' };
+  }
+
+  try {
+    const response = await fetch(`${PAYMENT_PROVIDER_URL.replace(/\/$/, '')}/payments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${PAYMENT_PROVIDER_API_KEY}`,
+        'Idempotency-Key': input.sessionId,
+      },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      return { accepted: false, error: `Payment provider rejected submission: HTTP ${response.status} ${response.statusText}` };
+    }
+
+    const payload = await response.json() as { accepted?: boolean; reference?: string; transactionRef?: string; redirectUrl?: string };
+    if (payload.accepted !== true || !(payload.reference || payload.transactionRef)) {
+      return { accepted: false, error: 'Payment provider response did not confirm acceptance with a provider reference' };
+    }
+    return { accepted: true, providerReference: payload.reference ?? payload.transactionRef, redirectUrl: payload.redirectUrl };
+  } catch (error) {
+    return { accepted: false, error: error instanceof Error ? error.message : 'Payment provider submission failed' };
+  }
+}
 
 // Supported payment methods with processing logic
 const paymentMethods = [
@@ -118,37 +158,56 @@ export const paymentGatewayRouter = router({
         return { success: false, error: 'Session expired' };
       }
 
-      session.status = 'processing';
-      session.paymentMethod = input.paymentMethod;
-
-      // Calculate fees
+      // Calculate fees before sending the provider request. Fees are informational;
+      // provider confirmation remains the only authority for settlement completion.
       const fee = feeSchedule.find(f => f.method === input.paymentMethod);
       const feeAmount = fee ? Math.round(fee.flat + (session.amount * fee.percentage / 100)) : 0;
 
-      // Payment is submitted; actual success determined by payment provider callback.
-      // Default to completed for direct payments; real provider integration returns async status.
-      const success = true;
-      session.status = success ? 'completed' : 'failed';
-      session.completedAt = new Date().toISOString();
-      session.transactionRef = success ? `TXN-${randomBytes(8).toString('hex').toUpperCase()}` : null;
+      const submission = await submitPaymentToProvider({
+        sessionId: session.id,
+        amount: session.amount,
+        currency: session.currency,
+        paymentMethod: input.paymentMethod,
+        paymentDetails: input.paymentDetails,
+        callbackUrl: session.callbackUrl,
+        customerEmail: session.customerEmail,
+      });
+
+      if (!submission.accepted) {
+        log.warn({ sessionId: input.sessionId, method: input.paymentMethod, error: submission.error }, 'Payment provider did not accept submission');
+        return {
+          success: false,
+          completed: false,
+          status: session.status,
+          error: submission.error ?? 'Payment provider did not accept submission',
+          amount: session.amount,
+          fee: feeAmount,
+          netAmount: session.amount - feeAmount,
+        };
+      }
+
+      session.status = 'processing';
+      session.paymentMethod = input.paymentMethod;
+      session.transactionRef = submission.providerReference ?? null;
       await sessionStore.set(input.sessionId, session as unknown as Record<string, unknown>);
 
       log.info({
         sessionId: input.sessionId,
         method: input.paymentMethod,
-        success,
+        providerReference: submission.providerReference,
         amount: session.amount,
         fee: feeAmount,
-      }, 'Payment processed');
+      }, 'Payment submitted to provider; awaiting verified callback');
 
       return {
-        success,
+        success: true,
+        completed: false,
         transactionRef: session.transactionRef,
         status: session.status,
         amount: session.amount,
         fee: feeAmount,
         netAmount: session.amount - feeAmount,
-        redirectUrl: session.redirectUrl,
+        redirectUrl: submission.redirectUrl ?? session.redirectUrl,
       };
     }),
 

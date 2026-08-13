@@ -3,7 +3,8 @@
  * 
  * Production database layer replacing in-memory seed data.
  * All queries go through Drizzle ORM against PostgreSQL.
- * Falls back to seed data only when DB is unavailable (dev mode).
+ * PostgreSQL is mandatory for runtime requests; an unavailable database is surfaced
+ * to the caller rather than replaced with plausible seed records.
  */
 
 import { eq, and, desc, count, like, or, sql, asc } from 'drizzle-orm';
@@ -42,13 +43,12 @@ const log = createChildLogger('outboundRemittanceDb');
 
 type DrizzleDb = Exclude<Awaited<ReturnType<typeof getDb>>, null>;
 
-async function tryGetDb(): Promise<DrizzleDb | null> {
-  try {
-    const db = await getDb();
-    return db as DrizzleDb | null;
-  } catch {
-    return null;
+async function tryGetDb(): Promise<DrizzleDb> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error('PostgreSQL is unavailable for outbound remittance operations');
   }
+  return db as DrizzleDb;
 }
 
 // ============================================================================

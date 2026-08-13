@@ -1,13 +1,9 @@
 /**
- * Go Service Bridge
- * 
- * HTTP client layer connecting the Node.js tRPC server to the Go microservices:
- * - Corridor Routing Engine (port 8201)
- * - Sanctions Screening Service (port 8202)
- * - Tiered Billing Service (port 8203)
- * - Mojaloop Hub Router (port 8204)
- * 
- * When Go services are unavailable, falls back to local TypeScript implementations.
+ * Authoritative Go Service Bridge.
+ *
+ * Financial routing, sanctions, billing, and party lookup results are valid only
+ * when returned by their designated service. This module intentionally does not
+ * synthesize an apparently usable response when an upstream is unavailable.
  */
 
 import { createChildLogger } from '../lib/logger';
@@ -20,37 +16,42 @@ const GO_BILLING_URL = process.env.GO_BILLING_SERVICE_URL || 'http://localhost:8
 const GO_MOJALOOP_URL = process.env.GO_MOJALOOP_SERVICE_URL || 'http://localhost:8204';
 const RUST_LEDGER_URL = process.env.RUST_LEDGER_SERVICE_URL || 'http://localhost:8301';
 
-interface ServiceResponse<T> {
+export interface ServiceResponse<T> {
   ok: boolean;
   data?: T;
   error?: string;
-  source: 'go_service' | 'local_fallback';
+  source: 'go_service' | 'unavailable';
 }
 
-async function callService<T>(baseUrl: string, path: string, method: 'GET' | 'POST' = 'POST', body?: unknown): Promise<ServiceResponse<T>> {
+async function callService<T>(
+  baseUrl: string,
+  path: string,
+  method: 'GET' | 'POST' = 'POST',
+  body?: unknown,
+): Promise<ServiceResponse<T>> {
   try {
-    const opts: RequestInit = {
+    const options: RequestInit = {
       method,
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(10_000),
     };
-    if (body && method === 'POST') opts.body = JSON.stringify(body);
-    
-    const res = await fetch(`${baseUrl}${path}`, opts);
-    if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status}: ${await res.text().catch(() => '')}`, source: 'go_service' };
+    if (body !== undefined && method === 'POST') options.body = JSON.stringify(body);
+
+    const response = await fetch(`${baseUrl}${path}`, options);
+    if (!response.ok) {
+      const responseText = await response.text().catch(() => '');
+      return {
+        ok: false,
+        error: `Authoritative service rejected ${path}: HTTP ${response.status}${responseText ? `: ${responseText}` : ''}`,
+        source: 'go_service',
+      };
     }
-    const data = await res.json() as T;
-    return { ok: true, data, source: 'go_service' };
+    return { ok: true, data: await response.json() as T, source: 'go_service' };
   } catch (error) {
-    log.debug({ baseUrl, path, err: error }, 'Go service unavailable, using local fallback');
-    return { ok: false, error: 'Service unavailable', source: 'local_fallback' };
+    log.error({ baseUrl, path, err: error }, 'Authoritative Go service unavailable');
+    return { ok: false, error: `Authoritative service unavailable for ${path}`, source: 'unavailable' };
   }
 }
-
-// ============================================================================
-// CORRIDOR ROUTING
-// ============================================================================
 
 export interface CorridorQuoteRequest {
   corridor: string;
@@ -71,66 +72,19 @@ export interface CorridorQuoteResponse {
   expiresAt: string;
 }
 
-// Fallback FX rates when Go service is unavailable
-const FALLBACK_RATES: Record<string, number> = {
-  'GHS': 0.00125000, 'XOF': 0.65789500, 'XAF': 0.65789500,
-  'GBP': 0.00076920, 'USD': 0.00064516, 'CAD': 0.00092593,
-  'INR': 0.08167235, 'TRY': 0.02160494, 'CNY': 0.01014714,
-  'AED': 0.00237000, 'KES': 0.00925920, 'ZAR': 0.01019929,
-};
-
-const CORRIDOR_PROVIDERS: Record<string, string> = {
-  'NG-GH': 'PAPSS', 'NG-SN': 'PAPSS', 'NG-CI': 'PAPSS', 'NG-CM': 'PAPSS',
-  'NG-GB': 'SWIFT', 'NG-US': 'SWIFT', 'NG-CA': 'SWIFT',
-  'NG-IN': 'UPI', 'NG-TR': 'SWIFT',
-  'NG-CN': 'CIPS', 'NG-AE': 'SWIFT',
-  'NG-KE': 'Mobile Money', 'NG-ZA': 'PAPSS',
-};
-
-export async function getCorridorQuote(req: CorridorQuoteRequest): Promise<ServiceResponse<CorridorQuoteResponse>> {
-  const goResult = await callService<CorridorQuoteResponse>(GO_CORRIDOR_URL, '/api/quote', 'POST', req);
-  if (goResult.ok) return goResult;
-  
-  // Local fallback
-  const rate = FALLBACK_RATES[req.destCurrency] ?? 0.001;
-  const destAmount = parseFloat(req.amountNgn) * rate;
-  const corridorFee = parseFloat(req.amountNgn) * 0.005;
-  
-  return {
-    ok: true,
-    source: 'local_fallback',
-    data: {
-      corridor: req.corridor,
-      rate,
-      destAmount,
-      destCurrency: req.destCurrency,
-      provider: CORRIDOR_PROVIDERS[req.corridor] ?? 'Mojaloop Hub',
-      railType: CORRIDOR_PROVIDERS[req.corridor] ?? 'MOJALOOP',
-      railFee: corridorFee * 0.1,
-      corridorFee,
-      totalFee: corridorFee * 1.1,
-      expiresAt: new Date(Date.now() + 300_000).toISOString(),
-    },
-  };
+export function getCorridorQuote(req: CorridorQuoteRequest): Promise<ServiceResponse<CorridorQuoteResponse>> {
+  return callService<CorridorQuoteResponse>(GO_CORRIDOR_URL, '/api/quote', 'POST', req);
 }
 
-export async function routeTransfer(corridor: string, amountNgn: string): Promise<ServiceResponse<{ provider: string; railType: string; estimatedSettlement: string }>> {
-  const goResult = await callService<{ provider: string; railType: string; estimatedSettlement: string }>(
-    GO_CORRIDOR_URL, '/api/route', 'POST', { corridor, amountNgn }
-  );
-  if (goResult.ok) return goResult;
-  
-  const provider = CORRIDOR_PROVIDERS[corridor] ?? 'Mojaloop Hub';
-  return {
-    ok: true,
-    source: 'local_fallback',
-    data: { provider, railType: provider, estimatedSettlement: '24h' },
-  };
+export interface TransferRouteResponse {
+  provider: string;
+  railType: string;
+  estimatedSettlement: string;
 }
 
-// ============================================================================
-// SANCTIONS SCREENING
-// ============================================================================
+export function routeTransfer(corridor: string, amountNgn: string): Promise<ServiceResponse<TransferRouteResponse>> {
+  return callService<TransferRouteResponse>(GO_CORRIDOR_URL, '/api/route', 'POST', { corridor, amountNgn });
+}
 
 export interface SanctionsScreenRequest {
   transferId: string;
@@ -149,40 +103,12 @@ export interface SanctionsScreenResponse {
   decision: 'allow' | 'block' | 'escalate';
   reason: string;
   listsChecked: string[];
-  matches: Array<{
-    listId: string;
-    matchedName: string;
-    matchScore: number;
-  }>;
+  matches: Array<{ listId: string; matchedName: string; matchScore: number }>;
 }
 
-export async function screenTransfer(req: SanctionsScreenRequest): Promise<ServiceResponse<SanctionsScreenResponse>> {
-  const goResult = await callService<SanctionsScreenResponse>(GO_SANCTIONS_URL, '/api/screen', 'POST', req);
-  if (goResult.ok) return goResult;
-  
-  // Local fallback — basic keyword screening
-  const highRiskNames = ['hassan nasrallah', 'al-qaeda', 'isis', 'taliban', 'hezbollah'];
-  const benefLower = req.beneficiaryName.toLowerCase();
-  const isHit = highRiskNames.some(name => benefLower.includes(name));
-  
-  return {
-    ok: true,
-    source: 'local_fallback',
-    data: {
-      transferId: req.transferId,
-      status: isHit ? 'hit' : 'clear',
-      score: isHit ? 0.98 : 0.0,
-      decision: isHit ? 'block' : 'allow',
-      reason: isHit ? 'High-risk name match (local rules)' : 'No matches found (local rules)',
-      listsChecked: ['LOCAL_RULES'],
-      matches: isHit ? [{ listId: 'LOCAL', matchedName: req.beneficiaryName, matchScore: 0.98 }] : [],
-    },
-  };
+export function screenTransfer(req: SanctionsScreenRequest): Promise<ServiceResponse<SanctionsScreenResponse>> {
+  return callService<SanctionsScreenResponse>(GO_SANCTIONS_URL, '/api/screen', 'POST', req);
 }
-
-// ============================================================================
-// TIERED BILLING
-// ============================================================================
 
 export interface BillingCalculationRequest {
   participantId: number;
@@ -200,53 +126,19 @@ export interface BillingCalculationResponse {
   breakdown: Record<string, number>;
 }
 
-const TIER_RATES: Record<string, number> = {
-  'starter': 0.007, 'growth': 0.005, 'enterprise': 0.003, 'premium': 0.002,
-};
-
-export async function calculateBilling(req: BillingCalculationRequest): Promise<ServiceResponse<BillingCalculationResponse>> {
-  const goResult = await callService<BillingCalculationResponse>(GO_BILLING_URL, '/api/calculate', 'POST', req);
-  if (goResult.ok) return goResult;
-  
-  // Local fallback
-  const tierRate = TIER_RATES[req.tier] ?? 0.005;
-  const platformFee = req.amountNgn * tierRate;
-  const corridorFee = req.amountNgn * 0.001;
-  const fxSpread = req.amountNgn * 0.0005;
-  const cbnLevy = req.amountNgn * 0.0001;
-  
-  return {
-    ok: true,
-    source: 'local_fallback',
-    data: {
-      platformFee, corridorFee, fxSpread,
-      totalFee: platformFee + corridorFee + fxSpread + cbnLevy,
-      cbnLevy,
-      breakdown: { platformFee, corridorFee, fxSpread, cbnLevy },
-    },
-  };
+export function calculateBilling(req: BillingCalculationRequest): Promise<ServiceResponse<BillingCalculationResponse>> {
+  return callService<BillingCalculationResponse>(GO_BILLING_URL, '/api/calculate', 'POST', req);
 }
 
-// ============================================================================
-// MOJALOOP HUB
-// ============================================================================
-
-export async function lookupParty(partyIdType: string, partyId: string): Promise<ServiceResponse<{ name: string; dfspId: string; accountType: string }>> {
-  const goResult = await callService<{ name: string; dfspId: string; accountType: string }>(
-    GO_MOJALOOP_URL, '/api/parties/lookup', 'POST', { partyIdType, partyId }
-  );
-  if (goResult.ok) return goResult;
-  
-  return {
-    ok: true,
-    source: 'local_fallback',
-    data: { name: 'Unknown', dfspId: 'dfsp-unknown', accountType: 'SAVINGS' },
-  };
+export interface PartyLookupResponse {
+  name: string;
+  dfspId: string;
+  accountType: string;
 }
 
-// ============================================================================
-// HEALTH CHECK
-// ============================================================================
+export function lookupParty(partyIdType: string, partyId: string): Promise<ServiceResponse<PartyLookupResponse>> {
+  return callService<PartyLookupResponse>(GO_MOJALOOP_URL, '/api/parties/lookup', 'POST', { partyIdType, partyId });
+}
 
 export async function checkServiceHealth(): Promise<Record<string, { available: boolean; latencyMs: number }>> {
   const services = [
@@ -256,18 +148,16 @@ export async function checkServiceHealth(): Promise<Record<string, { available: 
     { name: 'mojaloop_hub', url: `${GO_MOJALOOP_URL}/health` },
     { name: 'rust_ledger', url: `${RUST_LEDGER_URL}/health` },
   ];
-  
+
   const results: Record<string, { available: boolean; latencyMs: number }> = {};
-  
-  await Promise.all(services.map(async (svc) => {
-    const start = Date.now();
+  await Promise.all(services.map(async (service) => {
+    const started = Date.now();
     try {
-      const res = await fetch(svc.url, { signal: AbortSignal.timeout(3_000) });
-      results[svc.name] = { available: res.ok, latencyMs: Date.now() - start };
+      const response = await fetch(service.url, { signal: AbortSignal.timeout(3_000) });
+      results[service.name] = { available: response.ok, latencyMs: Date.now() - started };
     } catch {
-      results[svc.name] = { available: false, latencyMs: Date.now() - start };
+      results[service.name] = { available: false, latencyMs: Date.now() - started };
     }
   }));
-  
   return results;
 }

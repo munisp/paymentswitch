@@ -178,17 +178,17 @@ export default function Dashboard() {
 
   const utils = trpc.useUtils();
   const { data: liveMerchants, isLoading: loadingMerchants } = trpc.merchant.list.useQuery();
-  const merchants = liveMerchants && liveMerchants.length > 0 ? liveMerchants : [DEMO_MERCHANT];
+  const merchants = liveMerchants ?? [];
   const { data: liveTransactions, isLoading: loadingTransactions } = trpc.payment.listTransactions.useQuery(
     { merchantId: selectedMerchant! },
     { enabled: !!selectedMerchant }
   );
-  const transactions = liveTransactions && liveTransactions.length > 0 ? liveTransactions : DEMO_TRANSACTIONS;
+  const transactions = liveTransactions ?? [];
   const { data: liveSessions, isLoading: loadingSessions } = trpc.payment.listSessions.useQuery(
     { merchantId: selectedMerchant! },
     { enabled: !!selectedMerchant }
   );
-  const sessions = liveSessions && liveSessions.length > 0 ? liveSessions : DEMO_SESSIONS;
+  const sessions = liveSessions ?? [];
 
   const createMerchant = trpc.merchant.create.useMutation({
     onSuccess: (data) => {
@@ -653,27 +653,9 @@ const { checkoutUrl } = await response.json();
                           <CardDescription>Configure webhook URLs to receive real-time event notifications</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                          {defaultWebhooks.map(wh => (
-                            <div key={wh.id} className="border rounded-lg p-4 space-y-2">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  {getStatusBadge(wh.status)}
-                                  <code className="text-sm bg-muted px-2 py-1 rounded">{wh.url}</code>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs text-muted-foreground">Success: {wh.successRate}%</span>
-                                  <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
-                                  <Button variant="ghost" size="sm"><Trash2 className="h-4 w-4 text-red-500" /></Button>
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap gap-1">
-                                {wh.events.map(e => (
-                                  <Badge key={e} variant="secondary" className="text-xs">{e}</Badge>
-                                ))}
-                              </div>
-                              <p className="text-xs text-muted-foreground">Last delivery: {wh.lastDelivery}</p>
-                            </div>
-                          ))}
+                          <p className="text-sm text-muted-foreground">
+                            Persisted webhook configuration and delivery metrics are unavailable. No static endpoint or delivery status is shown.
+                          </p>
                         </CardContent>
                       </Card>
                       <Card>
@@ -1054,27 +1036,13 @@ const { checkoutUrl } = await response.json();
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {defaultNotificationPrefs.map((pref, idx) => (
-                              <TableRow key={idx}>
-                                <TableCell className="font-medium">{pref.event}</TableCell>
-                                <TableCell className="text-center">
-                                  <input type="checkbox" defaultChecked={pref.email} className="rounded" />
-                                </TableCell>
-                                <TableCell className="text-center">
-                                  <input type="checkbox" defaultChecked={pref.sms} className="rounded" />
-                                </TableCell>
-                                <TableCell className="text-center">
-                                  <input type="checkbox" defaultChecked={pref.push} className="rounded" />
-                                </TableCell>
-                              </TableRow>
-                            ))}
+                            <TableRow>
+                              <TableCell colSpan={4} className="text-center text-muted-foreground">
+                                Persisted notification preferences are unavailable. No default settings are shown or saved.
+                              </TableCell>
+                            </TableRow>
                           </TableBody>
                         </Table>
-                        <div className="mt-4 flex justify-end">
-                          <Button onClick={() => toast.success("Notification preferences saved")}>
-                            Save Preferences
-                          </Button>
-                        </div>
                       </CardContent>
                     </Card>
                   </TabsContent>

@@ -11,15 +11,18 @@ from prometheus_client import Counter, Histogram, generate_latest
 from prometheus_client.openmetrics.exposition import CONTENT_TYPE_LATEST
 from starlette.responses import Response
 
-from .schemas import (
-    TransactionRequest,
-    FraudScoreResponse,
-    BatchScoreRequest,
-    BatchScoreResponse,
-    ModelStatsResponse,
-    HealthResponse,
-    ErrorResponse
-)
+try:
+    from .model_runtime import ModelBundleError
+    from .schemas import (
+        TransactionRequest, FraudScoreResponse, BatchScoreRequest, BatchScoreResponse,
+        ModelStatsResponse, HealthResponse, ErrorResponse,
+    )
+except ImportError:
+    from model_runtime import ModelBundleError
+    from schemas import (
+        TransactionRequest, FraudScoreResponse, BatchScoreRequest, BatchScoreResponse,
+        ModelStatsResponse, HealthResponse, ErrorResponse,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -94,17 +97,20 @@ async def score_transaction(
             gnn_score=result.gnn_score,
             ml_score=result.ml_score,
             rule_score=result.rule_score,
+            model_id=result.model_id,
+            model_version=result.model_version,
+            model_decision=result.model_decision,
             explanation=result.explanation,
             processing_time_ms=result.processing_time_ms,
             features=result.features
         )
         
+    except ModelBundleError as e:
+        logger.error(f"Verified CPU scoring unavailable for {request.transaction_id}: {e}")
+        raise HTTPException(status_code=503, detail=f"Verified CPU fraud model unavailable: {e}")
     except Exception as e:
         logger.error(f"Scoring failed for transaction {request.transaction_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Fraud scoring failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Fraud scoring failed: {str(e)}")
 
 
 @router.post("/score/batch", response_model=BatchScoreResponse)
@@ -148,6 +154,9 @@ async def score_transactions_batch(
                     gnn_score=result.gnn_score,
                     ml_score=result.ml_score,
                     rule_score=result.rule_score,
+                    model_id=result.model_id,
+                    model_version=result.model_version,
+                    model_decision=result.model_decision,
                     explanation=result.explanation,
                     processing_time_ms=result.processing_time_ms
                 )

@@ -46,8 +46,8 @@ pub struct CorridorQuote {
 /// The corridor FX engine.
 pub struct CorridorFxEngine {
     corridors: Vec<CorridorConfig>,
-    /// Simulated mid-rates (in production: from Redis/external feed)
-    /// Fixed-point * 1_000_000_000
+    /// Authoritative mid-rates loaded from the approved market-data feed.
+    /// A zero entry denotes an unavailable rate and can never produce a quote.
     rates: Vec<u64>,
     quote_counter: u64,
 }
@@ -70,24 +70,10 @@ impl CorridorFxEngine {
             CorridorConfig { corridor_id: 13, corridor_code: *b"NG-ZA", source_currency: 566, dest_currency: 710, max_spread_bps: 130, min_spread_bps: 40, max_txn_kobo: 15_000_000_000, requires_documentation: false, launch_wave: 1 },
         ];
 
-        // Simulated mid-rates: NGN per 1 unit of dest currency * 1B
-        // e.g., 1 GHS = 125 NGN → mid_rate = 125_000_000_000
-        let rates = vec![
-            0,                    // corridor 0 unused
-            125_000_000_000,      // NG-GH: 1 GHS = ₦125
-            2_500_000_000,        // NG-SN: 1 XOF = ₦2.50
-            2_500_000_000,        // NG-CI: 1 XOF = ₦2.50
-            2_500_000_000,        // NG-CM: 1 XAF = ₦2.50
-            1_900_000_000_000,    // NG-GB: 1 GBP = ₦1,900
-            1_500_000_000_000,    // NG-US: 1 USD = ₦1,500
-            1_100_000_000_000,    // NG-CA: 1 CAD = ₦1,100
-            18_000_000_000,       // NG-IN: 1 INR = ₦18
-            45_000_000_000,       // NG-TR: 1 TRY = ₦45
-            210_000_000_000,      // NG-CN: 1 CNY = ₦210
-            410_000_000_000,      // NG-AE: 1 AED = ₦410
-            9_500_000_000,        // NG-KE: 1 KES = ₦9.50
-            85_000_000_000,       // NG-ZA: 1 ZAR = ₦85
-        ];
+        // No quote can be issued until a verified market-data adapter loads a
+        // rate. Defaulting to a plausible static rate would create a financial
+        // commitment with no authoritative source.
+        let rates = vec![0; corridors.len() + 1];
 
         Self {
             corridors,
@@ -114,31 +100,46 @@ impl CorridorFxEngine {
 
         let mid_rate = *self.rates.get(corridor_id as usize)
             .ok_or(FxError::UnknownCorridor)?;
+        if mid_rate == 0 {
+            return Err(FxError::RateUnavailable);
+        }
 
-        // Apply spread (use max for now; in production: dynamic based on volatility)
+        // Apply the approved corridor spread cap to an authoritative rate.
         let spread_bps = config.max_spread_bps;
 
         // Applied rate = mid_rate * (1 - spread/2/10000) for sell-side
         let half_spread_fp = (mid_rate as u128 * spread_bps as u128 / 20_000) as u64;
         let applied_rate = mid_rate.saturating_sub(half_spread_fp);
 
-        // Dest amount = source_kobo / applied_rate_per_dest_unit
-        // Since rate is NGN_per_dest * 1B, dest = source * 1B / rate
-        let dest_amount = (source_amount_kobo as u128 * 1_000_000_000 / applied_rate as u128) as u64;
+        // Dest amount = source_kobo / applied_rate_per_dest_unit.
+        // Convert only after verifying the value is representable in the target
+        // ledger amount type; truncating an oversized quote is unsafe.
+        if applied_rate == 0 {
+            return Err(FxError::RateUnavailable);
+        }
+        let dest_amount_u128 = (source_amount_kobo as u128)
+            .checked_mul(1_000_000_000)
+            .ok_or(FxError::ArithmeticOverflow)?
+            / applied_rate as u128;
+        let dest_amount = u64::try_from(dest_amount_u128).map_err(|_| FxError::ArithmeticOverflow)?;
 
-        // Spread amount in kobo
-        let spread_amount = (source_amount_kobo as u128 * spread_bps as u128 / 10_000) as u64;
+        let spread_amount_u128 = (source_amount_kobo as u128)
+            .checked_mul(spread_bps as u128)
+            .ok_or(FxError::ArithmeticOverflow)?
+            / 10_000;
+        let spread_amount = u64::try_from(spread_amount_u128).map_err(|_| FxError::ArithmeticOverflow)?;
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .map_err(|_| FxError::ClockUnavailable)?
             .as_secs();
 
         let quote_id = self.quote_counter;
-        self.quote_counter += 1;
+        self.quote_counter = self.quote_counter.checked_add(1).ok_or(FxError::QuoteIdExhausted)?;
 
         // Quote validity: Wave 1 corridors = 60s, Wave 2/3 = 30s
         let validity = if config.launch_wave == 1 { 60 } else { 30 };
+        let valid_until_epoch_s = now.checked_add(validity).ok_or(FxError::ArithmeticOverflow)?;
 
         Ok(CorridorQuote {
             corridor_id,
@@ -148,9 +149,19 @@ impl CorridorFxEngine {
             applied_rate_fp: applied_rate,
             spread_bps,
             spread_amount_kobo: spread_amount,
-            valid_until_epoch_s: now + validity,
+            valid_until_epoch_s,
             quote_id,
         })
+    }
+
+    /// Load an authoritative fixed-point mid-rate from a verified market-data adapter.
+    pub fn set_authoritative_rate(&mut self, corridor_id: u8, mid_rate_fp: u64) -> Result<(), FxError> {
+        if mid_rate_fp == 0 {
+            return Err(FxError::RateUnavailable);
+        }
+        let slot = self.rates.get_mut(corridor_id as usize).ok_or(FxError::UnknownCorridor)?;
+        *slot = mid_rate_fp;
+        Ok(())
     }
 
     /// Get corridor config.
@@ -178,6 +189,9 @@ pub enum FxError {
     ZeroAmount,
     RateUnavailable,
     SpreadExceedsCap,
+    ArithmeticOverflow,
+    ClockUnavailable,
+    QuoteIdExhausted,
 }
 
 #[cfg(test)]
@@ -187,6 +201,7 @@ mod tests {
     #[test]
     fn test_quote_ng_gh() {
         let mut engine = CorridorFxEngine::new();
+        engine.set_authoritative_rate(1, 125_000_000_000).unwrap();
         let quote = engine.generate_quote(1, 75_000_000).unwrap(); // ₦750,000
         assert_eq!(quote.corridor_id, 1);
         assert_eq!(quote.source_amount_kobo, 75_000_000);
@@ -198,6 +213,7 @@ mod tests {
     #[test]
     fn test_quote_ng_gb_education() {
         let mut engine = CorridorFxEngine::new();
+        engine.set_authoritative_rate(5, 1_900_000_000_000).unwrap();
         let quote = engine.generate_quote(5, 1_800_000_000).unwrap(); // ₦18M
         assert_eq!(quote.spread_bps, 100); // CBN cap for education corridors
     }
@@ -205,6 +221,7 @@ mod tests {
     #[test]
     fn test_quote_ng_cn_premium() {
         let mut engine = CorridorFxEngine::new();
+        engine.set_authoritative_rate(10, 210_000_000_000).unwrap();
         let quote = engine.generate_quote(10, 6_750_000_000).unwrap(); // ₦67.5M
         assert_eq!(quote.spread_bps, 80); // Tight spread for premium business
     }
@@ -215,6 +232,19 @@ mod tests {
         // NG-GH max is 750M kobo (₦7.5M)
         let result = engine.generate_quote(1, 800_000_000);
         assert_eq!(result, Err(FxError::ExceedsMaxTransaction));
+    }
+
+    #[test]
+    fn test_rate_is_unavailable_until_authoritative_feed_loads_it() {
+        let mut engine = CorridorFxEngine::new();
+        assert_eq!(engine.generate_quote(1, 10_000_000), Err(FxError::RateUnavailable));
+    }
+
+    #[test]
+    fn test_quote_rejects_destination_amount_overflow() {
+        let mut engine = CorridorFxEngine::new();
+        engine.set_authoritative_rate(10, 1).unwrap();
+        assert_eq!(engine.generate_quote(10, 150_000_000_000), Err(FxError::ArithmeticOverflow));
     }
 
     #[test]
@@ -232,9 +262,18 @@ mod tests {
     }
 
     #[test]
+    fn test_quote_id_exhaustion_is_rejected() {
+        let mut engine = CorridorFxEngine::new();
+        engine.set_authoritative_rate(1, 125_000_000_000).unwrap();
+        engine.quote_counter = u64::MAX;
+        assert_eq!(engine.generate_quote(1, 10_000_000), Err(FxError::QuoteIdExhausted));
+    }
+
+    #[test]
     fn test_all_corridors_have_rates() {
         let mut engine = CorridorFxEngine::new();
         for corridor_id in 1..=13u8 {
+            engine.set_authoritative_rate(corridor_id, 1_000_000_000).unwrap();
             let result = engine.generate_quote(corridor_id, 10_000_000);
             assert!(result.is_ok(), "Corridor {} failed", corridor_id);
         }

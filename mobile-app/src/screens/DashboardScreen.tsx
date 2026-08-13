@@ -8,55 +8,47 @@ interface MetricData {
   label: string;
   value: string;
   change: string;
-  positive: boolean;
+  positive: boolean | null;
 }
 
 interface RecentTransaction {
   id: string;
   type: string;
   amount: number;
-  status: 'completed' | 'pending' | 'failed';
+  status: 'completed' | 'pending' | 'failed' | 'reversed';
   time: string;
 }
-
-const SEED_METRICS: MetricData[] = [
-  { label: 'Total Volume', value: '₦2.4B', change: '+12.5%', positive: true },
-  { label: 'Transactions', value: '54,231', change: '+8.3%', positive: true },
-  { label: 'Success Rate', value: '99.7%', change: '+0.2%', positive: true },
-  { label: 'Active Users', value: '1,247', change: '-2.1%', positive: false },
-];
-
-const SEED_TRANSACTIONS: RecentTransaction[] = [
-  { id: '1', type: 'NIP Transfer', amount: 250000, status: 'completed', time: '2 min ago' },
-  { id: '2', type: 'Card Payment', amount: 45000, status: 'completed', time: '5 min ago' },
-  { id: '3', type: 'Outbound Remittance', amount: 1200000, status: 'pending', time: '8 min ago' },
-  { id: '4', type: 'Government Payment', amount: 180000, status: 'completed', time: '12 min ago' },
-  { id: '5', type: 'NIP Transfer', amount: 75000, status: 'failed', time: '15 min ago' },
-  { id: '6', type: 'Trade Payment', amount: 3500000, status: 'completed', time: '20 min ago' },
-];
 
 const STATUS_COLORS: Record<string, string> = {
   completed: '#10b981',
   pending: '#f59e0b',
   failed: '#ef4444',
+  reversed: '#8b5cf6',
 };
 
 export default function DashboardScreen() {
-  const [metrics, setMetrics] = useState<MetricData[]>(SEED_METRICS);
-  const [transactions, setTransactions] = useState<RecentTransaction[]>(SEED_TRANSACTIONS);
+  const [metrics, setMetrics] = useState<MetricData[]>([]);
+  const [transactions, setTransactions] = useState<RecentTransaction[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
     try {
+      setError(null);
       const res = await fetch('/api/trpc/dashboard.getStats');
+      if (!res.ok) throw new Error(`Live dashboard request failed with ${res.status}`);
       const data = await res.json();
-      if (data?.result?.data) {
-        setMetrics(data.result.data.metrics ?? SEED_METRICS);
-        setTransactions(data.result.data.recentTransactions ?? SEED_TRANSACTIONS);
+      const result = data?.result?.data?.json ?? data?.result?.data;
+      if (!result || !Array.isArray(result.metrics) || !Array.isArray(result.recentTransactions)) {
+        throw new Error('Live dashboard response is incomplete');
       }
-    } catch {
-      // Graceful fallback to seed data
+      setMetrics(result.metrics);
+      setTransactions(result.recentTransactions);
+    } catch (err) {
+      setMetrics([]);
+      setTransactions([]);
+      setError(err instanceof Error ? err.message : 'Live dashboard data is unavailable');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -86,37 +78,20 @@ export default function DashboardScreen() {
       <Text style={styles.header}>NOC Dashboard</Text>
       <Text style={styles.subHeader}>Real-time payment switch overview</Text>
 
+      {error && <Text style={styles.error}>{error}</Text>}
+
       {/* Metrics Grid */}
       <View style={styles.metricsGrid}>
         {metrics.map((m) => (
           <View key={m.label} style={styles.metricCard}>
             <Text style={styles.metricLabel}>{m.label}</Text>
             <Text style={styles.metricValue}>{m.value}</Text>
-            <Text style={[styles.metricChange, { color: m.positive ? '#10b981' : '#ef4444' }]}>
+                          <Text style={[styles.metricChange, { color: m.positive === null ? '#6b7280' : m.positive ? '#10b981' : '#ef4444' }]}>
+
               {m.change}
             </Text>
           </View>
         ))}
-      </View>
-
-      {/* System Status */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>System Health</Text>
-        <View style={styles.statusRow}>
-          <View style={[styles.statusDot, { backgroundColor: '#10b981' }]} />
-          <Text style={styles.statusLabel}>Payment Engine</Text>
-          <Text style={[styles.statusValue, { color: '#10b981' }]}>Operational</Text>
-        </View>
-        <View style={styles.statusRow}>
-          <View style={[styles.statusDot, { backgroundColor: '#10b981' }]} />
-          <Text style={styles.statusLabel}>Settlement Service</Text>
-          <Text style={[styles.statusValue, { color: '#10b981' }]}>Operational</Text>
-        </View>
-        <View style={styles.statusRow}>
-          <View style={[styles.statusDot, { backgroundColor: '#f59e0b' }]} />
-          <Text style={styles.statusLabel}>Fraud Detection</Text>
-          <Text style={[styles.statusValue, { color: '#f59e0b' }]}>Degraded</Text>
-        </View>
       </View>
 
       {/* Recent Transactions */}
@@ -170,4 +145,5 @@ const styles = StyleSheet.create({
   txAmount: { fontSize: 14, fontWeight: '600', color: '#111827' },
   txStatus: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginTop: 4 },
   txStatusText: { fontSize: 11, fontWeight: '600', textTransform: 'capitalize' },
+  error: { color: '#b91c1c', backgroundColor: '#fee2e2', marginHorizontal: 16, marginTop: 12, borderRadius: 6, padding: 10, fontSize: 13 },
 });

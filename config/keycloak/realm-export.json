@@ -151,14 +151,10 @@
       "enabled": true,
       "clientAuthenticatorType": "client-secret",
       "redirectUris": [
-        "http://localhost:3000/*",
-        "http://localhost:3001/*",
-        "https://*.payment-switch.local/*"
+        "https://portal.payment-switch.local/*"
       ],
       "webOrigins": [
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "https://*.payment-switch.local"
+        "https://portal.payment-switch.local"
       ],
       "publicClient": true,
       "protocol": "openid-connect",
@@ -167,7 +163,7 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "authorizationServicesEnabled": false,
-      "fullScopeAllowed": true,
+      "fullScopeAllowed": false,
       "defaultClientScopes": [
         "web-origins",
         "acr",
@@ -195,6 +191,17 @@
             "claim.name": "realm_access.roles",
             "jsonType.label": "String"
           }
+        },
+        {
+          "name": "payment-switch-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "payment-switch-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
         }
       ]
     },
@@ -204,7 +211,6 @@
       "description": "Backend API for Payment Switch services",
       "enabled": true,
       "clientAuthenticatorType": "client-secret",
-      "secret": "payment-switch-api-secret-dev-only",
       "redirectUris": [],
       "webOrigins": [],
       "publicClient": false,
@@ -214,7 +220,7 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
       "authorizationServicesEnabled": true,
-      "fullScopeAllowed": true,
+      "fullScopeAllowed": false,
       "defaultClientScopes": [
         "web-origins",
         "acr",
@@ -229,7 +235,6 @@
       "description": "APISIX gateway for token introspection",
       "enabled": true,
       "clientAuthenticatorType": "client-secret",
-      "secret": "apisix-gateway-secret-dev-only",
       "redirectUris": [],
       "webOrigins": [],
       "publicClient": false,
@@ -242,28 +247,7 @@
       "fullScopeAllowed": false
     }
   ],
-  "users": [
-    {
-      "username": "admin",
-      "enabled": true,
-      "emailVerified": true,
-      "firstName": "Platform",
-      "lastName": "Administrator",
-      "email": "admin@payment-switch.local",
-      "credentials": [
-        {
-          "type": "password",
-          "value": "CHANGE_ME_IN_PRODUCTION",
-          "temporary": true
-        }
-      ],
-      "realmRoles": ["admin"],
-      "clientRoles": {
-        "payment-switch-portal": ["portal_admin"],
-        "payment-switch-api": ["api_admin"]
-      }
-    }
-  ],
+  "users": [],
   "scopeMappings": [
     {
       "client": "payment-switch-portal",

@@ -1,0 +1,52 @@
+{
+  "bundle_id": "fraud-ensemble-cpu-v1",
+  "model_name": "fraud_ensemble",
+  "model_version": "2026.05.25",
+  "runtime": {
+    "python": "3.11",
+    "device": "cpu",
+    "frameworks": {
+      "numpy": "1.26.2",
+      "joblib": "1.3.2",
+      "scikit_learn": "1.8.0",
+      "xgboost": "2.0.3",
+      "lightgbm": "4.6.0"
+    }
+  },
+  "feature_contract": {
+    "version": "fraud-tabular-v1",
+    "names": [
+      "amount",
+      "amount_log",
+      "channel_enc",
+      "narration_enc",
+      "hour",
+      "day_of_week",
+      "day_of_month",
+      "is_weekend",
+      "is_night",
+      "is_salary_day",
+      "is_interbank",
+      "sender_balance",
+      "sender_age",
+      "sender_is_mule"
+    ],
+    "currency": "NGN",
+    "missing_feature_policy": "reject"
+  },
+  "artifacts": {
+    "fraud_ensemble.joblib": "ee9a379efeb63d93018321fad7bdf6413c106e5a9513de7bc56636e15e8e1864",
+    "encoders.joblib": "f6aff9f27f21232021770d9a822290b91e95e0a311c57dcb34a9a63158076d24",
+    "training_manifest.json": "99423569e34510684e62bd0e2102a840e20f56d2e356c75e888ed3a5f323cd03"
+  },
+  "decision_policy": {
+    "review_threshold": 0.5,
+    "block_threshold": 0.8,
+    "required_minimum_models": 1
+  },
+  "provenance": {
+    "training_manifest": "training_manifest.json",
+    "approval_required": true,
+    "status": "approved_for_cpu_serving"
+  }
+}

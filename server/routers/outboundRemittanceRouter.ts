@@ -1593,6 +1593,9 @@ export const outboundRemittanceRouter = router({
     }))
     .query(async ({ input }) => {
       const result = await goBridge.getCorridorQuote(input);
+      if (!result.ok || !result.data) {
+        throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: result.error || 'Authoritative corridor pricing is unavailable' });
+      }
       return { ...result.data, source: result.source };
     }),
 

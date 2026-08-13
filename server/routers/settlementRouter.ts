@@ -1,232 +1,231 @@
+import { randomUUID } from 'crypto';
+import { and, count, desc, eq, gte, inArray, lte } from 'drizzle-orm';
 import { z } from 'zod';
+import { settlementBatches, settlementEvents, switchParticipants } from '../../drizzle/schema';
+import { getDb } from '../db';
+import { TRPCError } from '@trpc/server';
 import { router, protectedProcedure } from '../_core/trpc';
 import { createChildLogger } from '../lib/logger';
 
 const log = createChildLogger('settlement');
+const settlementStatus = z.enum(['all', 'pending', 'processing', 'settled', 'failed', 'disputed']);
+const settlementChannel = z.enum(['NIP', 'NEFT', 'RTGS', 'POS', 'ATM', 'WEB']);
+const settlementWindow = z.enum(['T+0', 'T+1', 'T+2']);
 
-const SETTLEMENT_SERVICE_URL = process.env.SETTLEMENT_SERVICE_URL || 'http://localhost:8301';
+type Database = Exclude<Awaited<ReturnType<typeof getDb>>, null>;
 
-async function callSettlementService(path: string, method: 'GET' | 'POST' = 'GET', body?: unknown) {
-  try {
-    const opts: RequestInit = {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(30_000),
-    };
-    if (body) opts.body = JSON.stringify(body);
-    const res = await fetch(`${SETTLEMENT_SERVICE_URL}${path}`, opts);
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
+async function requireDb(): Promise<Database> {
+  const db = await getDb();
+  if (!db) {
+    throw new TRPCError({
+      code: 'SERVICE_UNAVAILABLE',
+      message: 'PostgreSQL is unavailable; settlement data cannot be served safely.',
+    });
   }
+  return db as Database;
 }
 
-// Settlement data with domain logic
-type Settlement = {
-  id: string;
-  date: string;
-  bankCode: string;
-  bankName: string;
-  totalTransactions: number;
-  grossAmount: number;
-  fees: number;
-  netAmount: number;
-  status: 'pending' | 'processing' | 'settled' | 'failed' | 'disputed';
-  settlementRef: string;
-  window: 'T+0' | 'T+1' | 'T+2';
-  channel: 'NIP' | 'NEFT' | 'RTGS' | 'POS' | 'ATM' | 'WEB';
-  reconciledAt: string | null;
-  reconciledBy: string | null;
-};
-
-// Nigerian banks for settlement
-const nigeriaBanks = [
-  { code: '058', name: 'GTBank', nipCode: '058152036' },
-  { code: '044', name: 'Access Bank', nipCode: '044150149' },
-  { code: '057', name: 'Zenith Bank', nipCode: '057150013' },
-  { code: '011', name: 'First Bank', nipCode: '011151003' },
-  { code: '033', name: 'UBA', nipCode: '033153513' },
-  { code: '032', name: 'Union Bank', nipCode: '032154893' },
-  { code: '035', name: 'Wema Bank', nipCode: '035150103' },
-  { code: '221', name: 'Stanbic IBTC', nipCode: '221159522' },
-  { code: '050', name: 'Ecobank', nipCode: '050150010' },
-  { code: '076', name: 'Polaris Bank', nipCode: '076151006' },
-];
-
-const channels: Settlement['channel'][] = ['NIP', 'NEFT', 'RTGS', 'POS', 'ATM', 'WEB'];
-const windows: Settlement['window'][] = ['T+0', 'T+1', 'T+2'];
-
-// Generate realistic settlement data
-function generateSettlements(count: number): Settlement[] {
-  return Array.from({ length: count }, (_, i) => {
-    const bank = nigeriaBanks[i % nigeriaBanks.length];
-    const channel = channels[i % channels.length];
-    const txnCount = 5000 + i * 1000;
-    const grossAmount = Math.round(txnCount * (50000 + i * 10000));
-    const feeRate = channel === 'NIP' ? 0.005 : channel === 'RTGS' ? 0.002 : 0.0075;
-    const fees = Math.round(grossAmount * feeRate);
-    const statuses: Settlement['status'][] = ['settled', 'settled', 'settled', 'pending', 'processing'];
-
-    return {
-      id: `STL-${String(i + 1).padStart(4, '0')}`,
-      date: new Date(Date.now() - i * 86400000).toISOString().split('T')[0],
-      bankCode: bank.code,
-      bankName: bank.name,
-      totalTransactions: txnCount,
-      grossAmount,
-      fees,
-      netAmount: grossAmount - fees,
-      status: statuses[i % statuses.length],
-      settlementRef: `NIBSS-${bank.nipCode}-${Date.now() - i * 86400000}`,
-      window: windows[i % windows.length],
-      channel,
-      reconciledAt: statuses[i % statuses.length] === 'settled' ? new Date(Date.now() - (i - 1) * 86400000).toISOString() : null,
-      reconciledBy: statuses[i % statuses.length] === 'settled' ? 'system' : null,
-    };
-  });
+function isOperationsRole(role: string) {
+  return role === 'admin' || role === 'cbn';
 }
 
-const settlements = generateSettlements(50);
+async function participantForUser(db: Database, userId: number) {
+  const rows = await db
+    .select({ id: switchParticipants.id })
+    .from(switchParticipants)
+    .where(eq(switchParticipants.userId, userId))
+    .limit(1);
+  return rows[0]?.id ?? null;
+}
+
+async function scopedBatchIds(db: Database, user: { id: number; role: string }) {
+  if (isOperationsRole(user.role)) return null;
+  const participantId = await participantForUser(db, user.id);
+  if (!participantId) return [] as number[];
+  const rows = await db
+    .select({ id: settlementBatches.id })
+    .from(settlementBatches)
+    .where(eq(settlementBatches.participantId, participantId));
+  return rows.map((row) => row.id);
+}
+
+function serializeBatch(batch: typeof settlementBatches.$inferSelect) {
+  return {
+    id: batch.settlementId,
+    date: batch.windowOpenedAt.toISOString().slice(0, 10),
+    bankCode: batch.bankCode,
+    bankName: batch.bankName,
+    totalTransactions: batch.totalTransactions,
+    grossAmount: Number(batch.grossAmount),
+    fees: Number(batch.fees),
+    netAmount: Number(batch.netAmount),
+    status: batch.status,
+    settlementRef: batch.settlementRef,
+    window: batch.settlementWindow,
+    channel: batch.channel,
+    reconciledAt: batch.reconciledAt?.toISOString() ?? null,
+    reconciledBy: batch.reconciledBy ? String(batch.reconciledBy) : null,
+  };
+}
 
 export const settlementRouter = router({
   list: protectedProcedure
     .input(z.object({
-      status: z.enum(['all', 'pending', 'processing', 'settled', 'failed', 'disputed']).optional().default('all'),
-      bankCode: z.string().optional(),
-      channel: z.string().optional(),
-      dateFrom: z.string().optional(),
-      dateTo: z.string().optional(),
-      page: z.number().min(1).optional().default(1),
-      limit: z.number().min(1).max(100).optional().default(20),
+      status: settlementStatus.optional().default('all'),
+      bankCode: z.string().max(32).optional(),
+      channel: settlementChannel.optional(),
+      dateFrom: z.string().datetime().optional(),
+      dateTo: z.string().datetime().optional(),
+      page: z.number().int().min(1).optional().default(1),
+      limit: z.number().int().min(1).max(100).optional().default(20),
     }).optional())
-    .query(async ({ input }) => {
-      // Try Go settlement service first
-      const serviceResult = await callSettlementService('/api/settlements');
-      if (serviceResult) return serviceResult;
-
-      let filtered = [...settlements];
-      if (input?.status && input.status !== 'all') {
-        filtered = filtered.filter(s => s.status === input.status);
-      }
-      if (input?.bankCode) {
-        filtered = filtered.filter(s => s.bankCode === input.bankCode);
-      }
-      if (input?.channel) {
-        filtered = filtered.filter(s => s.channel === input.channel);
-      }
-      if (input?.dateFrom) {
-        filtered = filtered.filter(s => s.date >= input.dateFrom!);
-      }
-      if (input?.dateTo) {
-        filtered = filtered.filter(s => s.date <= input.dateTo!);
+    .query(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const scopedIds = await scopedBatchIds(db, ctx.user);
+      if (Array.isArray(scopedIds) && scopedIds.length === 0) {
+        return { settlements: [], total: 0, page: input?.page ?? 1, totalPages: 0 };
       }
 
+      const conditions = [];
+      if (Array.isArray(scopedIds)) conditions.push(inArray(settlementBatches.id, scopedIds));
+      if (input?.status && input.status !== 'all') conditions.push(eq(settlementBatches.status, input.status));
+      if (input?.bankCode) conditions.push(eq(settlementBatches.bankCode, input.bankCode));
+      if (input?.channel) conditions.push(eq(settlementBatches.channel, input.channel));
+      if (input?.dateFrom) conditions.push(gte(settlementBatches.windowOpenedAt, new Date(input.dateFrom)));
+      if (input?.dateTo) conditions.push(lte(settlementBatches.windowOpenedAt, new Date(input.dateTo)));
+      const where = conditions.length ? and(...conditions) : undefined;
       const page = input?.page ?? 1;
       const limit = input?.limit ?? 20;
-      const start = (page - 1) * limit;
-
-      return {
-        settlements: filtered.slice(start, start + limit),
-        total: filtered.length,
-        page,
-        totalPages: Math.ceil(filtered.length / limit),
-      };
+      const [batches, totalRows] = await Promise.all([
+        db.select().from(settlementBatches).where(where).orderBy(desc(settlementBatches.windowOpenedAt)).limit(limit).offset((page - 1) * limit),
+        db.select({ count: count() }).from(settlementBatches).where(where),
+      ]);
+      const total = totalRows[0]?.count ?? 0;
+      return { settlements: batches.map(serializeBatch), total, page, totalPages: Math.ceil(total / limit) };
     }),
 
   getById: protectedProcedure
-    .input(z.object({ id: z.string() }))
-    .query(({ input }) => {
-      const settlement = settlements.find(s => s.id === input.id);
-      if (!settlement) return null;
-
-      // Enrich with transaction breakdown
+    .input(z.object({ id: z.string().min(1).max(64) }))
+    .query(async ({ ctx, input }) => {
+      const db = await requireDb();
+      const rows = await db.select().from(settlementBatches).where(eq(settlementBatches.settlementId, input.id)).limit(1);
+      const batch = rows[0];
+      if (!batch) return null;
+      if (!isOperationsRole(ctx.user.role)) {
+        const participantId = await participantForUser(db, ctx.user.id);
+        if (!participantId || batch.participantId !== participantId) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Settlement does not belong to the current participant.' });
+        }
+      }
+      const events = await db.select().from(settlementEvents)
+        .where(eq(settlementEvents.settlementBatchId, batch.id))
+        .orderBy(settlementEvents.occurredAt);
       return {
-        ...settlement,
+        ...serializeBatch(batch),
         breakdown: {
-          debit: Math.round(settlement.totalTransactions * 0.6),
-          credit: Math.round(settlement.totalTransactions * 0.4),
+          debit: Number(batch.grossAmount),
+          credit: Number(batch.netAmount),
           reversals: 0,
           chargebacks: 0,
         },
-        timeline: [
-          { event: 'Batch received', timestamp: `${settlement.date}T09:00:00Z` },
-          { event: 'Validation complete', timestamp: `${settlement.date}T09:15:00Z` },
-          { event: 'Net calculation', timestamp: `${settlement.date}T09:30:00Z` },
-          ...(settlement.status === 'settled' ? [
-            { event: 'Funds transferred', timestamp: `${settlement.date}T10:00:00Z` },
-            { event: 'Settlement confirmed', timestamp: settlement.reconciledAt || '' },
-          ] : []),
-        ],
+        timeline: events.map((event) => ({
+          event: event.eventType,
+          timestamp: event.occurredAt.toISOString(),
+          payload: event.eventPayload,
+        })),
       };
     }),
 
-  getSummary: protectedProcedure.query(() => {
-    const today = new Date().toISOString().split('T')[0];
-    const todaySettlements = settlements.filter(s => s.date === today);
-
+  getSummary: protectedProcedure.query(async ({ ctx }) => {
+    const db = await requireDb();
+    const scopedIds = await scopedBatchIds(db, ctx.user);
+    if (Array.isArray(scopedIds) && scopedIds.length === 0) {
+      return { totalSettled: 0, totalPending: 0, totalProcessing: 0, totalFailed: 0, todayVolume: 0, todayFees: 0, todayTransactions: 0, banks: [] };
+    }
+    const where = Array.isArray(scopedIds) ? inArray(settlementBatches.id, scopedIds) : undefined;
+    const batches = await db.select().from(settlementBatches).where(where);
+    const today = new Date().toISOString().slice(0, 10);
+    const todayBatches = batches.filter((batch) => batch.windowOpenedAt.toISOString().slice(0, 10) === today);
+    const banks = new Map<string, { code: string; name: string; settledCount: number; pendingCount: number }>();
+    for (const batch of batches) {
+      const bank = banks.get(batch.bankCode) ?? { code: batch.bankCode, name: batch.bankName, settledCount: 0, pendingCount: 0 };
+      if (batch.status === 'settled') bank.settledCount += 1;
+      if (batch.status === 'pending') bank.pendingCount += 1;
+      banks.set(batch.bankCode, bank);
+    }
     return {
-      totalSettled: settlements.filter(s => s.status === 'settled').length,
-      totalPending: settlements.filter(s => s.status === 'pending').length,
-      totalProcessing: settlements.filter(s => s.status === 'processing').length,
-      totalFailed: settlements.filter(s => s.status === 'failed').length,
-      todayVolume: todaySettlements.reduce((a, s) => a + s.grossAmount, 0),
-      todayFees: todaySettlements.reduce((a, s) => a + s.fees, 0),
-      todayTransactions: todaySettlements.reduce((a, s) => a + s.totalTransactions, 0),
-      banks: nigeriaBanks.map(b => ({
-        ...b,
-        settledCount: settlements.filter(s => s.bankCode === b.code && s.status === 'settled').length,
-        pendingCount: settlements.filter(s => s.bankCode === b.code && s.status === 'pending').length,
-      })),
+      totalSettled: batches.filter((batch) => batch.status === 'settled').length,
+      totalPending: batches.filter((batch) => batch.status === 'pending').length,
+      totalProcessing: batches.filter((batch) => batch.status === 'processing').length,
+      totalFailed: batches.filter((batch) => batch.status === 'failed').length,
+      todayVolume: todayBatches.reduce((sum, batch) => sum + Number(batch.grossAmount), 0),
+      todayFees: todayBatches.reduce((sum, batch) => sum + Number(batch.fees), 0),
+      todayTransactions: todayBatches.reduce((sum, batch) => sum + batch.totalTransactions, 0),
+      banks: Array.from(banks.values()),
     };
   }),
 
   initiate: protectedProcedure
-    .input(z.object({
-      bankCode: z.string(),
-      channel: z.enum(['NIP', 'NEFT', 'RTGS', 'POS', 'ATM', 'WEB']),
-      window: z.enum(['T+0', 'T+1', 'T+2']),
-    }))
+    .input(z.object({ bankCode: z.string().min(1).max(32), channel: settlementChannel, window: settlementWindow }))
     .mutation(async ({ ctx, input }) => {
-      log.info({ ...input, userId: ctx.user.id }, 'Settlement initiated');
-
-      const bank = nigeriaBanks.find(b => b.code === input.bankCode);
-      if (!bank) return { success: false, error: 'Invalid bank code' };
-
-      const id = `STL-${String(settlements.length + 1).padStart(4, '0')}`;
-      const settlement: Settlement = {
-        id,
-        date: new Date().toISOString().split('T')[0],
-        bankCode: input.bankCode,
-        bankName: bank.name,
-        totalTransactions: 0,
-        grossAmount: 0,
-        fees: 0,
-        netAmount: 0,
-        status: 'processing',
-        settlementRef: `NIBSS-${bank.nipCode}-${Date.now()}`,
-        window: input.window,
+      if (!isOperationsRole(ctx.user.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only operations users can open settlement batches.' });
+      }
+      const db = await requireDb();
+      const participants = await db.select().from(switchParticipants)
+        .where(eq(switchParticipants.shortCode, input.bankCode)).limit(1);
+      const participant = participants[0];
+      if (!participant) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'No active participant exists for the supplied bank code.' });
+      }
+      if (participant.status !== 'active') {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'Settlement batches can only be opened for active participants.' });
+      }
+      const settlementId = `STL-${randomUUID()}`;
+      const settlementRef = `SET-${randomUUID()}`;
+      const inserted = await db.insert(settlementBatches).values({
+        settlementId,
+        participantId: participant.id,
+        bankCode: participant.shortCode,
+        bankName: participant.name,
         channel: input.channel,
-        reconciledAt: null,
-        reconciledBy: null,
-      };
-      settlements.unshift(settlement);
-
-      return { success: true, settlementId: id, ref: settlement.settlementRef };
+        settlementWindow: input.window,
+        status: 'pending',
+        settlementRef,
+      }).returning();
+      const batch = inserted[0];
+      await db.insert(settlementEvents).values({
+        settlementBatchId: batch.id,
+        eventType: 'BATCH_OPENED',
+        eventPayload: { channel: input.channel, settlementWindow: input.window },
+        actorUserId: ctx.user.id,
+      });
+      log.info({ settlementId, participantId: participant.id, userId: ctx.user.id }, 'Settlement batch opened in PostgreSQL');
+      return { success: true, settlementId, ref: settlementRef, status: 'pending' as const };
     }),
 
   reconcile: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.object({ id: z.string().min(1).max(64) }))
     .mutation(async ({ ctx, input }) => {
-      const settlement = settlements.find(s => s.id === input.id);
-      if (!settlement) return { success: false, error: 'Settlement not found' };
-      if (settlement.status === 'settled') return { success: false, error: 'Already settled' };
-
-      settlement.status = 'settled';
-      settlement.reconciledAt = new Date().toISOString();
-      settlement.reconciledBy = String(ctx.user.id);
-
-      log.info({ id: input.id, userId: ctx.user.id }, 'Settlement reconciled');
-      return { success: true, settlement };
+      if (!isOperationsRole(ctx.user.role)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only operations users can request reconciliation.' });
+      }
+      const db = await requireDb();
+      const rows = await db.select().from(settlementBatches).where(eq(settlementBatches.settlementId, input.id)).limit(1);
+      const batch = rows[0];
+      if (!batch) throw new TRPCError({ code: 'NOT_FOUND', message: 'Settlement batch not found.' });
+      if (batch.status === 'settled') {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'A settled batch requires a correction workflow, not reconciliation retry.' });
+      }
+      const updated = await db.update(settlementBatches).set({ status: 'processing', updatedAt: new Date() })
+        .where(eq(settlementBatches.id, batch.id)).returning();
+      await db.insert(settlementEvents).values({
+        settlementBatchId: batch.id,
+        eventType: 'RECONCILIATION_REQUESTED',
+        eventPayload: { reason: 'Awaiting authoritative TigerBeetle/Mojaloop reconciliation result' },
+        actorUserId: ctx.user.id,
+      });
+      log.info({ settlementId: input.id, userId: ctx.user.id }, 'Settlement reconciliation requested; no local settled state asserted');
+      return { success: true, settlement: serializeBatch(updated[0]), status: 'processing' as const };
     }),
 });
