@@ -1,0 +1,76 @@
+version: 1
+assurance_level: mission_critical
+release_rule: >-
+  Release is denied unless every required claim has current PASS evidence or is
+  explicitly waived by an authorized release decision outside this repository.
+claims:
+  - id: identity.gateway-keycloak-mobile
+    component: apisix-keycloak-mobile-trpc
+    assertion: APISIX rejects unauthenticated and spoofed identity requests and forwards only verified Keycloak bearer tokens to mobile tRPC.
+    required: true
+    evidence:
+      static_gate: scripts/assurance/verify_gateway_keycloak_config.py
+      live_gate: scripts/assurance/run_live_identity_gates.sh
+      status: pending_live
+  - id: identity.ledger-downstream-jwt
+    component: go-ledger
+    assertion: The ledger independently verifies RS256 Keycloak JWTs, issuer, audience, expiry, and roles after APISIX routing.
+    required: true
+    evidence:
+      static_gate: scripts/assurance/verify_gateway_keycloak_config.py
+      native_gate: payment-core/go-services/cmd/mojaloop-service
+      status: pending_native_live
+  - id: dependency.external-secrets
+    component: kubernetes-secrets
+    assertion: Deployable workloads consume managed ExternalSecret targets and no placeholder, default credential, or disabled certificate verification remains in deployable sources.
+    required: true
+    evidence:
+      static_gate: scripts/assurance/validate_deployment_policy.py
+      live_gate: scripts/assurance/run_dependency_recovery_gates.sh
+      status: static_ready
+  - id: ledger.tigerbeetle-fail-closed
+    component: tigerbeetle-ledger
+    assertion: Financial postings never synthesize local success when TigerBeetle is unavailable.
+    required: true
+    evidence:
+      static_gate: .audit/verify_go_rust_ledger_fx_security.py
+      live_gate: scripts/assurance/run_dependency_recovery_gates.sh
+      status: pending_live
+  - id: fx.authoritative-rate
+    component: rust-fx-engine
+    assertion: FX quotes are unavailable without an authoritative validated rate and reject arithmetic overflow, zero rates, expired rates, and quote-ID exhaustion.
+    required: true
+    evidence:
+      native_gate: payment-core/rust-services/outbound-ledger
+      status: static_ready
+  - id: settlement.postgres-read-model
+    component: settlement-read-model
+    assertion: Portal settlement summaries and lifecycle events are derived from PostgreSQL-backed batches and immutable events rather than generated arrays.
+    required: true
+    evidence:
+      static_gate: .audit/verify_component_contracts.py
+      live_gate: scripts/assurance/run_dependency_recovery_gates.sh
+      status: pending_live
+  - id: ai.cpu-fraud-inference
+    component: fraud-detection-service
+    assertion: Live fraud scoring loads only the digest-verified CPU model bundle and returns model provenance with no heuristic or generated fallback.
+    required: true
+    evidence:
+      static_gate: payment-core/services/fraud-detection-service/verify_model_bundle.py
+      live_gate: scripts/assurance/run_live_identity_gates.sh
+      status: pending_live
+  - id: authorization.permify-fail-closed
+    component: permify
+    assertion: Protected and administrative tRPC procedures deny when the external authorization service is unavailable or denies access.
+    required: true
+    evidence:
+      static_gate: scripts/assurance/verify_gateway_keycloak_config.py
+      live_gate: scripts/assurance/run_dependency_recovery_gates.sh
+      status: pending_live
+  - id: recovery.critical-dependencies
+    component: dependency-recovery
+    assertion: PostgreSQL, Redis, Keycloak, Permify, TigerBeetle, APISIX, Temporal, Kafka, and lakehouse dependency loss causes explicit failure and recovery restores only authoritative behavior.
+    required: true
+    evidence:
+      live_gate: scripts/assurance/run_dependency_recovery_gates.sh
+      status: pending_live

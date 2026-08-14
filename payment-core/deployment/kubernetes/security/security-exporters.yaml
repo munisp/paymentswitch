@@ -53,6 +53,26 @@ data:
         query: /sca
 
 ---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: security-exporter-secrets
+  namespace: security
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: security-exporter-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: WAZUH_API_PASSWORD
+      remoteRef: { key: payment-switch/security/wazuh, property: api_password }
+    - secretKey: OPENCTI_API_TOKEN
+      remoteRef: { key: payment-switch/security/opencti, property: api_token }
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -90,14 +110,16 @@ spec:
               import requests
               from prometheus_client import start_http_server, Counter, Gauge
               import logging
+              import os
               
               logging.basicConfig(level=logging.INFO)
               logger = logging.getLogger(__name__)
               
-              # Wazuh API configuration
-              WAZUH_API_URL = "http://wazuh-manager.security.svc.cluster.local:55000"
-              WAZUH_API_USER = "wazuh"
-              WAZUH_API_PASSWORD = "PLACEHOLDER_INJECT_FROM_VAULT"
+              # Managed secret and CA paths are required; no credential/TLS fallback is permitted.
+              WAZUH_API_URL = os.environ['WAZUH_API_URL']
+              WAZUH_API_USER = os.environ['WAZUH_API_USER']
+              WAZUH_API_PASSWORD = os.environ['WAZUH_API_PASSWORD']
+              WAZUH_CA_FILE = os.environ['WAZUH_CA_FILE']
               
               # Prometheus metrics
               alerts_total = Counter('wazuh_alerts_total', 'Total number of Wazuh alerts')
@@ -112,7 +134,7 @@ spec:
                       response = requests.post(
                           f"{WAZUH_API_URL}/security/user/authenticate",
                           auth=(WAZUH_API_USER, WAZUH_API_PASSWORD),
-                          verify=False
+                          verify=WAZUH_CA_FILE
                       )
                       return response.json()['data']['token']
                   except Exception as e:
@@ -132,7 +154,7 @@ spec:
                       response = requests.get(
                           f"{WAZUH_API_URL}/agents/summary/status",
                           headers=headers,
-                          verify=False
+                          verify=WAZUH_CA_FILE
                       )
                       data = response.json()['data']
                       agents_total.set(data.get('total', 0))
@@ -143,7 +165,7 @@ spec:
                       response = requests.get(
                           f"{WAZUH_API_URL}/alerts",
                           headers=headers,
-                          verify=False
+                          verify=WAZUH_CA_FILE
                       )
                       alerts_count = response.json()['data']['total_affected_items']
                       alerts_total.inc(alerts_count)
@@ -163,6 +185,16 @@ spec:
               EOF
               python /app/exporter.py
           
+          envFrom:
+            - secretRef:
+                name: security-exporter-secrets
+          env:
+            - name: WAZUH_API_URL
+              value: "https://wazuh-manager.security.svc.cluster.local:55000"
+            - name: WAZUH_API_USER
+              value: "wazuh"
+            - name: WAZUH_CA_FILE
+              value: "/var/run/secrets/wazuh/ca.crt"
           ports:
             - name: metrics
               containerPort: 9090
@@ -203,8 +235,8 @@ metadata:
 data:
   config.yaml: |
     opencti:
-      api_url: http://opencti-platform.security.svc.cluster.local:8080
-      api_token: ChangeMe
+      api_url: https://opencti-platform.security.svc.cluster.local:8443
+      # API token is injected through security-exporter-secrets.
     
     prometheus:
       port: 9091
@@ -237,6 +269,12 @@ spec:
           image: python:3.11-slim
           imagePullPolicy: IfNotPresent
           
+          envFrom:
+            - secretRef:
+                name: security-exporter-secrets
+          env:
+            - name: OPENCTI_API_URL
+              value: "https://opencti-platform.security.svc.cluster.local:8443"
           command:
             - /bin/sh
             - -c
@@ -248,13 +286,14 @@ spec:
               import requests
               from prometheus_client import start_http_server, Gauge
               import logging
+              import os
               
               logging.basicConfig(level=logging.INFO)
               logger = logging.getLogger(__name__)
               
-              # OpenCTI API configuration
-              OPENCTI_API_URL = "http://opencti-platform.security.svc.cluster.local:8080"
-              OPENCTI_API_TOKEN = "ChangeMe"
+              # Managed OpenCTI credential is required; missing credentials fail at startup.
+              OPENCTI_API_URL = os.environ['OPENCTI_API_URL']
+              OPENCTI_API_TOKEN = os.environ['OPENCTI_API_TOKEN']
               
               # Prometheus metrics
               indicators_total = Gauge('opencti_indicators_total', 'Total number of indicators')

@@ -149,9 +149,11 @@ data:
 
     # Configuration
     OPENCTI_URL = os.getenv('OPENCTI_URL', 'http://opencti-platform.security.svc.cluster.local:8080')
-    OPENCTI_TOKEN = os.getenv('OPENCTI_TOKEN', 'ChangeMe')
+    OPENCTI_TOKEN = os.getenv('OPENCTI_TOKEN', '').strip()
+    if not OPENCTI_TOKEN:
+        raise RuntimeError('OPENCTI_TOKEN must be injected by the managed secret store')
 
-    # Initialize OpenCTI client
+    # Initialize OpenCTI client only after the managed token is present.
     opencti_api_client = OpenCTIApiClient(OPENCTI_URL, OPENCTI_TOKEN)
 
     def parse_wazuh_alert(alert_json):
@@ -232,17 +234,26 @@ data:
         main()
 
 ---
-apiVersion: v1
-kind: Secret
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
   name: opencti-credentials
   namespace: security
   labels:
     app: wazuh
-type: Opaque
-stringData:
-  OPENCTI_URL: "http://opencti-platform.security.svc.cluster.local:8080"
-  OPENCTI_TOKEN: "ChangeMe"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: opencti-credentials
+    creationPolicy: Owner
+  data:
+    - secretKey: OPENCTI_URL
+      remoteRef: { key: payment-switch/security/opencti, property: api_url }
+    - secretKey: OPENCTI_TOKEN
+      remoteRef: { key: payment-switch/security/opencti, property: api_token }
 
 ---
 # Updated Wazuh Manager StatefulSet with custom rules, decoders, and integration

@@ -24,27 +24,48 @@ data:
   MINIO_BROWSER: "on"
 
 ---
-# IMPORTANT: This secret should be created via external secrets management (Vault, AWS Secrets Manager, etc.)
-# Do NOT commit actual credentials. Use: kubectl create secret generic minio-secrets --from-literal=...
-apiVersion: v1
-kind: Secret
+# Credentials are materialized only by External Secrets Operator. Applying this
+# manifest without its referenced ClusterSecretStore intentionally leaves the
+# workload pending rather than creating a deployable placeholder credential.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
   name: minio-secrets
   namespace: lakehouse
   labels:
     app: minio
-  annotations:
-    external-secrets.io/managed: "true"
-    description: "Credentials should be injected via external secrets operator or CI/CD pipeline"
-type: Opaque
-stringData:
-  # Placeholder values - MUST be replaced via external secrets management in production
-  # Use: kubectl create secret generic minio-secrets --from-literal=MINIO_ROOT_USER=... --from-literal=...
-  # Or configure ExternalSecrets operator to inject from Vault/AWS Secrets Manager
-  MINIO_ROOT_USER: "PLACEHOLDER_INJECT_FROM_VAULT"
-  MINIO_ROOT_PASSWORD: "PLACEHOLDER_INJECT_FROM_VAULT"
-  MINIO_ACCESS_KEY: "PLACEHOLDER_INJECT_FROM_VAULT"
-  MINIO_SECRET_KEY: "PLACEHOLDER_INJECT_FROM_VAULT"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: minio-secrets
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      data:
+        MINIO_ROOT_USER: "{{ .root_user }}"
+        MINIO_ROOT_PASSWORD: "{{ .root_password }}"
+        MINIO_ACCESS_KEY: "{{ .access_key }}"
+        MINIO_SECRET_KEY: "{{ .secret_key }}"
+  data:
+    - secretKey: root_user
+      remoteRef:
+        key: payment-switch/lakehouse/minio
+        property: root_user
+    - secretKey: root_password
+      remoteRef:
+        key: payment-switch/lakehouse/minio
+        property: root_password
+    - secretKey: access_key
+      remoteRef:
+        key: payment-switch/lakehouse/minio
+        property: access_key
+    - secretKey: secret_key
+      remoteRef:
+        key: payment-switch/lakehouse/minio
+        property: secret_key
 
 ---
 apiVersion: v1

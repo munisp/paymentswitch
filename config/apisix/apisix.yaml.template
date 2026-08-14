@@ -1,3 +1,13 @@
+# Runtime TLS material is rendered by assurance-apisix-entrypoint.sh.
+ssls:
+  - id: assurance-gateway-tls
+    snis:
+      - "__APISIX_TLS_SERVER_NAME__"
+    cert: |
+      __APISIX_TLS_CERT_PEM__
+    key: |
+      __APISIX_TLS_KEY_PEM__
+
 # APISIX Routes and Upstreams for Payment Switch Platform
 # This file defines the API routes with Keycloak OIDC authentication
 
@@ -114,7 +124,7 @@ routes:
         burst: 50
         key: remote_addr
       cors:
-        allow_origins: "https://portal.payment-switch.local"
+        allow_origins: "${{PORTAL_ALLOWED_ORIGIN}}"
         allow_methods: "GET,POST,OPTIONS"
         allow_headers: "Content-Type,Authorization,X-Request-ID"
         expose_headers: "X-Request-ID"
@@ -143,7 +153,7 @@ routes:
         burst: 500
         key: consumer_name
       cors:
-        allow_origins: "https://portal.payment-switch.local"
+        allow_origins: "${{PORTAL_ALLOWED_ORIGIN}}"
         allow_methods: "GET,POST,OPTIONS"
         allow_headers: "Content-Type,Authorization,X-Request-ID"
         expose_headers: "X-Request-ID"
@@ -170,7 +180,7 @@ routes:
         burst: 500
         key: consumer_name
       cors:
-        allow_origins: "https://portal.payment-switch.local"
+        allow_origins: "${{PORTAL_ALLOWED_ORIGIN}}"
         allow_methods: "GET,POST,PUT,DELETE,PATCH,OPTIONS"
         allow_headers: "Content-Type,Authorization,X-Request-ID"
         expose_headers: "X-Request-ID"

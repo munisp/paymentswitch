@@ -1,3 +1,4 @@
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,52 +18,52 @@ spec:
         app: workflows-service
     spec:
       containers:
-        - name: workflows-service
-          image: payment-switch/workflows-service:latest
-          ports:
-            - containerPort: 8000
-          env:
-            - name: TEMPORAL_HOST
-              value: "temporal-frontend.payment-switch.svc.cluster.local:7233"
-            - name: TEMPORAL_NAMESPACE
-              value: "payment-switch"
-            - name: REDIS_HOST
-              value: "redis.payment-switch.svc.cluster.local"
-            - name: KAFKA_BOOTSTRAP_SERVERS
-              value: "kafka.payment-switch.svc.cluster.local:9092"
-            - name: POSTGRES_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: workflows-secrets
-                  key: POSTGRES_HOST
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: workflows-secrets
-                  key: POSTGRES_PASSWORD
-          resources:
-            requests:
-              memory: "128Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
-              cpu: "500m"
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 3
+      - name: workflows-service
+        image: payment-switch/workflows-service:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: TEMPORAL_HOST
+          value: temporal-frontend.payment-switch.svc.cluster.local:7233
+        - name: TEMPORAL_NAMESPACE
+          value: payment-switch
+        - name: REDIS_HOST
+          value: redis.payment-switch.svc.cluster.local
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: kafka.payment-switch.svc.cluster.local:9092
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: workflows-secrets
+              key: POSTGRES_HOST
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: workflows-secrets
+              key: POSTGRES_PASSWORD
+        resources:
+          requests:
+            memory: 128Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 500m
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service
@@ -75,20 +76,32 @@ spec:
   selector:
     app: workflows-service
   ports:
-    - port: 8000
-      targetPort: 8000
-      protocol: TCP
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
   type: ClusterIP
 ---
-apiVersion: v1
-kind: Secret
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
   name: workflows-secrets
   namespace: payment-switch
   labels:
     app: workflows-service
-    external-secrets.io/managed: "true"
-type: Opaque
-stringData:
-  POSTGRES_HOST: "PLACEHOLDER_INJECT_FROM_VAULT"
-  POSTGRES_PASSWORD: "PLACEHOLDER_INJECT_FROM_VAULT"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: workflows-secrets
+    creationPolicy: Owner
+  data:
+  - secretKey: POSTGRES_HOST
+    remoteRef:
+      key: payment-switch/workflows
+      property: host
+  - secretKey: POSTGRES_PASSWORD
+    remoteRef:
+      key: payment-switch/workflows
+      property: password

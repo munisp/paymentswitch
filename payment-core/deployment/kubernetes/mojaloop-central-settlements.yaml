@@ -1,5 +1,4 @@
-# Mojaloop Central Settlements Service
-# Handles multilateral net settlement between DFSPs
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -11,10 +10,10 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - name: http
-      port: 3007
-      targetPort: 3007
-      protocol: TCP
+  - name: http
+    port: 3007
+    targetPort: 3007
+    protocol: TCP
   selector:
     app: mojaloop
     component: central-settlements
@@ -39,54 +38,53 @@ spec:
         app: mojaloop
         component: central-settlements
       annotations:
-        dapr.io/enabled: "true"
-        dapr.io/app-id: "mojaloop-central-settlements"
-        dapr.io/app-port: "3007"
-        dapr.io/config: "dapr-config"
+        dapr.io/enabled: 'true'
+        dapr.io/app-id: mojaloop-central-settlements
+        dapr.io/app-port: '3007'
+        dapr.io/config: dapr-config
     spec:
       containers:
-        - name: central-settlements
-          image: mojaloop/central-settlement:v15.0.0
-          ports:
-            - containerPort: 3007
-              name: http
-          env:
-            - name: CSL_DATABASE_URI
-              valueFrom:
-                secretKeyRef:
-                  name: mojaloop-db-credentials
-                  key: central-settlements-uri
-            - name: CSL_KAFKA_HOST
-              value: "kafka.payment-switch.svc.cluster.local"
-            - name: CSL_KAFKA_PORT
-              value: "9092"
-            - name: CSL_CENTRAL_LEDGER_URL
-              value: "http://mojaloop-central-ledger.payment-switch.svc.cluster.local:3001"
-            - name: CSL_SETTLEMENT_WINDOW_AGGREGATION_INTERVAL_MS
-              value: "10000"
-            - name: CSL_SETTLEMENT_DELAY_MS
-              value: "2000"
-          resources:
-            requests:
-              memory: "512Mi"
-              cpu: "250m"
-            limits:
-              memory: "1Gi"
-              cpu: "500m"
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 3007
-            initialDelaySeconds: 30
-            periodSeconds: 15
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 3007
-            initialDelaySeconds: 10
-            periodSeconds: 5
+      - name: central-settlements
+        image: mojaloop/central-settlement:v15.0.0
+        ports:
+        - containerPort: 3007
+          name: http
+        env:
+        - name: CSL_DATABASE_URI
+          valueFrom:
+            secretKeyRef:
+              name: mojaloop-db-credentials
+              key: central-settlements-uri
+        - name: CSL_KAFKA_HOST
+          value: kafka.payment-switch.svc.cluster.local
+        - name: CSL_KAFKA_PORT
+          value: '9092'
+        - name: CSL_CENTRAL_LEDGER_URL
+          value: http://mojaloop-central-ledger.payment-switch.svc.cluster.local:3001
+        - name: CSL_SETTLEMENT_WINDOW_AGGREGATION_INTERVAL_MS
+          value: '10000'
+        - name: CSL_SETTLEMENT_DELAY_MS
+          value: '2000'
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 250m
+          limits:
+            memory: 1Gi
+            cpu: 500m
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3007
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3007
+          initialDelaySeconds: 10
+          periodSeconds: 5
 ---
-# Settlement Handler Service
 apiVersion: v1
 kind: Service
 metadata:
@@ -98,10 +96,10 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - name: http
-      port: 3008
-      targetPort: 3008
-      protocol: TCP
+  - name: http
+    port: 3008
+    targetPort: 3008
+    protocol: TCP
   selector:
     app: mojaloop
     component: settlement-handler
@@ -127,39 +125,61 @@ spec:
         component: settlement-handler
     spec:
       containers:
-        - name: settlement-handler
-          image: mojaloop/central-settlement:v15.0.0
-          command: ["node", "src/handlers/index.js", "handler", "--settlement"]
-          ports:
-            - containerPort: 3008
-              name: http
-          env:
-            - name: CSL_DATABASE_URI
-              valueFrom:
-                secretKeyRef:
-                  name: mojaloop-db-credentials
-                  key: central-settlements-uri
-            - name: CSL_KAFKA_HOST
-              value: "kafka.payment-switch.svc.cluster.local"
-            - name: CSL_KAFKA_PORT
-              value: "9092"
-          resources:
-            requests:
-              memory: "256Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
-              cpu: "250m"
+      - name: settlement-handler
+        image: mojaloop/central-settlement:v15.0.0
+        command:
+        - node
+        - src/handlers/index.js
+        - handler
+        - --settlement
+        ports:
+        - containerPort: 3008
+          name: http
+        env:
+        - name: CSL_DATABASE_URI
+          valueFrom:
+            secretKeyRef:
+              name: mojaloop-db-credentials
+              key: central-settlements-uri
+        - name: CSL_KAFKA_HOST
+          value: kafka.payment-switch.svc.cluster.local
+        - name: CSL_KAFKA_PORT
+          value: '9092'
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 250m
 ---
-# Mojaloop DB Credentials Secret (placeholder - use ExternalSecrets in production)
-apiVersion: v1
-kind: Secret
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
   name: mojaloop-db-credentials
   namespace: payment-switch
-type: Opaque
-stringData:
-  central-settlements-uri: "postgresql://central_settlements:PLACEHOLDER_INJECT_FROM_VAULT@mojaloop-postgres.payment-switch.svc.cluster.local:5432/central_settlements"
-  central-ledger-uri: "postgresql://central_ledger:PLACEHOLDER_INJECT_FROM_VAULT@mojaloop-postgres.payment-switch.svc.cluster.local:5432/central_ledger"
-  account-lookup-uri: "postgresql://account_lookup:PLACEHOLDER_INJECT_FROM_VAULT@mojaloop-postgres.payment-switch.svc.cluster.local:5432/account_lookup"
-  quoting-service-uri: "postgresql://quoting_service:PLACEHOLDER_INJECT_FROM_VAULT@mojaloop-postgres.payment-switch.svc.cluster.local:5432/quoting_service"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: mojaloop-db-credentials
+    creationPolicy: Owner
+  data:
+  - secretKey: central-settlements-uri
+    remoteRef:
+      key: payment-switch/mojaloop/database-uris
+      property: central-settlements-uri
+  - secretKey: central-ledger-uri
+    remoteRef:
+      key: payment-switch/mojaloop/database-uris
+      property: central-ledger-uri
+  - secretKey: account-lookup-uri
+    remoteRef:
+      key: payment-switch/mojaloop/database-uris
+      property: account-lookup-uri
+  - secretKey: quoting-service-uri
+    remoteRef:
+      key: payment-switch/mojaloop/database-uris
+      property: quoting-service-uri

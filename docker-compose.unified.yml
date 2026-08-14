@@ -32,15 +32,13 @@ services:
     image: postgres:15-alpine
     container_name: payment-core-postgres
     environment:
-      POSTGRES_DB: payment_switch
-      POSTGRES_USER: payment_user
-      POSTGRES_PASSWORD: payment_pass_2024
+      POSTGRES_DB: ${POSTGRES_DB:-payment_switch}
+      POSTGRES_USER: ${POSTGRES_USER:-payment_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a unique isolated PostgreSQL password}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/postgres:/docker-entrypoint-initdb.d:ro
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U payment_user -d payment_switch"]
       interval: 10s
@@ -54,13 +52,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: shared-redis
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_pass_2024}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?Set a unique isolated Redis password}
     volumes:
       - redis_data:/data
-    ports:
-      - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -qx PONG"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -75,8 +71,6 @@ services:
     command: start --addresses=0.0.0.0:3001 /var/lib/tigerbeetle/0_0.tigerbeetle
     volumes:
       - tigerbeetle_data:/var/lib/tigerbeetle
-    ports:
-      - "3002:3001"  # Map to 3002 externally to avoid conflict with admin dashboard
     networks:
       - payment-switch-network
     restart: unless-stopped
@@ -102,17 +96,14 @@ services:
     container_name: kafka
     depends_on:
       - zookeeper
-    ports:
-      - "9092:9092"
-      - "9093:9093"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
     volumes:
       - kafka_data:/var/lib/kafka/data
     networks:
@@ -135,15 +126,15 @@ services:
     container_name: web-checkout-portal
     environment:
       # Database (PostgreSQL - MySQL removed)
-      DATABASE_URL: postgresql://payment_user:payment_pass_2024@postgres:5432/payment_switch
+      DATABASE_URL: postgresql://${POSTGRES_USER:-payment_user}:${POSTGRES_PASSWORD:?Set a unique isolated PostgreSQL password}@postgres:5432/${POSTGRES_DB:-payment_switch}
       
       # Redis
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_pass_2024}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a unique isolated Redis password}
       
       # Authentication (Keycloak)
-      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      JWT_SECRET: ${JWT_SECRET:?Set a unique isolated portal JWT secret}
       KEYCLOAK_URL: ${KEYCLOAK_ISSUER_URL:?Set the externally issued Keycloak realm URL}
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-payment-switch}
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-payment-switch-portal}
@@ -218,12 +209,12 @@ services:
       TIGERBEETLE_ADDRESS: tigerbeetle:3001
       
       # PostgreSQL
-      DATABASE_URL: postgresql://payment_user:payment_pass_2024@postgres:5432/payment_switch
+      DATABASE_URL: postgresql://${POSTGRES_USER:-payment_user}:${POSTGRES_PASSWORD:?Set a unique isolated PostgreSQL password}@postgres:5432/${POSTGRES_DB:-payment_switch}
       
       # Redis
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_pass_2024}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a unique isolated Redis password}
       
       # Kafka
       KAFKA_BROKERS: kafka:9092
@@ -263,7 +254,7 @@ services:
     environment:
       # Redis supplies optional behavior context; model availability does not
       # downgrade to a synthetic score if Redis is unavailable.
-      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_pass_2024}@redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set a unique isolated Redis password}@redis:6379/0
       FRAUD_MODEL_BUNDLE_DIR: /app/ml-platform/weights
       PYTHONUNBUFFERED: 1
     depends_on:
@@ -289,7 +280,7 @@ services:
     container_name: data-pipeline-service
     environment:
       # PostgreSQL
-      DATABASE_URL: postgresql://payment_user:payment_pass_2024@postgres:5432/payment_switch
+      DATABASE_URL: postgresql://${POSTGRES_USER:-payment_user}:${POSTGRES_PASSWORD:?Set a unique isolated PostgreSQL password}@postgres:5432/${POSTGRES_DB:-payment_switch}
       
       # Kafka
       KAFKA_BROKERS: kafka:9092
@@ -355,8 +346,6 @@ services:
       - '--storage.tsdb.path=/prometheus'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
-    ports:
-      - "9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -368,10 +357,8 @@ services:
     image: grafana/grafana:latest
     container_name: grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?Set a unique isolated Grafana password}
       - GF_USERS_ALLOW_SIGN_UP=false
-    ports:
-      - "3001:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
@@ -387,10 +374,9 @@ services:
   # ============================================================================
   
   adminer:
+    profiles: ["operator-tools"]
     image: adminer:latest
     container_name: adminer
-    ports:
-      - "8090:8080"
     environment:
       ADMINER_DEFAULT_SERVER: postgres
       ADMINER_DESIGN: pepa-linha
@@ -399,12 +385,11 @@ services:
     restart: unless-stopped
 
   redis-commander:
+    profiles: ["operator-tools"]
     image: rediscommander/redis-commander:latest
     container_name: redis-commander
     environment:
-      - REDIS_HOSTS=local:redis:6379:0:${REDIS_PASSWORD:-redis_pass_2024}
-    ports:
-      - "8091:8081"
+      - REDIS_HOSTS=local:redis:6379:0:${REDIS_PASSWORD:?Set a unique isolated Redis password}
     networks:
       - payment-switch-network
     restart: unless-stopped
@@ -421,13 +406,18 @@ services:
     environment:
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:?Set a Keycloak bootstrap admin username}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set a Keycloak bootstrap admin password}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:?Set the isolated confidential portal client secret}
+      KEYCLOAK_API_CLIENT_SECRET: ${KEYCLOAK_API_CLIENT_SECRET:?Set the isolated API client secret}
+      KEYCLOAK_APISIX_CLIENT_SECRET: ${KEYCLOAK_APISIX_CLIENT_SECRET:?Set the isolated APISIX client secret}
+      PORTAL_ALLOWED_ORIGIN: ${PORTAL_ALLOWED_ORIGIN:?Set the exact isolated portal HTTPS origin}
+      PORTAL_REDIRECT_URI: ${PORTAL_REDIRECT_URI:?Set the exact isolated portal callback URI}
       KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:?Set the externally reachable Keycloak hostname or gateway auth URL}
       KC_HOSTNAME_STRICT: "true"
       KC_PROXY_HEADERS: xforwarded
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
-      KC_DB_USERNAME: payment_user
-      KC_DB_PASSWORD: payment_pass_2024
+      KC_DB_USERNAME: ${POSTGRES_USER:-payment_user}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:?Set a unique isolated PostgreSQL password}
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
     volumes:
@@ -446,18 +436,26 @@ services:
 
   # APISIX - API Gateway with Authentication
   apisix:
-    image: apache/apisix:3.8.0-debian
+    build:
+      context: .
+      dockerfile: config/apisix/Dockerfile
     container_name: apisix
     environment:
       APISIX_STAND_ALONE: "true"
       APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?Set the APISIX admin key}
       KEYCLOAK_APISIX_CLIENT_SECRET: ${KEYCLOAK_APISIX_CLIENT_SECRET:?Set the APISIX Keycloak client secret}
       KEYCLOAK_API_CLIENT_SECRET: ${KEYCLOAK_API_CLIENT_SECRET:?Set the Keycloak authorization client secret}
+      APISIX_TLS_SERVER_NAME: ${APISIX_TLS_SERVER_NAME:?Set the APISIX TLS server name}
+      APISIX_TLS_CERT_FILE: /run/secrets/apisix-gateway.crt
+      APISIX_TLS_KEY_FILE: /run/secrets/apisix-gateway.key
+      PORTAL_ALLOWED_ORIGIN: ${PORTAL_ALLOWED_ORIGIN:?Set the exact isolated portal HTTPS origin}
     ports:
       - "9443:9443"
     volumes:
-      - ./config/apisix/config.yaml:/usr/local/apisix/conf/config.yaml
-      - ./config/apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml
+      - ./config/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./config/apisix/apisix.yaml.template:/usr/local/apisix/conf/apisix.yaml.template:ro
+      - ${APISIX_TLS_CERT_FILE_HOST:?Set the absolute host path to the isolated APISIX certificate}:/run/secrets/apisix-gateway.crt:ro
+      - ${APISIX_TLS_KEY_FILE_HOST:?Set the absolute host path to the isolated APISIX private key}:/run/secrets/apisix-gateway.key:ro
     depends_on:
       - keycloak
     networks:
@@ -476,11 +474,8 @@ services:
     command: serve
     environment:
       PERMIFY_DATABASE_ENGINE: postgres
-      PERMIFY_DATABASE_URI: postgres://payment_user:payment_pass_2024@postgres:5432/permify?sslmode=disable
+      PERMIFY_DATABASE_URI: postgres://${POSTGRES_USER:-payment_user}:${POSTGRES_PASSWORD:?Set a unique isolated PostgreSQL password}@postgres:5432/permify?sslmode=disable
       PERMIFY_LOG_LEVEL: info
-    ports:
-      - "3476:3476"   # gRPC
-      - "3478:3478"   # HTTP
     depends_on:
       postgres:
         condition: service_healthy
@@ -498,11 +493,8 @@ services:
     image: ghcr.io/openappsec/open-appsec-standalone:latest
     container_name: openappsec
     environment:
-      LEARNING_MODE: "true"
+      LEARNING_MODE: "false"
       LOG_LEVEL: info
-    ports:
-      - "8085:8080"   # WAF proxy
-      - "8086:8081"   # Management API
     volumes:
       - ./config/openappsec/local_policy.yaml:/etc/cp/conf/local_policy.yaml:ro
     networks:
@@ -518,11 +510,9 @@ services:
     image: postgres:15-alpine
     container_name: mojaloop-postgres
     environment:
-      POSTGRES_PASSWORD: mojaloop_pass_2024
-      POSTGRES_DB: central_ledger
-      POSTGRES_USER: mojaloop
-    ports:
-      - "5433:5432"
+      POSTGRES_PASSWORD: ${MOJALOOP_POSTGRES_PASSWORD:?Set a unique isolated Mojaloop PostgreSQL password}
+      POSTGRES_DB: ${MOJALOOP_POSTGRES_DB:-central_ledger}
+      POSTGRES_USER: ${MOJALOOP_POSTGRES_USER:-mojaloop}
     volumes:
       - mojaloop_postgres_data:/var/lib/postgresql/data
     networks:
@@ -542,14 +532,12 @@ services:
       CLEDG_DATABASE__DIALECT: pg
       CLEDG_DATABASE__HOST: mojaloop-postgres
       CLEDG_DATABASE__PORT: 5432
-      CLEDG_DATABASE__USER: mojaloop
-      CLEDG_DATABASE__PASSWORD: mojaloop_pass_2024
-      CLEDG_DATABASE__SCHEMA: central_ledger
+      CLEDG_DATABASE__USER: ${MOJALOOP_POSTGRES_USER:-mojaloop}
+      CLEDG_DATABASE__PASSWORD: ${MOJALOOP_POSTGRES_PASSWORD:?Set a unique isolated Mojaloop PostgreSQL password}
+      CLEDG_DATABASE__SCHEMA: ${MOJALOOP_POSTGRES_DB:-central_ledger}
       CLEDG_KAFKA__PRODUCER__BROKER_LIST: kafka:9092
       CLEDG_KAFKA__CONSUMER__BROKER_LIST: kafka:9092
       LOG_LEVEL: info
-    ports:
-      - "3003:3001"  # Admin API; host 3000 is reserved for web-portal
     depends_on:
       mojaloop-postgres:
         condition: service_healthy
@@ -572,13 +560,10 @@ services:
       ALS_DATABASE__DIALECT: pg
       ALS_DATABASE__HOST: mojaloop-postgres
       ALS_DATABASE__PORT: 5432
-      ALS_DATABASE__USER: mojaloop
-      ALS_DATABASE__PASSWORD: mojaloop_pass_2024
+      ALS_DATABASE__USER: ${MOJALOOP_POSTGRES_USER:-mojaloop}
+      ALS_DATABASE__PASSWORD: ${MOJALOOP_POSTGRES_PASSWORD:?Set a unique isolated Mojaloop PostgreSQL password}
       ALS_DATABASE__SCHEMA: account_lookup
       LOG_LEVEL: info
-    ports:
-      - "4001:4001"  # Admin API
-      - "4002:4002"  # FSPIOP API
     depends_on:
       mojaloop-postgres:
         condition: service_healthy

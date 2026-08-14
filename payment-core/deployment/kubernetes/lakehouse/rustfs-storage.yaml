@@ -29,28 +29,48 @@ data:
   RUSTFS_S3_SIGNATURE_VERSION: "4"
 
 ---
-# IMPORTANT: This secret should be created via external secrets management (Vault, AWS Secrets Manager, etc.)
-# Do NOT commit actual credentials. Use: kubectl create secret generic rustfs-secrets --from-literal=...
-apiVersion: v1
-kind: Secret
+# Credentials are materialized only by External Secrets Operator. Applying this
+# manifest without its referenced ClusterSecretStore intentionally leaves the
+# workload pending rather than creating a deployable placeholder credential.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
   name: rustfs-secrets
   namespace: lakehouse
   labels:
     app: rustfs
-  annotations:
-    external-secrets.io/managed: "true"
-    description: "Credentials should be injected via external secrets operator or CI/CD pipeline"
-type: Opaque
-stringData:
-  # Placeholder values - MUST be replaced via external secrets management in production
-  # Use: kubectl create secret generic rustfs-secrets --from-literal=RUSTFS_ROOT_USER=... --from-literal=...
-  # Or configure ExternalSecrets operator to inject from Vault/AWS Secrets Manager
-  RUSTFS_ROOT_USER: "PLACEHOLDER_INJECT_FROM_VAULT"
-  RUSTFS_ROOT_PASSWORD: "PLACEHOLDER_INJECT_FROM_VAULT"
-  # Standard AWS S3 credential names for compatibility
-  AWS_ACCESS_KEY_ID: "PLACEHOLDER_INJECT_FROM_VAULT"
-  AWS_SECRET_ACCESS_KEY: "PLACEHOLDER_INJECT_FROM_VAULT"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: rustfs-secrets
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      data:
+        RUSTFS_ROOT_USER: "{{ .root_user }}"
+        RUSTFS_ROOT_PASSWORD: "{{ .root_password }}"
+        AWS_ACCESS_KEY_ID: "{{ .access_key }}"
+        AWS_SECRET_ACCESS_KEY: "{{ .secret_key }}"
+  data:
+    - secretKey: root_user
+      remoteRef:
+        key: payment-switch/lakehouse/rustfs
+        property: root_user
+    - secretKey: root_password
+      remoteRef:
+        key: payment-switch/lakehouse/rustfs
+        property: root_password
+    - secretKey: access_key
+      remoteRef:
+        key: payment-switch/lakehouse/rustfs
+        property: access_key
+    - secretKey: secret_key
+      remoteRef:
+        key: payment-switch/lakehouse/rustfs
+        property: secret_key
 
 ---
 apiVersion: v1

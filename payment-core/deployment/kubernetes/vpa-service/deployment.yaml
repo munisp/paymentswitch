@@ -1,3 +1,4 @@
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,64 +18,64 @@ spec:
         app: vpa-service
     spec:
       containers:
-        - name: vpa-service
-          image: payment-switch/vpa-service:latest
-          ports:
-            - containerPort: 8000
-            - containerPort: 50051
-              name: grpc
-          env:
-            - name: POSTGRES_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: vpa-service-secrets
-                  key: POSTGRES_HOST
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: vpa-service-secrets
-                  key: POSTGRES_PASSWORD
-            - name: REDIS_HOST
-              value: "redis.payment-switch.svc.cluster.local"
-            - name: KAFKA_BOOTSTRAP_SERVERS
-              value: "kafka.payment-switch.svc.cluster.local:9092"
-            - name: GRPC_PORT
-              value: "50051"
-          resources:
-            requests:
-              memory: "128Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
-              cpu: "500m"
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 3
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 3
+      - name: vpa-service
+        image: payment-switch/vpa-service:latest
+        ports:
+        - containerPort: 8000
+        - containerPort: 50051
+          name: grpc
+        env:
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: vpa-service-secrets
+              key: POSTGRES_HOST
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: vpa-service-secrets
+              key: POSTGRES_PASSWORD
+        - name: REDIS_HOST
+          value: redis.payment-switch.svc.cluster.local
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: kafka.payment-switch.svc.cluster.local:9092
+        - name: GRPC_PORT
+          value: '50051'
+        resources:
+          requests:
+            memory: 128Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 500m
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchExpressions:
-                    - key: app
-                      operator: In
-                      values:
-                        - vpa-service
-                topologyKey: kubernetes.io/hostname
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - vpa-service
+              topologyKey: kubernetes.io/hostname
 ---
 apiVersion: v1
 kind: Service
@@ -87,25 +88,37 @@ spec:
   selector:
     app: vpa-service
   ports:
-    - port: 8000
-      targetPort: 8000
-      protocol: TCP
-      name: http
-    - port: 50051
-      targetPort: 50051
-      protocol: TCP
-      name: grpc
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  - port: 50051
+    targetPort: 50051
+    protocol: TCP
+    name: grpc
   type: ClusterIP
 ---
-apiVersion: v1
-kind: Secret
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
   name: vpa-service-secrets
   namespace: payment-switch
   labels:
     app: vpa-service
-    external-secrets.io/managed: "true"
-type: Opaque
-stringData:
-  POSTGRES_HOST: "PLACEHOLDER_INJECT_FROM_VAULT"
-  POSTGRES_PASSWORD: "PLACEHOLDER_INJECT_FROM_VAULT"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: vpa-service-secrets
+    creationPolicy: Owner
+  data:
+  - secretKey: POSTGRES_HOST
+    remoteRef:
+      key: payment-switch/vpa-service
+      property: host
+  - secretKey: POSTGRES_PASSWORD
+    remoteRef:
+      key: payment-switch/vpa-service
+      property: password

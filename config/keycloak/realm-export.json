@@ -151,12 +151,13 @@
       "enabled": true,
       "clientAuthenticatorType": "client-secret",
       "redirectUris": [
-        "https://portal.payment-switch.local/*"
+        "${PORTAL_REDIRECT_URI}"
       ],
       "webOrigins": [
-        "https://portal.payment-switch.local"
+        "${PORTAL_ALLOWED_ORIGIN}"
       ],
-      "publicClient": true,
+      "publicClient": false,
+      "secret": "${KEYCLOAK_CLIENT_SECRET}",
       "protocol": "openid-connect",
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
@@ -214,6 +215,7 @@
       "redirectUris": [],
       "webOrigins": [],
       "publicClient": false,
+      "secret": "${KEYCLOAK_API_CLIENT_SECRET}",
       "protocol": "openid-connect",
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
@@ -238,6 +240,7 @@
       "redirectUris": [],
       "webOrigins": [],
       "publicClient": false,
+      "secret": "${KEYCLOAK_APISIX_CLIENT_SECRET}",
       "protocol": "openid-connect",
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,

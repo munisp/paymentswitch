@@ -21,9 +21,7 @@ data:
       session_idle_timeout: 3600000
       admin:
         email: admin@opencti.io
-        password: ChangeMe
-        token: ChangeMe
-      health_access_key: ChangeMe
+        # Admin password, token, and health key are supplied through opencti-secrets.
     elasticsearch:
       url: http://elasticsearch.security.svc.cluster.local:9200
       username: ''
@@ -35,15 +33,13 @@ data:
       endpoint: rustfs.security.svc.cluster.local
       port: 9000
       use_ssl: false
-      access_key: ChangeMe
-      secret_key: ChangeMe
+      # Object-store keys are supplied through opencti-secrets.
     rabbitmq:
       hostname: rabbitmq.security.svc.cluster.local
       port: 5672
       port_management: 15672
       management_ssl: false
-      username: guest
-      password: guest
+      # RabbitMQ credentials are supplied through opencti-secrets.
     redis:
       hostname: redis.security.svc.cluster.local
       port: 6379
@@ -53,12 +49,53 @@ data:
       hostname: smtp.example.com
       port: 25
       use_ssl: false
-      reject_unauthorized: false
+      reject_unauthorized: true
       username: ''
       password: ''
     providers:
       local:
         strategy: LocalStrategy
+
+---
+# OpenCTI secrets are supplied only by the configured external secret store.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: opencti-secrets
+  namespace: security
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: opencti-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: APP__ADMIN__PASSWORD
+      remoteRef: { key: payment-switch/security/opencti, property: admin_password }
+    - secretKey: APP__ADMIN__TOKEN
+      remoteRef: { key: payment-switch/security/opencti, property: admin_token }
+    - secretKey: APP__HEALTH_ACCESS_KEY
+      remoteRef: { key: payment-switch/security/opencti, property: health_access_key }
+    - secretKey: MINIO__ACCESS_KEY
+      remoteRef: { key: payment-switch/security/opencti, property: object_access_key }
+    - secretKey: MINIO__SECRET_KEY
+      remoteRef: { key: payment-switch/security/opencti, property: object_secret_key }
+    - secretKey: MINIO_ROOT_USER
+      remoteRef: { key: payment-switch/security/opencti, property: object_root_user }
+    - secretKey: MINIO_ROOT_PASSWORD
+      remoteRef: { key: payment-switch/security/opencti, property: object_root_password }
+    - secretKey: RABBITMQ__USERNAME
+      remoteRef: { key: payment-switch/security/opencti, property: rabbitmq_username }
+    - secretKey: RABBITMQ__PASSWORD
+      remoteRef: { key: payment-switch/security/opencti, property: rabbitmq_password }
+    - secretKey: OPENCTI_TOKEN
+      remoteRef: { key: payment-switch/security/opencti, property: api_token }
+    - secretKey: MISP_KEY
+      remoteRef: { key: payment-switch/security/misp, property: api_key }
+    - secretKey: ALIENVAULT_API_KEY
+      remoteRef: { key: payment-switch/security/alienvault, property: api_key }
 
 ---
 apiVersion: apps/v1
@@ -101,6 +138,9 @@ spec:
             - name: http
               containerPort: 8080
           
+          envFrom:
+            - secretRef:
+                name: opencti-secrets
           env:
             - name: NODE_OPTIONS
               value: "--max-old-space-size=8192"
@@ -110,12 +150,6 @@ spec:
               value: "http://opencti.security.svc.cluster.local:8080"
             - name: APP__ADMIN__EMAIL
               value: "admin@opencti.io"
-            - name: APP__ADMIN__PASSWORD
-              value: "ChangeMe"
-            - name: APP__ADMIN__TOKEN
-              value: "ChangeMe"
-            - name: APP__HEALTH_ACCESS_KEY
-              value: "ChangeMe"
             - name: ELASTICSEARCH__URL
               value: "http://elasticsearch.security.svc.cluster.local:9200"
             - name: MINIO__ENDPOINT
@@ -124,18 +158,10 @@ spec:
               value: "9000"
             - name: MINIO__USE_SSL
               value: "false"
-            - name: MINIO__ACCESS_KEY
-              value: "ChangeMe"
-            - name: MINIO__SECRET_KEY
-              value: "ChangeMe"
             - name: RABBITMQ__HOSTNAME
               value: "rabbitmq.security.svc.cluster.local"
             - name: RABBITMQ__PORT
               value: "5672"
-            - name: RABBITMQ__USERNAME
-              value: "guest"
-            - name: RABBITMQ__PASSWORD
-              value: "guest"
             - name: REDIS__HOSTNAME
               value: "redis.security.svc.cluster.local"
             - name: REDIS__PORT
@@ -195,7 +221,7 @@ metadata:
   labels:
     app: opencti
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: opencti
     component: platform
@@ -230,11 +256,12 @@ spec:
           image: opencti/worker:5.12.0
           imagePullPolicy: IfNotPresent
           
+          envFrom:
+            - secretRef:
+                name: opencti-secrets
           env:
             - name: OPENCTI_URL
               value: "http://opencti-platform.security.svc.cluster.local:8080"
-            - name: OPENCTI_TOKEN
-              value: "ChangeMe"
             - name: WORKER_LOG_LEVEL
               value: "info"
           
@@ -275,11 +302,12 @@ spec:
           image: opencti/connector-misp:5.12.0
           imagePullPolicy: IfNotPresent
           
+          envFrom:
+            - secretRef:
+                name: opencti-secrets
           env:
             - name: OPENCTI_URL
               value: "http://opencti-platform.security.svc.cluster.local:8080"
-            - name: OPENCTI_TOKEN
-              value: "ChangeMe"
             - name: CONNECTOR_ID
               value: "misp-connector"
             - name: CONNECTOR_TYPE
@@ -296,10 +324,8 @@ spec:
               value: "info"
             - name: MISP_URL
               value: "https://misp.example.com"
-            - name: MISP_KEY
-              value: "ChangeMe"
             - name: MISP_SSL_VERIFY
-              value: "false"
+              value: "true"
             - name: MISP_CREATE_REPORTS
               value: "true"
             - name: MISP_IMPORT_FROM_DATE
@@ -346,11 +372,12 @@ spec:
           image: opencti/connector-alienvault:5.12.0
           imagePullPolicy: IfNotPresent
           
+          envFrom:
+            - secretRef:
+                name: opencti-secrets
           env:
             - name: OPENCTI_URL
               value: "http://opencti-platform.security.svc.cluster.local:8080"
-            - name: OPENCTI_TOKEN
-              value: "ChangeMe"
             - name: CONNECTOR_ID
               value: "alienvault-connector"
             - name: CONNECTOR_TYPE
@@ -367,8 +394,6 @@ spec:
               value: "info"
             - name: ALIENVAULT_BASE_URL
               value: "https://otx.alienvault.com"
-            - name: ALIENVAULT_API_KEY
-              value: "ChangeMe"
             - name: ALIENVAULT_TLP
               value: "white"
             - name: ALIENVAULT_CREATE_OBSERVABLES
@@ -646,11 +671,9 @@ spec:
             - name: console
               containerPort: 9001
           
-          env:
-            - name: MINIO_ROOT_USER
-              value: "ChangeMe"
-            - name: MINIO_ROOT_PASSWORD
-              value: "ChangeMe"
+          envFrom:
+            - secretRef:
+                name: opencti-secrets
           
           resources:
             requests:

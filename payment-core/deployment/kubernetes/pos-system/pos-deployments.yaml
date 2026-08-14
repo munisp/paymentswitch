@@ -1,14 +1,11 @@
 ---
-# Namespace for POS payment system
 apiVersion: v1
 kind: Namespace
 metadata:
   name: pos-payment-system
   labels:
     name: pos-payment-system
-
 ---
-# Fluvio Cluster Deployment
 apiVersion: v1
 kind: Service
 metadata:
@@ -20,16 +17,15 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - name: sc-public
-      port: 9003
-      targetPort: 9003
-    - name: sc-private
-      port: 9004
-      targetPort: 9004
+  - name: sc-public
+    port: 9003
+    targetPort: 9003
+  - name: sc-private
+    port: 9004
+    targetPort: 9004
   selector:
     app: fluvio
     component: sc
-
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -55,61 +51,59 @@ spec:
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchExpressions:
-                  - key: app
-                    operator: In
-                    values:
-                      - fluvio
-              topologyKey: kubernetes.io/hostname
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - fluvio
+            topologyKey: kubernetes.io/hostname
       containers:
-        - name: fluvio-sc
-          image: infinyon/fluvio:latest
-          imagePullPolicy: IfNotPresent
-          command:
-            - /fluvio-run
-            - sc
-            - --bind-public
-            - 0.0.0.0:9003
-            - --bind-private
-            - 0.0.0.0:9004
-          ports:
-            - name: sc-public
-              containerPort: 9003
-            - name: sc-private
-              containerPort: 9004
-          resources:
-            requests:
-              cpu: 1000m
-              memory: 2Gi
-            limits:
-              cpu: 2000m
-              memory: 4Gi
-          volumeMounts:
-            - name: data
-              mountPath: /var/lib/fluvio
-  volumeClaimTemplates:
-    - metadata:
-        name: data
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        storageClassName: fast-ssd
+      - name: fluvio-sc
+        image: infinyon/fluvio:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - /fluvio-run
+        - sc
+        - --bind-public
+        - 0.0.0.0:9003
+        - --bind-private
+        - 0.0.0.0:9004
+        ports:
+        - name: sc-public
+          containerPort: 9003
+        - name: sc-private
+          containerPort: 9004
         resources:
           requests:
-            storage: 100Gi
-
+            cpu: 1000m
+            memory: 2Gi
+          limits:
+            cpu: 2000m
+            memory: 4Gi
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/fluvio
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: fast-ssd
+      resources:
+        requests:
+          storage: 100Gi
 ---
-# POS Gateway Deployment
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: pos-gateway-config
   namespace: pos-payment-system
 data:
-  FLUVIO_ENDPOINT: "fluvio-sc.pos-payment-system.svc.cluster.local:9003"
-  FLUVIO_TOPIC: "pos-transactions"
-  PORT: "8080"
-
+  FLUVIO_ENDPOINT: fluvio-sc.pos-payment-system.svc.cluster.local:9003
+  FLUVIO_TOPIC: pos-transactions
+  PORT: '8080'
 ---
 apiVersion: v1
 kind: Service
@@ -121,15 +115,14 @@ metadata:
 spec:
   type: LoadBalancer
   ports:
-    - name: http
-      port: 80
-      targetPort: 8080
-    - name: metrics
-      port: 9090
-      targetPort: 9090
+  - name: http
+    port: 80
+    targetPort: 8080
+  - name: metrics
+    port: 9090
+    targetPort: 9090
   selector:
     app: pos-gateway
-
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -148,54 +141,53 @@ spec:
       labels:
         app: pos-gateway
       annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9090"
-        prometheus.io/path: "/metrics"
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9090'
+        prometheus.io/path: /metrics
     spec:
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchExpressions:
-                    - key: app
-                      operator: In
-                      values:
-                        - pos-gateway
-                topologyKey: kubernetes.io/hostname
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - pos-gateway
+              topologyKey: kubernetes.io/hostname
       containers:
-        - name: pos-gateway
-          image: nextgen-payment-switch/pos-gateway:latest
-          imagePullPolicy: IfNotPresent
-          ports:
-            - name: http
-              containerPort: 8080
-            - name: metrics
-              containerPort: 9090
-          envFrom:
-            - configMapRef:
-                name: pos-gateway-config
-          resources:
-            requests:
-              cpu: 500m
-              memory: 512Mi
-            limits:
-              cpu: 2000m
-              memory: 2Gi
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 5
-
+      - name: pos-gateway
+        image: nextgen-payment-switch/pos-gateway:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        - name: metrics
+          containerPort: 9090
+        envFrom:
+        - configMapRef:
+            name: pos-gateway-config
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -210,48 +202,60 @@ spec:
   minReplicas: 20
   maxReplicas: 200
   metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80
-    - type: Pods
-      pods:
-        metric:
-          name: pos_transactions_received_total
-        target:
-          type: AverageValue
-          averageValue: "1000"
-
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: pos_transactions_received_total
+      target:
+        type: AverageValue
+        averageValue: '1000'
 ---
-# BankAdapter Service Deployment
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: bank-adapter-config
   namespace: pos-payment-system
 data:
-  PORT: "8080"
-
+  PORT: '8080'
 ---
-apiVersion: v1
-kind: Secret
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
   name: bank-adapter-secrets
   namespace: pos-payment-system
-type: Opaque
-stringData:
-  ACCESS_BANK_API_KEY: "PLACEHOLDER_INJECT_FROM_VAULT"
-  GTB_API_KEY: "PLACEHOLDER_INJECT_FROM_VAULT"
-  ZENITH_BANK_API_KEY: "PLACEHOLDER_INJECT_FROM_VAULT"
-
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: bank-adapter-secrets
+    creationPolicy: Owner
+  data:
+  - secretKey: ACCESS_BANK_API_KEY
+    remoteRef:
+      key: payment-switch/external-apis/banks
+      property: access-bank-api-key
+  - secretKey: GTB_API_KEY
+    remoteRef:
+      key: payment-switch/external-apis/banks
+      property: gtb-api-key
+  - secretKey: ZENITH_BANK_API_KEY
+    remoteRef:
+      key: payment-switch/external-apis/banks
+      property: zenith-bank-api-key
 ---
 apiVersion: v1
 kind: Service
@@ -263,12 +267,11 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - name: http
-      port: 8080
-      targetPort: 8080
+  - name: http
+    port: 8080
+    targetPort: 8080
   selector:
     app: bank-adapter
-
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -288,37 +291,36 @@ spec:
         app: bank-adapter
     spec:
       containers:
-        - name: bank-adapter
-          image: nextgen-payment-switch/bank-adapter:latest
-          imagePullPolicy: IfNotPresent
-          ports:
-            - name: http
-              containerPort: 8080
-          envFrom:
-            - configMapRef:
-                name: bank-adapter-config
-            - secretRef:
-                name: bank-adapter-secrets
-          resources:
-            requests:
-              cpu: 1000m
-              memory: 1Gi
-            limits:
-              cpu: 4000m
-              memory: 4Gi
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 5
-
+      - name: bank-adapter
+        image: nextgen-payment-switch/bank-adapter:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: bank-adapter-config
+        - secretRef:
+            name: bank-adapter-secrets
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 1Gi
+          limits:
+            cpu: 4000m
+            memory: 4Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -333,33 +335,30 @@ spec:
   minReplicas: 10
   maxReplicas: 50
   metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80
-
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
 ---
-# Fluvio Consumer Service Deployment
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: fluvio-consumer-config
   namespace: pos-payment-system
 data:
-  FLUVIO_ENDPOINT: "fluvio-sc.pos-payment-system.svc.cluster.local:9003"
-  FLUVIO_TOPIC: "processed-transactions"
-  TEMPORAL_ENDPOINT: "temporal-frontend.payment-switch.svc.cluster.local:7233"
-  CONSUMER_GROUP: "pos-transaction-processor"
-  METRICS_PORT: "9090"
-
+  FLUVIO_ENDPOINT: fluvio-sc.pos-payment-system.svc.cluster.local:9003
+  FLUVIO_TOPIC: processed-transactions
+  TEMPORAL_ENDPOINT: temporal-frontend.payment-switch.svc.cluster.local:7233
+  CONSUMER_GROUP: pos-transaction-processor
+  METRICS_PORT: '9090'
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -378,28 +377,27 @@ spec:
       labels:
         app: fluvio-consumer
       annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9090"
-        prometheus.io/path: "/metrics"
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9090'
+        prometheus.io/path: /metrics
     spec:
       containers:
-        - name: fluvio-consumer
-          image: nextgen-payment-switch/fluvio-consumer:latest
-          imagePullPolicy: IfNotPresent
-          ports:
-            - name: metrics
-              containerPort: 9090
-          envFrom:
-            - configMapRef:
-                name: fluvio-consumer-config
-          resources:
-            requests:
-              cpu: 500m
-              memory: 512Mi
-            limits:
-              cpu: 2000m
-              memory: 2Gi
-
+      - name: fluvio-consumer
+        image: nextgen-payment-switch/fluvio-consumer:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: metrics
+          containerPort: 9090
+        envFrom:
+        - configMapRef:
+            name: fluvio-consumer-config
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -414,21 +412,19 @@ spec:
   minReplicas: 10
   maxReplicas: 100
   metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80
-
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
 ---
-# Network Policies
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -439,32 +435,31 @@ spec:
     matchLabels:
       app: pos-gateway
   policyTypes:
-    - Ingress
-    - Egress
+  - Ingress
+  - Egress
   ingress:
-    - from:
-        - namespaceSelector: {}
-      ports:
-        - protocol: TCP
-          port: 8080
-        - protocol: TCP
-          port: 9090
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 9090
   egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              app: fluvio
-      ports:
-        - protocol: TCP
-          port: 9003
-    - to:
-        - namespaceSelector: {}
-      ports:
-        - protocol: TCP
-          port: 53
-        - protocol: UDP
-          port: 53
-
+  - to:
+    - podSelector:
+        matchLabels:
+          app: fluvio
+    ports:
+    - protocol: TCP
+      port: 9003
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -476,27 +471,25 @@ spec:
     matchLabels:
       app: bank-adapter
   policyTypes:
-    - Ingress
-    - Egress
+  - Ingress
+  - Egress
   ingress:
-    - from:
-        - namespaceSelector: {}
-      ports:
-        - protocol: TCP
-          port: 8080
+  - from:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8080
   egress:
-    - to:
-        - namespaceSelector: {}
-      ports:
-        - protocol: TCP
-          port: 443
-        - protocol: TCP
-          port: 53
-        - protocol: UDP
-          port: 53
-
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
 ---
-# Pod Disruption Budgets
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -507,7 +500,6 @@ spec:
   selector:
     matchLabels:
       app: pos-gateway
-
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -519,7 +511,6 @@ spec:
   selector:
     matchLabels:
       app: bank-adapter
-
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

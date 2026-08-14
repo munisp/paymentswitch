@@ -20,7 +20,7 @@ data:
             connectAddr: "postgresql:5432"
             connectProtocol: "tcp"
             user: "temporal"
-            password: "PLACEHOLDER_INJECT_FROM_VAULT"
+            password: "{{ .Env.TEMPORAL_POSTGRES_PASSWORD }}"
             maxConns: 20
             maxIdleConns: 20
             maxConnLifetime: "1h"
@@ -31,7 +31,7 @@ data:
             connectAddr: "postgresql:5432"
             connectProtocol: "tcp"
             user: "temporal"
-            password: "PLACEHOLDER_INJECT_FROM_VAULT"
+            password: "{{ .Env.TEMPORAL_POSTGRES_PASSWORD }}"
             maxConns: 10
             maxIdleConns: 10
             maxConnLifetime: "1h"
@@ -61,6 +61,24 @@ data:
           grpcPort: 7239
           membershipPort: 6939
           bindOnLocalHost: false
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: temporal-server-secrets
+  namespace: payment-switch
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: temporal-server-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: TEMPORAL_POSTGRES_PASSWORD
+      remoteRef: { key: payment-switch/temporal, property: postgres_password }
+
 ---
 apiVersion: v1
 kind: Service
@@ -102,6 +120,9 @@ spec:
           name: grpc
         - containerPort: 6933
           name: membership
+        envFrom:
+        - secretRef:
+            name: temporal-server-secrets
         env:
         - name: TEMPORAL_CONFIG
           value: "/etc/temporal/config.yaml"
@@ -146,6 +167,9 @@ spec:
           name: grpc
         - containerPort: 6934
           name: membership
+        envFrom:
+        - secretRef:
+            name: temporal-server-secrets
         env:
         - name: TEMPORAL_CONFIG
           value: "/etc/temporal/config.yaml"
@@ -190,6 +214,9 @@ spec:
           name: grpc
         - containerPort: 6935
           name: membership
+        envFrom:
+        - secretRef:
+            name: temporal-server-secrets
         env:
         - name: TEMPORAL_CONFIG
           value: "/etc/temporal/config.yaml"
@@ -234,6 +261,9 @@ spec:
           name: grpc
         - containerPort: 6939
           name: membership
+        envFrom:
+        - secretRef:
+            name: temporal-server-secrets
         env:
         - name: TEMPORAL_CONFIG
           value: "/etc/temporal/config.yaml"

@@ -22,11 +22,8 @@ data:
         "session_idle_timeout": 0,
         "session_cookie": false,
         "admin": {
-          "email": "admin@opencti.io",
-          "password": "ChangeMe",
-          "token": "ChangeMe"
-        },
-        "health_access_key": "ChangeMe"
+          "email": "admin@opencti.io"
+        }
       },
       "rule_engine": {
         "enabled": true,

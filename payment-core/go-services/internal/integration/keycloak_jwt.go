@@ -574,11 +574,11 @@ func GetClaimsFromContext(ctx context.Context) *JWTClaims {
 	return claims
 }
 
-// APISIXJWTPluginConfig generates APISIX JWT plugin configuration
+// APISIXJWTPluginConfig generates a bearer-only RS256 configuration fragment.
+// It deliberately omits query/cookie token paths and symmetric placeholder secrets.
 func APISIXJWTPluginConfig(config *KeycloakConfig) map[string]interface{} {
 	return map[string]interface{}{
 		"key":       config.ClientID,
-		"secret":    "PLACEHOLDER_FROM_VAULT",
 		"algorithm": "RS256",
 		"public_key": fmt.Sprintf("%s/realms/%s/protocol/openid-connect/certs",
 			config.BaseURL, config.Realm),
@@ -587,29 +587,31 @@ func APISIXJWTPluginConfig(config *KeycloakConfig) map[string]interface{} {
 			"nbf": true,
 		},
 		"header": "Authorization",
-		"query":  "token",
-		"cookie": "jwt",
 	}
 }
 
-// APISIXKeycloakAuthzConfig generates APISIX Keycloak authz plugin configuration
-func APISIXKeycloakAuthzConfig(config *KeycloakConfig) map[string]interface{} {
+// APISIXKeycloakAuthzConfig generates a Keycloak authorization configuration
+// fragment only when the caller supplies a real secret from its secret manager.
+func APISIXKeycloakAuthzConfig(config *KeycloakConfig, clientSecret string) (map[string]interface{}, error) {
+	if strings.TrimSpace(clientSecret) == "" {
+		return nil, fmt.Errorf("APISIX Keycloak client secret is required")
+	}
 	return map[string]interface{}{
 		"discovery": fmt.Sprintf("%s/realms/%s/.well-known/openid-configuration",
 			config.BaseURL, config.Realm),
 		"client_id":                          config.ClientID,
-		"client_secret":                      "PLACEHOLDER_FROM_VAULT",
+		"client_secret":                      clientSecret,
 		"bearer_only":                        true,
 		"realm":                              config.Realm,
 		"introspection_endpoint_auth_method": "client_secret_post",
 		"token_endpoint_auth_method":         "client_secret_post",
-		"ssl_verify":                         false,
+		"ssl_verify":                         true,
 		"timeout":                            10000,
 		"cache_ttl_seconds":                  300,
 		"keepalive":                          true,
 		"keepalive_timeout":                  60000,
 		"keepalive_pool":                     5,
-	}
+	}, nil
 }
 
 // KeycloakJWTSchema returns PostgreSQL schema for JWT audit

@@ -1,3 +1,4 @@
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,44 +18,44 @@ spec:
         app: payment-retry-consumer
     spec:
       containers:
-        - name: payment-retry-consumer
-          image: payment-switch/payment-retry-consumer:latest
-          env:
-            - name: KAFKA_BOOTSTRAP_SERVERS
-              value: "kafka.payment-switch.svc.cluster.local:9092"
-            - name: KAFKA_CONSUMER_GROUP
-              value: "payment-retry-consumer-group"
-            - name: KAFKA_TOPIC
-              value: "payment.retry"
-            - name: REDIS_HOST
-              value: "redis.payment-switch.svc.cluster.local"
-            - name: PAYMENT_GATEWAY_URL
-              value: "http://payment-gateway.payment-switch.svc.cluster.local:8000"
-            - name: MAX_RETRY_ATTEMPTS
-              value: "5"
-            - name: RETRY_BACKOFF_BASE_MS
-              value: "1000"
-            - name: RETRY_BACKOFF_MAX_MS
-              value: "60000"
-          resources:
-            requests:
-              memory: "128Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
-              cpu: "500m"
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 5
+      - name: payment-retry-consumer
+        image: payment-switch/payment-retry-consumer:latest
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: kafka.payment-switch.svc.cluster.local:9092
+        - name: KAFKA_CONSUMER_GROUP
+          value: payment-retry-consumer-group
+        - name: KAFKA_TOPIC
+          value: payment.retry
+        - name: REDIS_HOST
+          value: redis.payment-switch.svc.cluster.local
+        - name: PAYMENT_GATEWAY_URL
+          value: http://payment-gateway.payment-switch.svc.cluster.local:8000
+        - name: MAX_RETRY_ATTEMPTS
+          value: '5'
+        - name: RETRY_BACKOFF_BASE_MS
+          value: '1000'
+        - name: RETRY_BACKOFF_MAX_MS
+          value: '60000'
+        resources:
+          requests:
+            memory: 128Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 500m
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -75,40 +76,40 @@ spec:
         app: pos-transactions-consumer
     spec:
       containers:
-        - name: pos-transactions-consumer
-          image: payment-switch/pos-transactions-consumer:latest
-          env:
-            - name: KAFKA_BOOTSTRAP_SERVERS
-              value: "kafka.payment-switch.svc.cluster.local:9092"
-            - name: KAFKA_CONSUMER_GROUP
-              value: "pos-transactions-consumer-group"
-            - name: KAFKA_TOPIC
-              value: "pos-transactions"
-            - name: REDIS_HOST
-              value: "redis.payment-switch.svc.cluster.local"
-            - name: TIGERBEETLE_HOST
-              value: "tigerbeetle.payment-switch.svc.cluster.local:3000"
-            - name: LEDGER_SERVICE_URL
-              value: "http://ledger-service.payment-switch.svc.cluster.local:8000"
-          resources:
-            requests:
-              memory: "128Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
-              cpu: "500m"
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 5
+      - name: pos-transactions-consumer
+        image: payment-switch/pos-transactions-consumer:latest
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: kafka.payment-switch.svc.cluster.local:9092
+        - name: KAFKA_CONSUMER_GROUP
+          value: pos-transactions-consumer-group
+        - name: KAFKA_TOPIC
+          value: pos-transactions
+        - name: REDIS_HOST
+          value: redis.payment-switch.svc.cluster.local
+        - name: TIGERBEETLE_HOST
+          value: tigerbeetle.payment-switch.svc.cluster.local:3000
+        - name: LEDGER_SERVICE_URL
+          value: http://ledger-service.payment-switch.svc.cluster.local:8000
+        resources:
+          requests:
+            memory: 128Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 500m
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -129,55 +130,66 @@ spec:
         app: tigerbeetle-balances-consumer
     spec:
       containers:
-        - name: tigerbeetle-balances-consumer
-          image: payment-switch/tigerbeetle-balances-consumer:latest
-          env:
-            - name: KAFKA_BOOTSTRAP_SERVERS
-              value: "kafka.payment-switch.svc.cluster.local:9092"
-            - name: KAFKA_CONSUMER_GROUP
-              value: "tigerbeetle-balances-consumer-group"
-            - name: KAFKA_TOPIC
-              value: "tigerbeetle.balances"
-            - name: REDIS_HOST
-              value: "redis.payment-switch.svc.cluster.local"
-            - name: POSTGRES_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: tigerbeetle-balances-consumer-secrets
-                  key: POSTGRES_HOST
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: tigerbeetle-balances-consumer-secrets
-                  key: POSTGRES_PASSWORD
-          resources:
-            requests:
-              memory: "128Mi"
-              cpu: "100m"
-            limits:
-              memory: "512Mi"
-              cpu: "500m"
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 5
+      - name: tigerbeetle-balances-consumer
+        image: payment-switch/tigerbeetle-balances-consumer:latest
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: kafka.payment-switch.svc.cluster.local:9092
+        - name: KAFKA_CONSUMER_GROUP
+          value: tigerbeetle-balances-consumer-group
+        - name: KAFKA_TOPIC
+          value: tigerbeetle.balances
+        - name: REDIS_HOST
+          value: redis.payment-switch.svc.cluster.local
+        - name: POSTGRES_HOST
+          valueFrom:
+            secretKeyRef:
+              name: tigerbeetle-balances-consumer-secrets
+              key: POSTGRES_HOST
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: tigerbeetle-balances-consumer-secrets
+              key: POSTGRES_PASSWORD
+        resources:
+          requests:
+            memory: 128Mi
+            cpu: 100m
+          limits:
+            memory: 512Mi
+            cpu: 500m
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
 ---
-apiVersion: v1
-kind: Secret
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
   name: tigerbeetle-balances-consumer-secrets
   namespace: payment-switch
-  labels:
-    external-secrets.io/managed: "true"
-type: Opaque
-stringData:
-  POSTGRES_HOST: "PLACEHOLDER_INJECT_FROM_VAULT"
-  POSTGRES_PASSWORD: "PLACEHOLDER_INJECT_FROM_VAULT"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: tigerbeetle-balances-consumer-secrets
+    creationPolicy: Owner
+  data:
+  - secretKey: POSTGRES_HOST
+    remoteRef:
+      key: payment-switch/tigerbeetle-balances-consumer
+      property: host
+  - secretKey: POSTGRES_PASSWORD
+    remoteRef:
+      key: payment-switch/tigerbeetle-balances-consumer
+      property: password

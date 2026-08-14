@@ -1,20 +1,32 @@
 ---
 # Enhanced OpenCTI Deployment with Wazuh Integration
 
-apiVersion: v1
-kind: Secret
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
 metadata:
   name: opencti-wazuh-credentials
   namespace: security
   labels:
     app: opencti
-type: Opaque
-stringData:
-  OPENCTI_URL: "http://opencti-platform.security.svc.cluster.local:8080"
-  OPENCTI_TOKEN: "ChangeMe"
-  OPENCTI_ADMIN_EMAIL: "admin@opencti.io"
-  OPENCTI_ADMIN_PASSWORD: "ChangeMe"
-  OPENCTI_ADMIN_TOKEN: "ChangeMe"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: opencti-wazuh-credentials
+    creationPolicy: Owner
+  data:
+    - secretKey: OPENCTI_URL
+      remoteRef: { key: payment-switch/security/opencti, property: api_url }
+    - secretKey: OPENCTI_TOKEN
+      remoteRef: { key: payment-switch/security/opencti, property: api_token }
+    - secretKey: OPENCTI_ADMIN_EMAIL
+      remoteRef: { key: payment-switch/security/opencti, property: admin_email }
+    - secretKey: OPENCTI_ADMIN_PASSWORD
+      remoteRef: { key: payment-switch/security/opencti, property: admin_password }
+    - secretKey: OPENCTI_ADMIN_TOKEN
+      remoteRef: { key: payment-switch/security/opencti, property: admin_token }
 
 ---
 # ConfigMap for enhanced Wazuh integration script

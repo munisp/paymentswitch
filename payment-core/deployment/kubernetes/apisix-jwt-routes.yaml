@@ -18,12 +18,6 @@ spec:
         - serviceName: mojaloop-service
           servicePort: 8080
       plugins:
-        - name: jwt-auth
-          enable: true
-          config:
-            header: Authorization
-            query: token
-            cookie: jwt
         - name: authz-keycloak
           enable: true
           config:
@@ -34,7 +28,7 @@ spec:
               key: client-secret
             bearer_only: true
             realm: payment-switch
-            ssl_verify: false
+            ssl_verify: true
             cache_ttl_seconds: 300
         - name: request-id
           enable: true
@@ -64,10 +58,6 @@ spec:
         - serviceName: mojaloop-service
           servicePort: 8080
       plugins:
-        - name: jwt-auth
-          enable: true
-          config:
-            header: Authorization
         - name: authz-keycloak
           enable: true
           config:
@@ -78,7 +68,7 @@ spec:
               key: client-secret
             bearer_only: true
             realm: payment-switch
-            ssl_verify: false
+            ssl_verify: true
         - name: request-id
           enable: true
         - name: prometheus
@@ -101,10 +91,6 @@ spec:
         - serviceName: mojaloop-service
           servicePort: 8080
       plugins:
-        - name: jwt-auth
-          enable: true
-          config:
-            header: Authorization
         - name: authz-keycloak
           enable: true
           config:
@@ -115,7 +101,7 @@ spec:
               key: client-secret
             bearer_only: true
             realm: payment-switch
-            ssl_verify: false
+            ssl_verify: true
         - name: request-id
           enable: true
         - name: prometheus
@@ -138,10 +124,6 @@ spec:
         - serviceName: noc-operations-service
           servicePort: 8080
       plugins:
-        - name: jwt-auth
-          enable: true
-          config:
-            header: Authorization
         - name: authz-keycloak
           enable: true
           config:
@@ -152,7 +134,7 @@ spec:
               key: client-secret
             bearer_only: true
             realm: payment-switch
-            ssl_verify: false
+            ssl_verify: true
         - name: request-id
           enable: true
         - name: prometheus
@@ -183,10 +165,6 @@ spec:
         - serviceName: audit-service
           servicePort: 8080
       plugins:
-        - name: jwt-auth
-          enable: true
-          config:
-            header: Authorization
         - name: authz-keycloak
           enable: true
           config:
@@ -197,7 +175,7 @@ spec:
               key: client-secret
             bearer_only: true
             realm: payment-switch
-            ssl_verify: false
+            ssl_verify: true
         - name: request-id
           enable: true
         - name: prometheus
@@ -220,10 +198,6 @@ spec:
         - serviceName: regulatory-reporting-service
           servicePort: 8080
       plugins:
-        - name: jwt-auth
-          enable: true
-          config:
-            header: Authorization
         - name: authz-keycloak
           enable: true
           config:
@@ -234,7 +208,7 @@ spec:
               key: client-secret
             bearer_only: true
             realm: payment-switch
-            ssl_verify: false
+            ssl_verify: true
         - name: request-id
           enable: true
         - name: prometheus
@@ -257,10 +231,6 @@ spec:
         - serviceName: fraud-engine-service
           servicePort: 8080
       plugins:
-        - name: jwt-auth
-          enable: true
-          config:
-            header: Authorization
         - name: authz-keycloak
           enable: true
           config:
@@ -271,7 +241,7 @@ spec:
               key: client-secret
             bearer_only: true
             realm: payment-switch
-            ssl_verify: false
+            ssl_verify: true
         - name: request-id
           enable: true
         - name: prometheus
@@ -299,23 +269,6 @@ spec:
       plugins:
         - name: request-id
           enable: true
----
-# Keycloak consumer for JWT validation
-apiVersion: apisix.apache.org/v2
-kind: ApisixConsumer
-metadata:
-  name: keycloak-consumer
-  namespace: payment-switch
-spec:
-  authParameter:
-    jwtAuth:
-      value:
-        key: payment-api
-        algorithm: RS256
-        public_key: |
-          -----BEGIN PUBLIC KEY-----
-          PLACEHOLDER_INJECT_FROM_KEYCLOAK_JWKS
-          -----END PUBLIC KEY-----
 ---
 # Global plugin configuration for Keycloak
 apiVersion: apisix.apache.org/v2
@@ -422,7 +375,7 @@ data:
           "consentRequired": false,
           "standardFlowEnabled": true,
           "implicitFlowEnabled": false,
-          "directAccessGrantsEnabled": true,
+          "directAccessGrantsEnabled": false,
           "serviceAccountsEnabled": true,
           "publicClient": false,
           "protocol": "openid-connect",

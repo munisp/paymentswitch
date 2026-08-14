@@ -13,10 +13,13 @@ from pycti import OpenCTIApiClient
 
 # Configuration
 OPENCTI_URL = os.getenv('OPENCTI_URL', 'http://opencti-platform.security.svc.cluster.local:8080')
-OPENCTI_TOKEN = os.getenv('OPENCTI_TOKEN', 'ChangeMe')
+OPENCTI_TOKEN = os.getenv('OPENCTI_TOKEN', '').strip()
 WAZUH_MANAGER_URL = os.getenv('WAZUH_MANAGER_URL', 'http://wazuh-manager.security.svc.cluster.local:55000')
 
-# Initialize OpenCTI client
+if not OPENCTI_TOKEN:
+    raise RuntimeError('OPENCTI_TOKEN must be injected by the managed secret store')
+
+# Initialize OpenCTI client only after the managed token is present.
 opencti_api_client = OpenCTIApiClient(OPENCTI_URL, OPENCTI_TOKEN)
 
 def parse_wazuh_alert(alert_json):

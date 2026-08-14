@@ -25,9 +25,12 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 OPENCTI_URL = os.getenv('OPENCTI_URL', 'http://opencti-platform.security.svc.cluster.local:8080')
-OPENCTI_TOKEN = os.getenv('OPENCTI_TOKEN', 'ChangeMe')
+OPENCTI_TOKEN = os.getenv('OPENCTI_TOKEN', '').strip()
+if not OPENCTI_TOKEN:
+    logger.error('OPENCTI_TOKEN must be injected by the managed secret store')
+    sys.exit(1)
 
-# Initialize OpenCTI client
+# Initialize OpenCTI client only after the managed token is present.
 try:
     opencti_api_client = OpenCTIApiClient(OPENCTI_URL, OPENCTI_TOKEN)
     logger.info("OpenCTI API client initialized successfully")
