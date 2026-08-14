@@ -419,6 +419,15 @@ const (
 	cbStateHalfOpen int32 = 2
 )
 
+var (
+	// ErrCircuitBreakerOpen is returned without allocating when a dependency is
+	// in its configured cooldown interval.
+	ErrCircuitBreakerOpen = errors.New("circuit breaker is open")
+	// ErrCircuitBreakerHalfOpenProbeLimit is returned without allocating when
+	// the bounded recovery probe budget is already in flight.
+	ErrCircuitBreakerHalfOpenProbeLimit = errors.New("circuit breaker half-open probe limit reached")
+)
+
 // CircuitBreakerConfig configures the circuit breaker
 type CircuitBreakerConfig struct {
 	Name         string
@@ -457,7 +466,7 @@ func (cb *CircuitBreaker) Execute(fn func() error) error {
 		lastFail := atomic.LoadInt64(&cb.lastFailure)
 		if time.Now().UnixNano()-lastFail < cb.resetTimeout.Nanoseconds() {
 			atomic.AddUint64(&cb.totalRejects, 1)
-			return errors.New("circuit breaker is open")
+			return ErrCircuitBreakerOpen
 		}
 		// Only one concurrent caller may reset recovery counters and move the
 		// breaker into half-open state. Other callers observe that state below.
@@ -474,7 +483,7 @@ func (cb *CircuitBreaker) Execute(fn func() error) error {
 		if atomic.AddInt32(&cb.halfOpenInFlight, 1) > int32(cb.halfOpenMax) {
 			atomic.AddInt32(&cb.halfOpenInFlight, -1)
 			atomic.AddUint64(&cb.totalRejects, 1)
-			return errors.New("circuit breaker half-open probe limit reached")
+			return ErrCircuitBreakerHalfOpenProbeLimit
 		}
 		defer atomic.AddInt32(&cb.halfOpenInFlight, -1)
 	}
