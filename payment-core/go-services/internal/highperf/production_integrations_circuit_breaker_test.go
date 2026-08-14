@@ -78,3 +78,47 @@ func TestTigerBeetleCircuitBreakerRecoversOnlyAfterHalfOpenSuccesses(t *testing.
 	}
 	t.Logf("TigerBeetle circuit transition half-open->closed after %s following the second successful probe", time.Since(outageStarted))
 }
+
+func TestTigerBeetleCircuitBreakerCapsConcurrentHalfOpenProbes(t *testing.T) {
+	breaker := NewCircuitBreaker(CircuitBreakerConfig{
+		Name:         "tigerbeetle",
+		MaxFailures:  1,
+		ResetTimeout: time.Millisecond,
+		HalfOpenMax:  1,
+	})
+	if err := breaker.Execute(func() error { return errors.New("tigerbeetle offline") }); err == nil {
+		t.Fatal("expected outage to open the circuit")
+	}
+	time.Sleep(5 * time.Millisecond)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- breaker.Execute(func() error {
+			close(started)
+			<-release
+			return nil
+		})
+	}()
+	<-started
+
+	secondCalled := false
+	err := breaker.Execute(func() error {
+		secondCalled = true
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "half-open probe limit") {
+		t.Fatalf("concurrent half-open probe returned %v, want explicit probe-limit rejection", err)
+	}
+	if secondCalled {
+		t.Fatal("probe-limit rejection executed an additional TigerBeetle callback")
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("admitted half-open probe failed: %v", err)
+	}
+	if state := breaker.State(); state != "closed" {
+		t.Fatalf("breaker state = %q after admitted recovery probe, want closed", state)
+	}
+}

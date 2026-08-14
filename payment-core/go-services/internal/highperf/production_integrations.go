@@ -400,11 +400,12 @@ type CircuitBreaker struct {
 	resetTimeout time.Duration
 	halfOpenMax  int
 
-	failures      int32
-	state         int32 // 0=closed, 1=open, 2=half-open
-	lastFailure   int64
-	halfOpenCount int32
-	mu            sync.Mutex
+	failures         int32
+	state            int32 // 0=closed, 1=open, 2=half-open
+	lastFailure      int64
+	halfOpenCount    int32
+	halfOpenInFlight int32
+	mu               sync.Mutex
 
 	// Stats
 	totalCalls    uint64
@@ -450,18 +451,32 @@ func NewCircuitBreaker(config CircuitBreakerConfig) *CircuitBreaker {
 func (cb *CircuitBreaker) Execute(fn func() error) error {
 	atomic.AddUint64(&cb.totalCalls, 1)
 
-	// Check if circuit is open
+	// Open circuits reject immediately until the recovery interval elapses.
 	state := atomic.LoadInt32(&cb.state)
 	if state == cbStateOpen {
-		// Check if reset timeout has passed
 		lastFail := atomic.LoadInt64(&cb.lastFailure)
 		if time.Now().UnixNano()-lastFail < cb.resetTimeout.Nanoseconds() {
 			atomic.AddUint64(&cb.totalRejects, 1)
 			return errors.New("circuit breaker is open")
 		}
-		// Transition to half-open
-		atomic.StoreInt32(&cb.state, cbStateHalfOpen)
-		atomic.StoreInt32(&cb.halfOpenCount, 0)
+		// Only one concurrent caller may reset recovery counters and move the
+		// breaker into half-open state. Other callers observe that state below.
+		if atomic.CompareAndSwapInt32(&cb.state, cbStateOpen, cbStateHalfOpen) {
+			atomic.StoreInt32(&cb.halfOpenCount, 0)
+			atomic.StoreInt32(&cb.halfOpenInFlight, 0)
+		}
+		state = atomic.LoadInt32(&cb.state)
+	}
+
+	// During partial recovery, cap concurrent dependency probes. This prevents a
+	// high-throughput caller from stampeding an unstable TigerBeetle connection.
+	if state == cbStateHalfOpen {
+		if atomic.AddInt32(&cb.halfOpenInFlight, 1) > int32(cb.halfOpenMax) {
+			atomic.AddInt32(&cb.halfOpenInFlight, -1)
+			atomic.AddUint64(&cb.totalRejects, 1)
+			return errors.New("circuit breaker half-open probe limit reached")
+		}
+		defer atomic.AddInt32(&cb.halfOpenInFlight, -1)
 	}
 
 	// Execute function
