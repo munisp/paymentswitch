@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import sys
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 OVERLAY = ROOT / "deploy/k8s/staging"
-WORKFLOW = ROOT / ".github/workflows/deploy-staging.yml"
+WORKFLOW = ROOT / os.environ.get("STAGING_WORKFLOW_PATH", ".github/workflows/deploy-staging.yml")
 
 
 def docs(path: Path):
