@@ -5,10 +5,10 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | Metric | Count |
 | --- | ---: |
 | Tables declared across canonical schemas | 108 |
-| Additional tables created by embedded service migrations | 231 |
-| Distinct raw-SQL table references | 305 |
-| References resolved to a declared table | 169 |
-| References missing from declared schemas | 136 |
+| Additional tables created by embedded service migrations | 230 |
+| Distinct raw-SQL table references | 313 |
+| References resolved to a declared table | 176 |
+| References missing from declared schemas | 137 |
 
 ## Missing Table References
 
@@ -44,7 +44,6 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `docker` | 1 | `payment-core/test-scripts/categorize_and_integrate.py:169` |
 | `domain_events_stream` | 1 | `payment-core/data-integration/flink-jobs/src/main/java/com/paymentswitch/flink/DeltaLakeStreamingJob.java:158` |
 | `endpoint` | 2 | `payment-core/go-services/internal/mojaloop/participant_lifecycle.go:368`; `payment-core/go-services/internal/mojaloop/participant_lifecycle.go:392` |
-| `error` | 1 | `server/services/mobileMoneyService.ts:435` |
 | `execution` | 1 | `payment-core/go-services/pkg/remittance/recurring.go:452` |
 | `expired` | 1 | `payment-core/go-services/internal/mojaloop/outbox_publisher.go:463` |
 | `failed` | 6 | `payment-core/go-services/internal/mojaloop/mojaloop_tigerbeetle_adapter.go:297`; `payment-core/go-services/internal/mojaloop/mojaloop_tigerbeetle_adapter.go:375`; `payment-core/go-services/internal/national/disaster_recovery.go:585`; `payment-core/integrations/opencti/opencti_integration.go:535`; `payment-core/integrations/opencti/opencti_integration.go:570`; `payment-core/services/biometric-auth/main.go:1054` |
@@ -53,7 +52,7 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `features` | 1 | `payment-core/ml-platform/feature_store.py:160` |
 | `fee_schedules` | 1 | `middleware/redis/redis-enhanced.go:211` |
 | `field` | 1 | `payment-core/go-services/internal/mojaloop/upgrade_compatibility.go:453` |
-| `flex` | 1 | `client/src/components/AppShell.tsx:249` |
+| `flex` | 1 | `client/src/components/AppShell.tsx:244` |
 | `fraud` | 1 | `payment-core/data-integration/lakehouse-feedback/lakehouse_tigerbeetle_feedback.py:141` |
 | `ilp_protocol` | 1 | `payment-core/services/workflow-orchestrator/payment_workflow.py:244` |
 | `incident` | 1 | `payment-core/go-services/internal/national/noc_operations.go:445` |
@@ -95,6 +94,7 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `party_registry` | 4 | `payment-core/go-services/internal/database/postgres.go:337`; `payment-core/go-services/internal/database/postgres.go:370`; `payment-core/services/common/database.py:295`; `payment-core/services/common/database.py:323` |
 | `pattern` | 1 | `client/src/pages/admin/CorrectionPatternsAdmin.tsx:106` |
 | `payment_retry_attempts` | 1 | `orchestrator/services/go/retry/main.go:290` |
+| `payments` | 2 | `payment-core/services/database/postgres/adapter.py:101`; `payment-core/services/database/postgres/adapter.py:110` |
 | `pdfs` | 1 | `payment-core/go-services/internal/security/pii_encryption.go:586` |
 | `pending` | 1 | `payment-core/go-services/pkg/ledger/ledger.go:319` |
 | `permissions` | 1 | `client/src/components/ApiKeyPermissions.tsx:50` |
@@ -150,18 +150,20 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `webhook` | 1 | `server/api/routers/apiKeyEnhancements.ts:315` |
 | `window` | 5 | `payment-core/go-services/internal/mojaloop/settlement_windows.go:313`; `payment-core/go-services/internal/mojaloop/settlement_windows.go:320`; `payment-core/go-services/internal/mojaloop/settlement_windows.go:569`; `payment-core/go-services/internal/mojaloop/settlement_windows.go:577`; `payment-core/services/settlement/persistence.py:107` |
 | `with` | 1 | `payment-core/go-services/internal/mojaloop/postgres_migration.go:288` |
+| `workflows` | 3 | `payment-core/services/database/postgres/adapter.py:91`; `payment-core/services/database/postgres/adapter.py:97`; `payment-core/services/database/postgres/adapter.py:111` |
 
 ## Resolved Raw-SQL References
 
 | Table | Reference Count |
 | --- | ---: |
-| `accounts` | 1 |
+| `accounts` | 6 |
 | `admin_notifications` | 6 |
 | `aml_screening_results` | 1 |
 | `amounttype` | 1 |
 | `analytics_anomalies` | 1 |
 | `analytics_reports` | 3 |
-| `api_credentials` | 2 |
+| `api_credentials` | 3 |
+| `api_key_webhooks` | 1 |
 | `approval_decisions` | 3 |
 | `approval_requests` | 7 |
 | `approval_rules` | 2 |
@@ -177,6 +179,8 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `card_transactions` | 2 |
 | `cases` | 4 |
 | `collection_codes` | 2 |
+| `compliance_reports` | 1 |
+| `compliance_screenings` | 3 |
 | `corporate_applications` | 8 |
 | `corporate_documents` | 3 |
 | `currency` | 1 |
@@ -224,6 +228,7 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `kyc_audit_events` | 4 |
 | `kyc_cases` | 1 |
 | `kyc_daily_usage` | 2 |
+| `ledger_transfers` | 1 |
 | `ledgeraccounttype` | 1 |
 | `ledgerentrytype` | 1 |
 | `liquidity_reservations` | 5 |
@@ -245,6 +250,7 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `onboarding_provisioning` | 1 |
 | `onboarding_requirements` | 3 |
 | `onboarding_technical_profiles` | 2 |
+| `outbound_transfers` | 5 |
 | `outbox_events` | 4 |
 | `p2p_money_requests` | 1 |
 | `p2p_transactions` | 12 |
@@ -266,6 +272,7 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `pos_terminals` | 5 |
 | `pos_transactions` | 6 |
 | `position_history` | 2 |
+| `prefund_accounts` | 1 |
 | `pricing_corridor_configs` | 2 |
 | `qr_codes` | 7 |
 | `qr_payments` | 1 |
@@ -313,6 +320,7 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `subscriptions` | 5 |
 | `suspicious_activity_alerts` | 1 |
 | `suspicious_activity_reports` | 3 |
+| `switch_participants` | 4 |
 | `technical_configurations` | 1 |
 | `tigerbeetle_accounts` | 3 |
 | `tigerbeetle_transfers` | 2 |
