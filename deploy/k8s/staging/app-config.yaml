@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  keycloak-url: "http://keycloak.payment-switch.svc.cluster.local:8080"
+  keycloak-public-url: "https://keycloak.staging.payment-switch.example"
+  keycloak-realm: "payment-switch"
+  keycloak-client-id: "payment-switch-api"
+  keycloak-audience: "payment-switch-api"
+  apisix-admin-url: "http://apisix-admin.payment-switch.svc.cluster.local:9180"
+  apisix-public-url: "https://api.staging.payment-switch.example"
+  temporal-address: "temporal-frontend.temporal.svc.cluster.local:7233"
+  permify-url: "http://permify.payment-switch.svc.cluster.local:3478"
+  app-id: "payment-switch-staging"

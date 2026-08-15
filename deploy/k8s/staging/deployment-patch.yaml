@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-portal
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: web-portal
+    spec:
+      serviceAccountName: payment-switch
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web-portal
+          image: ghcr.io/munisp/paymentswitch:__IMAGE_TAG__
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: APP_ENV
+              value: staging
+            - name: KEYCLOAK_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: keycloak-public-url
+            - name: KEYCLOAK_AUDIENCE
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: keycloak-audience
+            - name: APISIX_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: apisix-public-url
+            - name: TEMPORAL_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: temporal-address
+            - name: TIGERBEETLE_REPLICA_ADDRESSES
+              valueFrom:
+                secretKeyRef:
+                  name: tigerbeetle-secrets
+                  key: TIGERBEETLE_REPLICA_ADDRESSES
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: app-cache
+              mountPath: /app/.cache
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: app-cache
+          emptyDir: {}

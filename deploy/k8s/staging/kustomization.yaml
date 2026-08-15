@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: payment-switch
+
+resources:
+  - ../../../kubernetes/base/web-portal-deployment.yaml
+  - deployment-patch.yaml
+  - app-config.yaml
+  - external-secrets.yaml
+  - migration-job.yaml
+  - network-policy.yaml
+  - service-account.yaml
+
+images:
+  - name: ghcr.io/your-org/payment-switch/web-portal
+    newName: ghcr.io/munisp/paymentswitch
+    newTag: __IMAGE_TAG__
+
+commonLabels:
+  app.kubernetes.io/part-of: payment-switch
+  app.kubernetes.io/managed-by: github-actions
+  app.kubernetes.io/environment: staging
