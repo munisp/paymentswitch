@@ -1,0 +1,145 @@
+name: Deploy Payment Switch to Kubernetes Staging
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/k8s/staging/**'
+      - 'payment-core/**'
+      - 'server/**'
+      - 'client/**'
+      - 'drizzle/**'
+      - '.github/workflows/deploy-staging.yml'
+      - 'Dockerfile'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Immutable image tag; defaults to the triggering commit SHA'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: payment-switch-staging
+  cancel-in-progress: false
+
+env:
+  NAMESPACE: payment-switch
+  IMAGE: ghcr.io/munisp/paymentswitch
+
+jobs:
+  validate:
+    name: Validate staging manifests and release inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout merged main
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.30.4
+
+      - name: Install manifest validation dependency
+        run: python -m pip install --disable-pip-version-check pyyaml==6.0.2
+
+      - name: Validate YAML and render Kustomize overlay
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag || github.sha }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          for path in Path('deploy/k8s/staging').glob('*.yaml'):
+              list(yaml.safe_load_all(path.read_text()))
+              print(f'valid YAML: {path}')
+          PY
+          kubectl kustomize deploy/k8s/staging | sed "s/__IMAGE_TAG__/${IMAGE_TAG}/g" > /tmp/payment-switch-staging.yaml
+          test -s /tmp/payment-switch-staging.yaml
+          ! grep -nE '(: latest$|password:|secret:|token:|admin_key:)' /tmp/payment-switch-staging.yaml || (echo 'unsafe literal detected'; exit 1)
+          kubectl apply --dry-run=client -f /tmp/payment-switch-staging.yaml >/dev/null
+
+  deploy:
+    name: Deploy immutable release to Kubernetes staging
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://api.staging.payment-switch.example
+    env:
+      IMAGE_TAG: ${{ inputs.image_tag || github.sha }}
+      KUBECONFIG: ${{ runner.temp }}/staging-kubeconfig
+    steps:
+      - name: Checkout merged main
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.30.4
+
+      - name: Configure staging kubeconfig
+        run: |
+          test -n "${{ secrets.STAGING_KUBECONFIG_B64 }}"
+          printf '%s' "${{ secrets.STAGING_KUBECONFIG_B64 }}" | base64 --decode > "$KUBECONFIG"
+          chmod 600 "$KUBECONFIG"
+          kubectl cluster-info
+          kubectl auth can-i create deployments -n "$NAMESPACE"
+          kubectl auth can-i create jobs -n "$NAMESPACE"
+
+      - name: Ensure namespace exists
+        run: |
+          kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl label namespace "$NAMESPACE" app.kubernetes.io/part-of=payment-switch --overwrite
+
+      - name: Verify External Secrets prerequisites
+        run: |
+          kubectl get clustersecretstore vault-backend
+          kubectl api-resources | grep -q '^externalsecrets.*external-secrets.io'
+
+      - name: Apply staging external secrets
+        run: |
+          kubectl apply -f deploy/k8s/staging/external-secrets.yaml -n "$NAMESPACE"
+          for name in postgres-secrets redis-secrets keycloak-secrets app-secrets tigerbeetle-secrets ghcr-credentials; do
+            kubectl wait --for=condition=Ready "externalsecret/$name" -n "$NAMESPACE" --timeout=180s
+          done
+
+      - name: Apply staging workload
+        run: |
+          kubectl kustomize deploy/k8s/staging \
+            | sed "s/__IMAGE_TAG__/${IMAGE_TAG}/g" \
+            | kubectl apply -f -
+
+      - name: Wait for migration and rollout
+        run: |
+          kubectl wait --for=condition=complete job/web-portal-migration -n "$NAMESPACE" --timeout=300s
+          kubectl rollout status deployment/web-portal -n "$NAMESPACE" --timeout=300s
+          kubectl get pods -n "$NAMESPACE" -l app=web-portal -o wide
+
+      - name: Run in-cluster smoke tests
+        run: |
+          kubectl run staging-smoke-${GITHUB_RUN_ID} -n "$NAMESPACE" \
+            --image=curlimages/curl:8.10.1 --restart=Never --rm -i --quiet \
+            --command -- curl --fail --silent --show-error --max-time 10 http://web-portal/health
+          kubectl run staging-gateway-smoke-${GITHUB_RUN_ID} -n "$NAMESPACE" \
+            --image=curlimages/curl:8.10.1 --restart=Never --rm -i --quiet \
+            --command -- curl --fail --silent --show-error --max-time 10 \
+            http://apisix.payment-switch.svc.cluster.local/health
+
+      - name: Roll back failed release
+        if: failure()
+        run: |
+          kubectl rollout undo deployment/web-portal -n "$NAMESPACE" || true
+          kubectl rollout status deployment/web-portal -n "$NAMESPACE" --timeout=180s || true
+          kubectl describe deployment/web-portal -n "$NAMESPACE" || true
+          kubectl logs job/web-portal-migration -n "$NAMESPACE" --all-containers=true --tail=200 || true
