@@ -159,55 +159,6 @@ export type Transaction = typeof transactions.$inferSelect;
 export type InsertTransaction = typeof transactions.$inferInsert;
 
 /**
- * Canonical settlement batches exposed to the operational portal. A batch never
- * becomes settled merely because it was created locally; external execution and
- * reconciliation outcomes are recorded as immutable settlement events.
- */
-export const settlementBatches = pgTable("settlement_batches", {
-  id: serial("id").primaryKey(),
-  settlementId: varchar("settlement_id", { length: 64 }).notNull().unique(),
-  participantId: integer("participant_id").references(() => switchParticipants.id),
-  bankCode: varchar("bank_code", { length: 32 }).notNull(),
-  bankName: varchar("bank_name", { length: 256 }).notNull(),
-  channel: varchar("channel", { length: 16 }).notNull(),
-  settlementWindow: varchar("settlement_window", { length: 8 }).notNull(),
-  status: varchar("status", { length: 32 }).default("pending").notNull(),
-  totalTransactions: integer("total_transactions").default(0).notNull(),
-  grossAmount: decimal("gross_amount", { precision: 20, scale: 2 }).default("0").notNull(),
-  fees: decimal("fees", { precision: 20, scale: 2 }).default("0").notNull(),
-  netAmount: decimal("net_amount", { precision: 20, scale: 2 }).default("0").notNull(),
-  settlementRef: varchar("settlement_ref", { length: 128 }).notNull().unique(),
-  windowOpenedAt: timestamp("window_opened_at").defaultNow().notNull(),
-  windowClosedAt: timestamp("window_closed_at"),
-  reconciledAt: timestamp("reconciled_at"),
-  reconciledBy: integer("reconciled_by").references(() => users.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
-  index("settlement_batches_status_window_idx").on(table.status, table.windowOpenedAt),
-  index("settlement_batches_participant_window_idx").on(table.participantId, table.windowOpenedAt),
-  index("settlement_batches_bank_window_idx").on(table.bankCode, table.windowOpenedAt),
-]);
-
-export type SettlementBatch = typeof settlementBatches.$inferSelect;
-export type InsertSettlementBatch = typeof settlementBatches.$inferInsert;
-
-/** Immutable lifecycle evidence for each settlement batch. */
-export const settlementEvents = pgTable("settlement_events", {
-  id: serial("id").primaryKey(),
-  settlementBatchId: integer("settlement_batch_id").notNull().references(() => settlementBatches.id),
-  eventType: varchar("event_type", { length: 64 }).notNull(),
-  eventPayload: jsonb("event_payload"),
-  actorUserId: integer("actor_user_id").references(() => users.id),
-  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
-}, (table) => [
-  index("settlement_events_batch_time_idx").on(table.settlementBatchId, table.occurredAt),
-]);
-
-export type SettlementEvent = typeof settlementEvents.$inferSelect;
-export type InsertSettlementEvent = typeof settlementEvents.$inferInsert;
-
-/**
  * Refunds issued for transactions
  */
 export const refunds = pgTable("refunds", {
@@ -457,62 +408,115 @@ export type ApiCredential = typeof apiCredentials.$inferSelect;
 export type InsertApiCredential = typeof apiCredentials.$inferInsert;
 
 /**
- * Durable key-value state for operational workflows. This replaces process-local
- * storage so gateway and orchestration results survive restarts.
+ * Integration test executions initiated during participant onboarding.
+ */
+export const integrationTests = pgTable("integration_tests", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull().references(() => participantApplications.id, { onDelete: "cascade" }),
+  testType: varchar("test_type", { length: 64 }).notNull(),
+  testName: varchar("test_name", { length: 255 }).notNull(),
+  status: testStatusEnum("status").default("pending").notNull(),
+  resultData: jsonb("result_data"),
+  executedAt: timestamp("executed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, table => [
+  index("idx_integration_tests_application_created").on(table.applicationId, table.createdAt),
+  index("idx_integration_tests_status").on(table.status),
+]);
+
+export type IntegrationTest = typeof integrationTests.$inferSelect;
+export type InsertIntegrationTest = typeof integrationTests.$inferInsert;
+
+/**
+ * SDK download audit trail for participant applications.
+ */
+export const sdkDownloads = pgTable("sdk_downloads", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull().references(() => participantApplications.id, { onDelete: "cascade" }),
+  sdkType: sdkTypeEnum("sdk_type").notNull(),
+  version: varchar("version", { length: 64 }).notNull(),
+  downloadedAt: timestamp("downloaded_at").defaultNow().notNull(),
+}, table => [
+  index("idx_sdk_downloads_application_downloaded").on(table.applicationId, table.downloadedAt),
+]);
+
+export type SdkDownload = typeof sdkDownloads.$inferSelect;
+export type InsertSdkDownload = typeof sdkDownloads.$inferInsert;
+
+/**
+ * In-application notifications addressed to portal users.
+ */
+export const adminNotifications = pgTable("admin_notifications", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: varchar("type", { length: 128 }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  message: text("message").notNull(),
+  link: varchar("link", { length: 512 }),
+  isRead: boolean("is_read").default(false).notNull(),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, table => [
+  index("idx_admin_notifications_user_unread_created").on(table.userId, table.isRead, table.createdAt),
+]);
+
+export type AdminNotification = typeof adminNotifications.$inferSelect;
+export type InsertAdminNotification = typeof adminNotifications.$inferInsert;
+
+/**
+ * Per-event delivery preferences, separate from account-security preferences.
+ */
+export const notificationTypePreferences = pgTable("notification_type_preferences", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  notificationType: varchar("notification_type", { length: 128 }).notNull(),
+  emailEnabled: boolean("email_enabled").default(true).notNull(),
+  inAppEnabled: boolean("in_app_enabled").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, table => [
+  uniqueIndex("uq_notification_type_preferences_user_type").on(table.userId, table.notificationType),
+]);
+
+export type NotificationTypePreference = typeof notificationTypePreferences.$inferSelect;
+export type InsertNotificationTypePreference = typeof notificationTypePreferences.$inferInsert;
+
+/**
+ * Historical rates persisted after successful provider responses.
+ */
+export const exchangeRateHistory = pgTable("exchange_rate_history", {
+  id: serial("id").primaryKey(),
+  fromCurrency: varchar("from_currency", { length: 10 }).notNull(),
+  toCurrency: varchar("to_currency", { length: 10 }).notNull(),
+  rate: decimal("rate", { precision: 28, scale: 12 }).notNull(),
+  provider: varchar("provider", { length: 64 }).notNull(),
+  observedAt: timestamp("observed_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, table => [
+  index("idx_exchange_rate_history_pair_observed").on(table.fromCurrency, table.toCurrency, table.observedAt),
+]);
+
+export type ExchangeRateHistory = typeof exchangeRateHistory.$inferSelect;
+export type InsertExchangeRateHistory = typeof exchangeRateHistory.$inferInsert;
+
+/**
+ * Durable namespaced JSON store used by services that do not warrant a dedicated table.
  */
 export const persistentStore = pgTable("persistent_store", {
   id: serial("id").primaryKey(),
   namespace: varchar("namespace", { length: 100 }).notNull(),
   key: varchar("key", { length: 500 }).notNull(),
   data: jsonb("data").notNull().default({}),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  expiresAt: timestamp("expires_at"),
-}, (table) => [
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+}, table => [
   uniqueIndex("uq_persistent_store_namespace_key").on(table.namespace, table.key),
   index("idx_persistent_store_namespace_expiry").on(table.namespace, table.expiresAt),
 ]);
 
 export type PersistentStoreRecord = typeof persistentStore.$inferSelect;
 export type InsertPersistentStoreRecord = typeof persistentStore.$inferInsert;
-
-/**
- * Real execution outcomes for onboarding integration checks. A failed or
- * unsupported test is retained as evidence and cannot be represented as passed.
- */
-export const integrationTests = pgTable("integration_tests", {
-  id: serial("id").primaryKey(),
-  applicationId: integer("application_id").notNull(),
-  testType: varchar("test_type", { length: 100 }).notNull(),
-  testName: varchar("test_name", { length: 255 }).notNull(),
-  status: testStatusEnum("status").default("pending").notNull(),
-  resultData: jsonb("result_data"),
-  startedAt: timestamp("started_at"),
-  executedAt: timestamp("executed_at"),
-  completedAt: timestamp("completed_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
-  index("idx_integration_tests_application_created").on(table.applicationId, table.createdAt),
-  index("idx_integration_tests_application_status").on(table.applicationId, table.status),
-]);
-
-export type IntegrationTest = typeof integrationTests.$inferSelect;
-export type InsertIntegrationTest = typeof integrationTests.$inferInsert;
-
-/** SDK artifact download audit trail for participant applications. */
-export const sdkDownloads = pgTable("sdk_downloads", {
-  id: serial("id").primaryKey(),
-  applicationId: integer("application_id").notNull(),
-  sdkType: sdkTypeEnum("sdk_type").notNull(),
-  version: varchar("version", { length: 64 }).notNull(),
-  downloadedAt: timestamp("downloaded_at").defaultNow().notNull(),
-}, (table) => [
-  index("idx_sdk_downloads_application_downloaded").on(table.applicationId, table.downloadedAt),
-]);
-
-export type SdkDownload = typeof sdkDownloads.$inferSelect;
-export type InsertSdkDownload = typeof sdkDownloads.$inferInsert;
 
 /**
  * Participant applications for onboarding

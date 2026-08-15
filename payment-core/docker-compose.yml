@@ -154,7 +154,7 @@ services:
       - DATABASE_URL=postgresql://payment_user:payment_pass_2024@postgres:5432/payment_switch
       - SERVICE_PORT=8003
       - LOG_LEVEL=INFO
-      - MOJALOOP_SETTLEMENT_URL=http://mojaloop-central-settlements:3007
+      - MOJALOOP_SETTLEMENT_URL=${MOJALOOP_SETTLEMENT_URL:?MOJALOOP_SETTLEMENT_URL must point to a reachable settlement service}
     ports:
       - "8003:8003"
     depends_on:
@@ -255,7 +255,7 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deployment/kubernetes/monitoring/grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
     ports:
       - "3000:3000"
@@ -274,10 +274,8 @@ services:
     container_name: payment-switch-nginx
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
     ports:
       - "80:80"
-      - "443:443"
     depends_on:
       - payment-gateway
       - fraud-detection-service

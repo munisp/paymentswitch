@@ -1,0 +1,94 @@
+services:
+  postgres:
+    ports:
+      - "55432:5432"
+    environment:
+      POSTGRES_DB: payment_switch
+      POSTGRES_USER: payment_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    volumes:
+      - postgres_validation_data:/var/lib/postgresql/data
+      - ./payment-core/services/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./payment-core/services/database/002_payment_flow_contracts.sql:/docker-entrypoint-initdb.d/02-payment-flow-contracts.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payment_user -d payment_switch"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    ports:
+      - "8180:8080"
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:?KEYCLOAK_ADMIN must be set}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD must be set}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/payment_switch
+      KC_DB_USERNAME: payment_user
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_PROXY: edge
+    volumes:
+      - ./config/keycloak/realm-export.json:/opt/keycloak/data/import/payment-switch-realm.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; grep -q '200' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  validation-backend:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./config/local-validation/nginx.conf:/etc/nginx/nginx.conf:ro
+    expose:
+      - "3000"
+    networks:
+      - payment-switch-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health | grep -q healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  apisix:
+    image: apache/apisix:3.8.0-debian
+    ports:
+      - "19080:9080"
+      - "19443:9443"
+      - "19180:9180"
+    environment:
+      APISIX_STAND_ALONE: "true"
+      APISIX_ADMIN_KEY: ${APISIX_ADMIN_KEY:?APISIX_ADMIN_KEY must be set}
+      KEYCLOAK_APISIX_CLIENT_SECRET: ${KEYCLOAK_APISIX_CLIENT_SECRET:?KEYCLOAK_APISIX_CLIENT_SECRET must be set}
+    volumes:
+      - ./config/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./config/local-validation/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      validation-backend:
+        condition: service_healthy
+    networks:
+      - payment-switch-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+volumes:
+  postgres_validation_data:
+
+networks:
+  payment-switch-network:
+    name: payment-switch-local-validation

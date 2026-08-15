@@ -32,8 +32,8 @@ export const integrationRouter = router({
     .input(z.object({
       applicationId: z.number(),
     }))
-    .mutation(async ({ input }) => {
-      return await provisionSandboxEnvironment(input.applicationId);
+    .mutation(async ({ ctx, input }) => {
+      return await provisionSandboxEnvironment(input.applicationId, ctx.user.id);
     }),
 
   // Get environment details

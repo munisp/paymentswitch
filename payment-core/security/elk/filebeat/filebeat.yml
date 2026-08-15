@@ -1,0 +1,13 @@
+filebeat.inputs:
+  - type: container
+    enabled: true
+    paths:
+      - /var/lib/docker/containers/*/*.log
+    json.keys_under_root: true
+    json.add_error_key: true
+    json.message_key: log
+
+output.logstash:
+  hosts: ["logstash:5044"]
+
+logging.to_stderr: true

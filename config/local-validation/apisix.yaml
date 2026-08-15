@@ -1,0 +1,45 @@
+upstreams:
+  - id: validation-backend
+    type: roundrobin
+    nodes:
+      "validation-backend:3000": 1
+    checks:
+      active:
+        type: http
+        http_path: /api/health
+        healthy:
+          interval: 3
+          successes: 1
+        unhealthy:
+          interval: 3
+          http_failures: 2
+
+global_rules:
+  - id: validation-request-id
+    plugins:
+      request-id:
+        header_name: X-Request-ID
+        include_in_response: true
+
+routes:
+  - id: validation-health
+    uri: /health
+    upstream_id: validation-backend
+    plugins:
+      proxy-rewrite:
+        uri: /api/health
+
+  - id: validation-protected
+    uri: /api/validation/*
+    upstream_id: validation-backend
+    plugins:
+      openid-connect:
+        client_id: apisix-gateway
+        client_secret: ${KEYCLOAK_APISIX_CLIENT_SECRET:?KEYCLOAK_APISIX_CLIENT_SECRET must be set}
+        discovery: http://keycloak:8080/realms/payment-switch/.well-known/openid-configuration
+        bearer_only: true
+        realm: payment-switch
+        token_signing_alg_values_expected: RS256
+        set_userinfo_header: true
+      proxy-rewrite:
+        regex_uri: ["^/api/validation/(.*)", "/$1"]

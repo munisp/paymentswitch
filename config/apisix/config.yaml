@@ -110,7 +110,7 @@ deployment:
     admin_key_required: true
     admin_key:
       - name: admin
-        key: "${APISIX_ADMIN_KEY}"
+        key: "${APISIX_ADMIN_KEY:?APISIX_ADMIN_KEY must be set}"
         role: admin
     admin_listen:
       ip: 127.0.0.1

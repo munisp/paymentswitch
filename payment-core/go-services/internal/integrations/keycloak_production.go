@@ -625,12 +625,12 @@ func (c *ProductionKeycloakClient) ProvisionParticipant(ctx context.Context, par
 		Name:                      participantName + " Client",
 		Enabled:                   true,
 		StandardFlowEnabled:       true,
-		DirectAccessGrantsEnabled: true,
+		DirectAccessGrantsEnabled: false,
 		ServiceAccountsEnabled:    true,
 		PublicClient:              false,
 		Protocol:                  "openid-connect",
-		RedirectUris:              []string{"*"},
-		WebOrigins:                []string{"*"},
+		RedirectUris:              []string{},
+		WebOrigins:                []string{},
 	}
 
 	clientUUID, err := c.CreateClient(ctx, client)

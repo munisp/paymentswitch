@@ -22,7 +22,6 @@ services:
       - opensearch_data:/usr/share/opensearch/data
     ports:
       - "9200:9200"
-      - "9600:9600"
     networks:
       - elk-network
 

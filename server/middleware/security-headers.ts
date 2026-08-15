@@ -31,8 +31,7 @@ function buildCspString(nonce: string): string {
 
 export function securityHeaders(req: Request, res: Response, next: NextFunction): void {
   const nonce = randomBytes(16).toString('base64');
-  // Express provides `locals`, but initialize it defensively for adapters and
-  // minimal response objects used in middleware tests.
+  // Express normally initializes locals, but middleware should remain safe in isolated tests and adapters.
   res.locals ??= {};
   (res.locals as Record<string, unknown>).cspNonce = nonce;
 

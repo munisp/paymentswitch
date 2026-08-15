@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -26,7 +27,7 @@ type APISIXConfig struct {
 func DefaultAPISIXConfig() *APISIXConfig {
 	return &APISIXConfig{
 		AdminURL: "http://apisix:9180",
-		APIKey:   "edd1c9f034335f136f87ad84b625c8f1",
+		APIKey:   "",
 		Timeout:  30 * time.Second,
 	}
 }
@@ -228,6 +229,9 @@ func (c *ProductionAPISIXClient) doRequest(ctx context.Context, method, path str
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	if strings.TrimSpace(c.config.APIKey) == "" {
+		return nil, fmt.Errorf("APISIX admin API key is required")
+	}
 	req.Header.Set("X-API-KEY", c.config.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 

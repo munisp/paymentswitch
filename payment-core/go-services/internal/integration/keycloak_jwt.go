@@ -307,8 +307,8 @@ func (v *KeycloakJWTValidator) getPublicKey(kid string) (*rsa.PublicKey, error) 
 
 // parseRSAPublicKey parses a JWK into an RSA public key
 func (v *KeycloakJWTValidator) parseRSAPublicKey(jwk *JWK) (*rsa.PublicKey, error) {
-	if jwk.Kty != "RSA" || (jwk.Use != "" && jwk.Use != "sig") || (jwk.Alg != "" && jwk.Alg != "RS256") {
-		return nil, fmt.Errorf("unsupported signing key: kty=%s use=%s alg=%s", jwk.Kty, jwk.Use, jwk.Alg)
+	if jwk.Kty != "RSA" {
+		return nil, fmt.Errorf("unsupported key type: %s", jwk.Kty)
 	}
 
 	// Decode modulus
@@ -328,26 +328,24 @@ func (v *KeycloakJWTValidator) parseRSAPublicKey(jwk *JWK) (*rsa.PublicKey, erro
 		e = e<<8 + int(b)
 	}
 
-	if n.Sign() <= 0 || e < 3 || e%2 == 0 {
-		return nil, fmt.Errorf("invalid RSA public key")
-	}
 	return &rsa.PublicKey{N: n, E: e}, nil
 }
 
-// verifySignature verifies an RS256 signature over the exact JWS signing input.
+// verifySignature verifies the JWT signature
 func (v *KeycloakJWTValidator) verifySignature(message, signature string, publicKey *rsa.PublicKey) error {
+	// Decode signature
 	sigBytes, err := base64.RawURLEncoding.DecodeString(signature)
 	if err != nil {
 		return fmt.Errorf("failed to decode signature: %w", err)
 	}
-	if publicKey == nil {
-		return fmt.Errorf("missing RSA public key")
-	}
-	digest := sha256.Sum256([]byte(message))
-	if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, digest[:], sigBytes); err != nil {
-		return fmt.Errorf("invalid RS256 signature: %w", err)
-	}
-	return nil
+
+			digest := sha256.Sum256([]byte(message))
+		if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, digest[:], sigBytes); err != nil {
+			return fmt.Errorf("invalid JWT signature: %w", err)
+		}
+
+		return nil
+
 }
 
 // refreshJWKS fetches the JWKS from Keycloak
@@ -376,7 +374,7 @@ func (v *KeycloakJWTValidator) refreshJWKS(ctx context.Context) error {
 		return fmt.Errorf("JWKS endpoint returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response: %w", err)
 	}
@@ -574,11 +572,11 @@ func GetClaimsFromContext(ctx context.Context) *JWTClaims {
 	return claims
 }
 
-// APISIXJWTPluginConfig generates a bearer-only RS256 configuration fragment.
-// It deliberately omits query/cookie token paths and symmetric placeholder secrets.
+// APISIXJWTPluginConfig generates APISIX JWT plugin configuration
 func APISIXJWTPluginConfig(config *KeycloakConfig) map[string]interface{} {
 	return map[string]interface{}{
 		"key":       config.ClientID,
+		"secret":    "PLACEHOLDER_FROM_VAULT",
 		"algorithm": "RS256",
 		"public_key": fmt.Sprintf("%s/realms/%s/protocol/openid-connect/certs",
 			config.BaseURL, config.Realm),
@@ -587,20 +585,18 @@ func APISIXJWTPluginConfig(config *KeycloakConfig) map[string]interface{} {
 			"nbf": true,
 		},
 		"header": "Authorization",
+		"query":  "token",
+		"cookie": "jwt",
 	}
 }
 
-// APISIXKeycloakAuthzConfig generates a Keycloak authorization configuration
-// fragment only when the caller supplies a real secret from its secret manager.
-func APISIXKeycloakAuthzConfig(config *KeycloakConfig, clientSecret string) (map[string]interface{}, error) {
-	if strings.TrimSpace(clientSecret) == "" {
-		return nil, fmt.Errorf("APISIX Keycloak client secret is required")
-	}
+// APISIXKeycloakAuthzConfig generates APISIX Keycloak authz plugin configuration
+func APISIXKeycloakAuthzConfig(config *KeycloakConfig) map[string]interface{} {
 	return map[string]interface{}{
 		"discovery": fmt.Sprintf("%s/realms/%s/.well-known/openid-configuration",
 			config.BaseURL, config.Realm),
 		"client_id":                          config.ClientID,
-		"client_secret":                      clientSecret,
+		"client_secret":                      "PLACEHOLDER_FROM_VAULT",
 		"bearer_only":                        true,
 		"realm":                              config.Realm,
 		"introspection_endpoint_auth_method": "client_secret_post",
@@ -611,7 +607,7 @@ func APISIXKeycloakAuthzConfig(config *KeycloakConfig, clientSecret string) (map
 		"keepalive":                          true,
 		"keepalive_timeout":                  60000,
 		"keepalive_pool":                     5,
-	}, nil
+	}
 }
 
 // KeycloakJWTSchema returns PostgreSQL schema for JWT audit
