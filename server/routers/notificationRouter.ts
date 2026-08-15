@@ -56,7 +56,7 @@ export const notificationRouter = router({
 
       const result = await db.execute(sql`
         SELECT notification_type, email_enabled, in_app_enabled
-        FROM notification_preferences
+        FROM notification_type_preferences
         WHERE user_id = ${ctx.user.id}
       `);
 
@@ -90,11 +90,11 @@ export const notificationRouter = router({
 
       // Upsert preference
       await db.execute(sql`
-        INSERT INTO notification_preferences (user_id, notification_type, email_enabled, in_app_enabled)
+        INSERT INTO notification_type_preferences (user_id, notification_type, email_enabled, in_app_enabled)
         VALUES (${ctx.user.id}, ${input.notificationType}, ${input.emailEnabled}, ${input.inAppEnabled})
-        ON DUPLICATE KEY UPDATE
-          email_enabled = ${input.emailEnabled},
-          in_app_enabled = ${input.inAppEnabled},
+        ON CONFLICT (user_id, notification_type) DO UPDATE SET
+          email_enabled = EXCLUDED.email_enabled,
+          in_app_enabled = EXCLUDED.in_app_enabled,
           updated_at = NOW()
       `);
 
@@ -108,7 +108,7 @@ export const notificationRouter = router({
       if (!db) throw new Error('Database not available');
 
       await db.execute(sql`
-        DELETE FROM notification_preferences WHERE user_id = ${ctx.user.id}
+        DELETE FROM notification_type_preferences WHERE user_id = ${ctx.user.id}
       `);
 
       return { success: true };

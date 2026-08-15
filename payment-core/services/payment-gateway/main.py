@@ -10,12 +10,13 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 from enum import Enum
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator
 import httpx
 from temporalio.client import Client as TemporalClient
 from dapr.clients import DaprClient
+from common.auth import AuthClaims
 import redis.asyncio as aioredis
 # Initialize event integration for lakehouse
 try:
@@ -164,7 +165,7 @@ async def health_check():
     }
 
 @app.post("/payments", response_model=PaymentResponse, status_code=status.HTTP_202_ACCEPTED)
-async def initiate_payment(payment: PaymentRequest):
+async def initiate_payment(payment: PaymentRequest, claims: AuthClaims):
     """
     Initiate a new payment transaction.
     
@@ -238,7 +239,7 @@ async def initiate_payment(payment: PaymentRequest):
         )
 
 @app.get("/payments/{transaction_id}", response_model=TransactionStatusResponse)
-async def get_payment_status(transaction_id: str):
+async def get_payment_status(transaction_id: str, claims: AuthClaims):
     """
     Get the status of a payment transaction.
     
@@ -315,7 +316,7 @@ async def validate_payment_request(payment: PaymentRequest) -> None:
     logger.info(f"Payment request validated successfully")
 
 @app.post("/payments/{transaction_id}/cancel")
-async def cancel_payment(transaction_id: str):
+async def cancel_payment(transaction_id: str, claims: AuthClaims):
     """
     Cancel a pending payment transaction.
     
@@ -361,8 +362,4 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 if __name__ == "__main__":
     import uvicorn
-
-from routers import router as payment_router
-
-from routers import router as payment_router
     uvicorn.run(app, host="0.0.0.0", port=8000)

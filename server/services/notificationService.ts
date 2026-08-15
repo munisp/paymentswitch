@@ -124,7 +124,7 @@ async function getUserPreferences(userId: number, notificationType: string) {
 
   const result = await db.execute(sql`
     SELECT email_enabled, in_app_enabled
-    FROM notification_preferences
+    FROM notification_type_preferences
     WHERE user_id = ${userId} AND notification_type = ${notificationType}
     LIMIT 1
   `);

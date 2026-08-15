@@ -127,7 +127,7 @@ services:
     environment:
       APISIX_STAND_ALONE: "false"
     volumes:
-      - ./apisix-config.yaml:/usr/local/apisix/conf/config.yaml
+      - ../../../config/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
 
   # Application Services
 
@@ -179,7 +179,7 @@ services:
       - mojaloop-postgres
       - kafka
     environment:
-      MOJALOOP_SETTLEMENT_URL: http://mojaloop-central-settlements:3007
+      MOJALOOP_SETTLEMENT_URL: ${MOJALOOP_SETTLEMENT_URL:?MOJALOOP_SETTLEMENT_URL must point to a reachable settlement service}
       TIGERBEETLE_HOST: tigerbeetle
     ports:
       - "8002:8002"
@@ -213,7 +213,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ../../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
 
   grafana:

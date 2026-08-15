@@ -23,6 +23,8 @@ import sys
 import json
 import time
 import argparse
+import importlib.util
+from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from urllib.parse import urljoin
@@ -56,10 +58,11 @@ except ImportError:
 class EndToEndPaymentTest:
     """End-to-end payment test orchestrator."""
     
-    def __init__(self, base_url: str = "http://localhost", db_config: Dict[str, str] = None, verbose: bool = False):
+    def __init__(self, base_url: str = "http://localhost", db_config: Dict[str, str] = None, verbose: bool = False, adapter_dsn: Optional[str] = None):
         """Initialize test configuration."""
         self.base_url = base_url.rstrip('/')
         self.verbose = verbose
+        self.adapter_dsn = adapter_dsn
         self.db_config = db_config or {
             'host': 'localhost',
             'port': 5432,
@@ -379,6 +382,41 @@ class EndToEndPaymentTest:
             })
             return None
     
+    def verify_with_postgres_adapter(self) -> bool:
+        """Run the tuned PostgreSQL adapter against its integration schema."""
+        self.log("Running tuned PostgreSQL adapter smoke test...", "INFO")
+        try:
+            adapter_path = Path(__file__).resolve().parent / "services/database/postgres/adapter.py"
+            spec = importlib.util.spec_from_file_location("paymentswitch_postgres_adapter", adapter_path)
+            if spec is None or spec.loader is None:
+                raise RuntimeError("unable to load PostgreSQL adapter")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+            adapter = module.PostgreSQLPaymentAdapter(self.adapter_dsn, min_connections=2, max_connections=8, isolation_level="READ COMMITTED", application_name="paymentswitch-e2e")
+            try:
+                run_id = str(time.time_ns())
+                prefix = f"e2e-{run_id}"
+                adapter.seed_accounts(1, prefix=prefix)
+                payload = {"transaction_id": f"{prefix}-tx", "workflow_id": f"{prefix}-wf", "idempotency_key": f"{prefix}-key", "source_account": f"{prefix}-source-0", "destination_account": f"{prefix}-destination-0", "amount_minor": 100, "currency": "NGN"}
+                first = adapter.execute_payment(payload)
+                replay = adapter.execute_payment(payload)
+                total = adapter.total_balance(f"{prefix}-")
+                passed = first is not None and replay is not None and first.status == "completed" and first.ledger == "committed" and replay.replayed and replay.ledger == "already_exists" and total == 100000
+                serialize = lambda result: result.__dict__ if result is not None else None
+                self.test_results['tests'].append({'test': 'verify_with_postgres_adapter', 'status': 'PASS' if passed else 'FAIL', 'first': serialize(first), 'replay': serialize(replay), 'balance_total': total})
+                if passed:
+                    self.log("Tuned PostgreSQL adapter smoke test passed", "SUCCESS")
+                else:
+                    self.log("Tuned PostgreSQL adapter smoke test failed", "ERROR")
+                return passed
+            finally:
+                adapter.close()
+        except Exception as exc:
+            self.log(f"PostgreSQL adapter smoke test error: {exc}", "ERROR")
+            self.test_results['tests'].append({'test': 'verify_with_postgres_adapter', 'status': 'FAIL', 'error': str(exc)})
+            return False
+
     def run_full_test(self) -> bool:
         """Run complete end-to-end test."""
         print(f"\n{Fore.CYAN}{'='*80}{Style.RESET_ALL}")
@@ -420,13 +458,18 @@ class EndToEndPaymentTest:
         # Step 5: Verify in database
         db_result = self.verify_in_database(transaction_id)
         print()
+
+        adapter_ok = True
+        if self.adapter_dsn:
+            adapter_ok = self.verify_with_postgres_adapter()
+            print()
         
         # Generate summary
         self.generate_summary()
         
         # Determine overall success
-        all_passed = all(
-            test.get('status') == 'PASS' 
+        all_passed = adapter_ok and all(
+            test.get('status') == 'PASS'
             for test in self.test_results['tests']
         )
         
@@ -531,6 +574,18 @@ Examples:
         action='store_true',
         help='Enable verbose output'
     )
+
+    parser.add_argument(
+        '--adapter-dsn',
+        default=None,
+        help='Optional PostgreSQL DSN for the tuned adapter smoke test'
+    )
+
+    parser.add_argument(
+        '--adapter-only',
+        action='store_true',
+        help='Run only the tuned PostgreSQL adapter integration smoke test'
+    )
     
     args = parser.parse_args()
     
@@ -547,10 +602,17 @@ Examples:
     tester = EndToEndPaymentTest(
         base_url=args.host,
         db_config=db_config,
-        verbose=args.verbose
+        verbose=args.verbose,
+        adapter_dsn=args.adapter_dsn
     )
     
-    success = tester.run_full_test()
+    if args.adapter_only:
+        if not args.adapter_dsn:
+            parser.error('--adapter-only requires --adapter-dsn')
+        success = tester.verify_with_postgres_adapter()
+        tester.generate_summary()
+    else:
+        success = tester.run_full_test()
     
     # Exit with appropriate code
     sys.exit(0 if success else 1)
