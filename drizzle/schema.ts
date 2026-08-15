@@ -159,6 +159,55 @@ export type Transaction = typeof transactions.$inferSelect;
 export type InsertTransaction = typeof transactions.$inferInsert;
 
 /**
+ * Canonical settlement batches exposed to the operational portal. A batch never
+ * becomes settled merely because it was created locally; external execution and
+ * reconciliation outcomes are recorded as immutable settlement events.
+ */
+export const settlementBatches = pgTable("settlement_batches", {
+  id: serial("id").primaryKey(),
+  settlementId: varchar("settlement_id", { length: 64 }).notNull().unique(),
+  participantId: integer("participant_id").references(() => switchParticipants.id),
+  bankCode: varchar("bank_code", { length: 32 }).notNull(),
+  bankName: varchar("bank_name", { length: 256 }).notNull(),
+  channel: varchar("channel", { length: 16 }).notNull(),
+  settlementWindow: varchar("settlement_window", { length: 8 }).notNull(),
+  status: varchar("status", { length: 32 }).default("pending").notNull(),
+  totalTransactions: integer("total_transactions").default(0).notNull(),
+  grossAmount: decimal("gross_amount", { precision: 20, scale: 2 }).default("0").notNull(),
+  fees: decimal("fees", { precision: 20, scale: 2 }).default("0").notNull(),
+  netAmount: decimal("net_amount", { precision: 20, scale: 2 }).default("0").notNull(),
+  settlementRef: varchar("settlement_ref", { length: 128 }).notNull().unique(),
+  windowOpenedAt: timestamp("window_opened_at").defaultNow().notNull(),
+  windowClosedAt: timestamp("window_closed_at"),
+  reconciledAt: timestamp("reconciled_at"),
+  reconciledBy: integer("reconciled_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("settlement_batches_status_window_idx").on(table.status, table.windowOpenedAt),
+  index("settlement_batches_participant_window_idx").on(table.participantId, table.windowOpenedAt),
+  index("settlement_batches_bank_window_idx").on(table.bankCode, table.windowOpenedAt),
+]);
+
+export type SettlementBatch = typeof settlementBatches.$inferSelect;
+export type InsertSettlementBatch = typeof settlementBatches.$inferInsert;
+
+/** Immutable lifecycle evidence for each settlement batch. */
+export const settlementEvents = pgTable("settlement_events", {
+  id: serial("id").primaryKey(),
+  settlementBatchId: integer("settlement_batch_id").notNull().references(() => settlementBatches.id),
+  eventType: varchar("event_type", { length: 64 }).notNull(),
+  eventPayload: jsonb("event_payload"),
+  actorUserId: integer("actor_user_id").references(() => users.id),
+  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+}, (table) => [
+  index("settlement_events_batch_time_idx").on(table.settlementBatchId, table.occurredAt),
+]);
+
+export type SettlementEvent = typeof settlementEvents.$inferSelect;
+export type InsertSettlementEvent = typeof settlementEvents.$inferInsert;
+
+/**
  * Refunds issued for transactions
  */
 export const refunds = pgTable("refunds", {

@@ -395,11 +395,13 @@ class EndToEndPaymentTest:
             spec.loader.exec_module(module)
             adapter = module.PostgreSQLPaymentAdapter(self.adapter_dsn, min_connections=2, max_connections=8, isolation_level="READ COMMITTED", application_name="paymentswitch-e2e")
             try:
-                adapter.seed_accounts(1, prefix="e2e")
-                payload = {"transaction_id": "e2e-adapter-tx", "workflow_id": "e2e-adapter-wf", "idempotency_key": "e2e-adapter-key", "source_account": "e2e-source-0", "destination_account": "e2e-destination-0", "amount_minor": 100, "currency": "NGN"}
+                run_id = str(time.time_ns())
+                prefix = f"e2e-{run_id}"
+                adapter.seed_accounts(1, prefix=prefix)
+                payload = {"transaction_id": f"{prefix}-tx", "workflow_id": f"{prefix}-wf", "idempotency_key": f"{prefix}-key", "source_account": f"{prefix}-source-0", "destination_account": f"{prefix}-destination-0", "amount_minor": 100, "currency": "NGN"}
                 first = adapter.execute_payment(payload)
                 replay = adapter.execute_payment(payload)
-                total = adapter.total_balance("e2e-")
+                total = adapter.total_balance(f"{prefix}-")
                 passed = first is not None and replay is not None and first.status == "completed" and first.ledger == "committed" and replay.replayed and replay.ledger == "already_exists" and total == 100000
                 serialize = lambda result: result.__dict__ if result is not None else None
                 self.test_results['tests'].append({'test': 'verify_with_postgres_adapter', 'status': 'PASS' if passed else 'FAIL', 'first': serialize(first), 'replay': serialize(replay), 'balance_total': total})
