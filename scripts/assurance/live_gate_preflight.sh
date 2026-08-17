@@ -47,6 +47,12 @@ for variable in \
   KEYCLOAK_APISIX_CLIENT_SECRET \
   KEYCLOAK_API_CLIENT_SECRET \
   KEYCLOAK_CLIENT_SECRET \
+  KEYCLOAK_URL \
+  ADMIN_KEYCLOAK_CLIENT_ID \
+  ADMIN_KEYCLOAK_CLIENT_SECRET \
+  ADMIN_AUTH_REDIRECT_URI \
+  ADMIN_DASHBOARD_ALLOWED_ORIGIN \
+  ADMIN_AUTH_STATE_SECRET \
   PORTAL_ALLOWED_ORIGIN \
   PORTAL_REDIRECT_URI \
   TLS_CA_FILE \
@@ -94,6 +100,12 @@ if [[ -n "${PORTAL_ALLOWED_ORIGIN:-}" && "${PORTAL_ALLOWED_ORIGIN}" == https://*
   pass 'portal origin and callback use one explicit HTTPS origin'
 else
   fail 'PORTAL_ALLOWED_ORIGIN and PORTAL_REDIRECT_URI must use one explicit HTTPS origin/callback'
+fi
+
+if [[ -n "${ADMIN_DASHBOARD_ALLOWED_ORIGIN:-}" && "${ADMIN_DASHBOARD_ALLOWED_ORIGIN}" == https://* ]] && [[ "${ADMIN_AUTH_REDIRECT_URI:-}" == "${ADMIN_DASHBOARD_ALLOWED_ORIGIN}/api/auth/callback" ]]; then
+  pass 'admin dashboard origin and Authorization Code callback are an exact HTTPS pair'
+else
+  fail 'ADMIN_DASHBOARD_ALLOWED_ORIGIN and ADMIN_AUTH_REDIRECT_URI must use one explicit HTTPS origin/api/auth/callback pair'
 fi
 
 if [[ -n "${APISIX_BASE_URL:-}" && "${APISIX_BASE_URL}" == https://* ]]; then

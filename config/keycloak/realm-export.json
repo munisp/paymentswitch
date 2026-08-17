@@ -207,6 +207,49 @@
       ]
     },
     {
+      "clientId": "payment-switch-admin-dashboard",
+      "name": "Payment Switch Admin Dashboard",
+      "description": "Server-managed Authorization Code + PKCE client for the standalone admin dashboard",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "redirectUris": [
+        "${ADMIN_AUTH_REDIRECT_URI}"
+      ],
+      "webOrigins": [
+        "${ADMIN_DASHBOARD_ALLOWED_ORIGIN}"
+      ],
+      "publicClient": false,
+      "secret": "${ADMIN_KEYCLOAK_CLIENT_SECRET}",
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": false,
+      "pkceCodeChallengeMethod": "S256",
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "protocolMappers": [
+        {
+          "name": "payment-switch-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "payment-switch-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
       "clientId": "payment-switch-api",
       "name": "Payment Switch API",
       "description": "Backend API for Payment Switch services",

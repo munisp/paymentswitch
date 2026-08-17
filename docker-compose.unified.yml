@@ -434,9 +434,9 @@ services:
   keycloak:
     image: quay.io/keycloak/keycloak:23.0
     container_name: keycloak
-    command: start-dev
+    command: start-dev --import-realm
     environment:
-      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:?KEYCLOAK_ADMIN must be set}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD must be set}
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
@@ -444,6 +444,16 @@ services:
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD must be set}
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:?KEYCLOAK_CLIENT_SECRET must be set}
+      KEYCLOAK_API_CLIENT_SECRET: ${KEYCLOAK_API_CLIENT_SECRET:?KEYCLOAK_API_CLIENT_SECRET must be set}
+      KEYCLOAK_APISIX_CLIENT_SECRET: ${KEYCLOAK_APISIX_CLIENT_SECRET:?KEYCLOAK_APISIX_CLIENT_SECRET must be set}
+      ADMIN_KEYCLOAK_CLIENT_SECRET: ${ADMIN_KEYCLOAK_CLIENT_SECRET:?ADMIN_KEYCLOAK_CLIENT_SECRET must be set}
+      PORTAL_ALLOWED_ORIGIN: ${PORTAL_ALLOWED_ORIGIN:?PORTAL_ALLOWED_ORIGIN must be set}
+      PORTAL_REDIRECT_URI: ${PORTAL_REDIRECT_URI:?PORTAL_REDIRECT_URI must be set}
+      ADMIN_DASHBOARD_ALLOWED_ORIGIN: ${ADMIN_DASHBOARD_ALLOWED_ORIGIN:?ADMIN_DASHBOARD_ALLOWED_ORIGIN must be set}
+      ADMIN_AUTH_REDIRECT_URI: ${ADMIN_AUTH_REDIRECT_URI:?ADMIN_AUTH_REDIRECT_URI must be set}
+    volumes:
+      - ./config/keycloak/realm-export.json:/opt/keycloak/data/import/payment-switch-realm.json:ro
     ports:
       - "8180:8080"
     depends_on:
