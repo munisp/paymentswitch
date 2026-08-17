@@ -4,8 +4,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+env_file="${LIVE_GATE_ENV_FILE:-$ROOT/.env.assurance}"
+if [[ ! -f "$env_file" ]]; then
+  printf 'LIVE IDENTITY GATE NOT RUN: required isolated environment file is missing: %s\n' "$env_file" >&2
+  printf 'Copy %s/.env.assurance.example to %s and populate it with real isolated TLS, Keycloak, and bearer-token values.\n' "$ROOT" "$env_file" >&2
+  exit 2
+fi
 # shellcheck source=/dev/null
-source "${LIVE_GATE_ENV_FILE:-$ROOT/.env.assurance}"
+source "$env_file"
 export ASSURANCE_ENV="${ASSURANCE_ENV:-}"
 "$ROOT/scripts/assurance/live_gate_preflight.sh"
 
