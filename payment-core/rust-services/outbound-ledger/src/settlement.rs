@@ -147,6 +147,12 @@ pub struct SettlementPostingEngine {
     _positions: HashMap<String, ParticipantPosition>,
 }
 
+impl Default for SettlementPostingEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SettlementPostingEngine {
     pub fn new() -> Self {
         Self {
@@ -191,7 +197,7 @@ impl SettlementPostingEngine {
                 debit_account_id: self.accounts.transit_payable,
                 credit_account_id: self.accounts.settlement_suspense,
                 amount: *ngn_amount,
-                pending: true, // Held until confirmed
+                pending: true,                   // Held until confirmed
                 linked: i < transfers.len() - 1, // Link all in batch
                 code: SettlementTransferCode::BatchSubmit as u16,
                 ledger: 1, // NGN ledger
@@ -368,16 +374,8 @@ impl SettlementPostingEngine {
     }
 
     /// Calculate the netting savings (gross - net) for a batch.
-    pub fn calculate_netting_savings(
-        &self,
-        gross_volume: u64,
-        net_volume: u64,
-    ) -> NettingSavings {
-        let savings = if gross_volume > net_volume {
-            gross_volume - net_volume
-        } else {
-            0
-        };
+    pub fn calculate_netting_savings(&self, gross_volume: u64, net_volume: u64) -> NettingSavings {
+        let savings = gross_volume.saturating_sub(net_volume);
         let savings_pct = if gross_volume > 0 {
             (savings as f64 / gross_volume as f64) * 100.0
         } else {
@@ -410,8 +408,18 @@ mod tests {
     fn test_batch_submit_postings() {
         let mut engine = SettlementPostingEngine::new();
         let transfers = vec![
-            ("T-001".to_string(), 250_000_000u64, 2_427_200u64, "GHS".to_string()),
-            ("T-002".to_string(), 500_000_000u64, 4_854_400u64, "GHS".to_string()),
+            (
+                "T-001".to_string(),
+                250_000_000u64,
+                2_427_200u64,
+                "GHS".to_string(),
+            ),
+            (
+                "T-002".to_string(),
+                500_000_000u64,
+                4_854_400u64,
+                "GHS".to_string(),
+            ),
         ];
         let batch = engine.generate_batch_submit_postings("STL-PAPSS-001", &transfers);
         assert_eq!(batch.total_ngn_debit, 750_000_000);
@@ -426,8 +434,14 @@ mod tests {
         let mut engine = SettlementPostingEngine::new();
         let postings = engine.generate_batch_confirm_postings("STL-PAPSS-001", 750_000_000);
         assert_eq!(postings.len(), 2); // confirm + fx release
-        assert_eq!(postings[0].code, SettlementTransferCode::BatchConfirm as u16);
-        assert_eq!(postings[1].code, SettlementTransferCode::FxExposureRelease as u16);
+        assert_eq!(
+            postings[0].code,
+            SettlementTransferCode::BatchConfirm as u16
+        );
+        assert_eq!(
+            postings[1].code,
+            SettlementTransferCode::FxExposureRelease as u16
+        );
     }
 
     #[test]
@@ -440,23 +454,49 @@ mod tests {
         let postings = engine.generate_batch_reversal_postings("STL-PAPSS-001", &participants);
         // Each participant gets 2 postings (reversal + fx release)
         assert_eq!(postings.len(), 4);
-        assert_eq!(postings[0].code, SettlementTransferCode::BatchReversal as u16);
+        assert_eq!(
+            postings[0].code,
+            SettlementTransferCode::BatchReversal as u16
+        );
     }
 
     #[test]
     fn test_netting_positions() {
         let engine = SettlementPostingEngine::new();
         let transfers = vec![
-            ("PAYAPP".to_string(), "GHS".to_string(), 250_000_000u64, 2_427_200u64),
-            ("PAYAPP".to_string(), "GHS".to_string(), 150_000_000u64, 1_456_000u64),
-            ("OPAY".to_string(), "GHS".to_string(), 500_000_000u64, 4_854_400u64),
-            ("PAYAPP".to_string(), "KES".to_string(), 120_000_000u64, 978_000u64),
+            (
+                "PAYAPP".to_string(),
+                "GHS".to_string(),
+                250_000_000u64,
+                2_427_200u64,
+            ),
+            (
+                "PAYAPP".to_string(),
+                "GHS".to_string(),
+                150_000_000u64,
+                1_456_000u64,
+            ),
+            (
+                "OPAY".to_string(),
+                "GHS".to_string(),
+                500_000_000u64,
+                4_854_400u64,
+            ),
+            (
+                "PAYAPP".to_string(),
+                "KES".to_string(),
+                120_000_000u64,
+                978_000u64,
+            ),
         ];
         let positions = engine.compute_netting_positions(&transfers);
         // 3 positions: OPAY/GHS, PAYAPP/GHS, PAYAPP/KES
         assert_eq!(positions.len(), 3);
 
-        let payapp_ghs = positions.iter().find(|p| p.participant_id == "PAYAPP" && p.currency == "GHS").unwrap();
+        let payapp_ghs = positions
+            .iter()
+            .find(|p| p.participant_id == "PAYAPP" && p.currency == "GHS")
+            .unwrap();
         assert_eq!(payapp_ghs.gross_outflow_ngn, 400_000_000);
         assert_eq!(payapp_ghs.transfer_count, 2);
     }
@@ -471,8 +511,14 @@ mod tests {
 
     #[test]
     fn test_settlement_ledger_currency_mapping() {
-        assert_eq!(SettlementLedger::from_currency("NGN"), Some(SettlementLedger::NGN));
-        assert_eq!(SettlementLedger::from_currency("GHS"), Some(SettlementLedger::GHS));
+        assert_eq!(
+            SettlementLedger::from_currency("NGN"),
+            Some(SettlementLedger::NGN)
+        );
+        assert_eq!(
+            SettlementLedger::from_currency("GHS"),
+            Some(SettlementLedger::GHS)
+        );
         assert_eq!(SettlementLedger::from_currency("INVALID"), None);
     }
 

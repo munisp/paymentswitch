@@ -80,6 +80,12 @@ pub struct MemoryStore {
     pub positions: std::sync::Mutex<Vec<PositionRow>>,
 }
 
+impl Default for MemoryStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MemoryStore {
     pub fn new() -> Self {
         Self {

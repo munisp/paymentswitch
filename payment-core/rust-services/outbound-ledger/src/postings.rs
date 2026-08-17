@@ -2,7 +2,7 @@
 //! Generates TigerBeetle transfer commands for each lifecycle step.
 //!
 //! Posting matrix per the architecture document:
-//! 
+//!
 //! Step D (Pricing & Funding):
 //!   DR fintech_prefund_ngn  → CR outbound_transit_payable  (principal)
 //!   DR fintech_prefund_ngn  → CR switch_fee_income         (switch fee)
@@ -17,8 +17,8 @@
 //! Reversal:
 //!   DR reversal_suspense    → CR fintech_prefund_ngn       (return funds)
 
-use serde::{Deserialize, Serialize};
 use crate::accounts::AccountId;
+use serde::{Deserialize, Serialize};
 
 /// A single TigerBeetle transfer command.
 /// Maps 1:1 to TigerBeetle's CreateTransfer operation.
@@ -159,19 +159,71 @@ impl PostingEngine {
                 },
             ],
             corridor_fees: vec![
-                CorridorFee { corridor_id: 1, base_fee_kobo: 45_000, fx_spread_bps: 150 },  // NG-GH
-                CorridorFee { corridor_id: 2, base_fee_kobo: 60_000, fx_spread_bps: 200 },  // NG-SN
-                CorridorFee { corridor_id: 3, base_fee_kobo: 60_000, fx_spread_bps: 200 },  // NG-CI
-                CorridorFee { corridor_id: 4, base_fee_kobo: 60_000, fx_spread_bps: 200 },  // NG-CM
-                CorridorFee { corridor_id: 5, base_fee_kobo: 120_000, fx_spread_bps: 100 }, // NG-GB
-                CorridorFee { corridor_id: 6, base_fee_kobo: 112_500, fx_spread_bps: 100 }, // NG-US
-                CorridorFee { corridor_id: 7, base_fee_kobo: 127_500, fx_spread_bps: 120 }, // NG-CA
-                CorridorFee { corridor_id: 8, base_fee_kobo: 75_000, fx_spread_bps: 150 },  // NG-IN
-                CorridorFee { corridor_id: 9, base_fee_kobo: 82_500, fx_spread_bps: 175 },  // NG-TR
-                CorridorFee { corridor_id: 10, base_fee_kobo: 180_000, fx_spread_bps: 80 }, // NG-CN
-                CorridorFee { corridor_id: 11, base_fee_kobo: 150_000, fx_spread_bps: 90 }, // NG-AE
-                CorridorFee { corridor_id: 12, base_fee_kobo: 52_500, fx_spread_bps: 150 }, // NG-KE
-                CorridorFee { corridor_id: 13, base_fee_kobo: 60_000, fx_spread_bps: 130 }, // NG-ZA
+                CorridorFee {
+                    corridor_id: 1,
+                    base_fee_kobo: 45_000,
+                    fx_spread_bps: 150,
+                }, // NG-GH
+                CorridorFee {
+                    corridor_id: 2,
+                    base_fee_kobo: 60_000,
+                    fx_spread_bps: 200,
+                }, // NG-SN
+                CorridorFee {
+                    corridor_id: 3,
+                    base_fee_kobo: 60_000,
+                    fx_spread_bps: 200,
+                }, // NG-CI
+                CorridorFee {
+                    corridor_id: 4,
+                    base_fee_kobo: 60_000,
+                    fx_spread_bps: 200,
+                }, // NG-CM
+                CorridorFee {
+                    corridor_id: 5,
+                    base_fee_kobo: 120_000,
+                    fx_spread_bps: 100,
+                }, // NG-GB
+                CorridorFee {
+                    corridor_id: 6,
+                    base_fee_kobo: 112_500,
+                    fx_spread_bps: 100,
+                }, // NG-US
+                CorridorFee {
+                    corridor_id: 7,
+                    base_fee_kobo: 127_500,
+                    fx_spread_bps: 120,
+                }, // NG-CA
+                CorridorFee {
+                    corridor_id: 8,
+                    base_fee_kobo: 75_000,
+                    fx_spread_bps: 150,
+                }, // NG-IN
+                CorridorFee {
+                    corridor_id: 9,
+                    base_fee_kobo: 82_500,
+                    fx_spread_bps: 175,
+                }, // NG-TR
+                CorridorFee {
+                    corridor_id: 10,
+                    base_fee_kobo: 180_000,
+                    fx_spread_bps: 80,
+                }, // NG-CN
+                CorridorFee {
+                    corridor_id: 11,
+                    base_fee_kobo: 150_000,
+                    fx_spread_bps: 90,
+                }, // NG-AE
+                CorridorFee {
+                    corridor_id: 12,
+                    base_fee_kobo: 52_500,
+                    fx_spread_bps: 150,
+                }, // NG-KE
+                CorridorFee {
+                    corridor_id: 13,
+                    base_fee_kobo: 60_000,
+                    fx_spread_bps: 130,
+                }, // NG-ZA
             ],
         }
     }
@@ -187,10 +239,16 @@ impl PostingEngine {
         principal_kobo: u64,
     ) -> PostingResult {
         let schedule = &self.tier_schedules[tier_id.min(3) as usize];
-        let corridor = self.corridor_fees.iter()
+        let corridor = self
+            .corridor_fees
+            .iter()
             .find(|c| c.corridor_id == corridor_id)
             .copied()
-            .unwrap_or(CorridorFee { corridor_id, base_fee_kobo: 75_000, fx_spread_bps: 150 });
+            .unwrap_or(CorridorFee {
+                corridor_id,
+                base_fee_kobo: 75_000,
+                fx_spread_bps: 150,
+            });
 
         // Calculate fees
         let switch_fee = schedule.switch_fee_kobo;
@@ -203,12 +261,32 @@ impl PostingEngine {
         let net_debit = principal_kobo + switch_fee + corridor_fee + fx_spread - fx_share_back;
 
         // Build transfer commands
-        let prefund = AccountId::new(participant_id, crate::accounts::AccountFamily::PrefundNGN, 0);
-        let transit = AccountId::new(participant_id, crate::accounts::AccountFamily::OutboundTransitPayable, corridor_id);
+        let prefund = AccountId::new(
+            participant_id,
+            crate::accounts::AccountFamily::PrefundNGN,
+            0,
+        );
+        let transit = AccountId::new(
+            participant_id,
+            crate::accounts::AccountFamily::OutboundTransitPayable,
+            corridor_id,
+        );
         let fee_acct = AccountId::new(0, crate::accounts::AccountFamily::SwitchFeeIncome, 0);
-        let corr_acct = AccountId::new(0, crate::accounts::AccountFamily::CorridorFeeIncome, corridor_id);
-        let fx_acct = AccountId::new(0, crate::accounts::AccountFamily::FxSpreadIncome, corridor_id);
-        let share_acct = AccountId::new(participant_id, crate::accounts::AccountFamily::FxRevenueSharePayable, 0);
+        let corr_acct = AccountId::new(
+            0,
+            crate::accounts::AccountFamily::CorridorFeeIncome,
+            corridor_id,
+        );
+        let fx_acct = AccountId::new(
+            0,
+            crate::accounts::AccountFamily::FxSpreadIncome,
+            corridor_id,
+        );
+        let share_acct = AccountId::new(
+            participant_id,
+            crate::accounts::AccountFamily::FxRevenueSharePayable,
+            0,
+        );
         let levy_acct = AccountId::new(0, crate::accounts::AccountFamily::CbnLevyPayable, 0);
 
         let mut transfers = Vec::with_capacity(7);
@@ -332,8 +410,16 @@ impl PostingEngine {
         principal_kobo: u64,
         pending_transfer_id: u128,
     ) -> TransferCommand {
-        let transit = AccountId::new(participant_id, crate::accounts::AccountFamily::OutboundTransitPayable, corridor_id);
-        let settled = AccountId::new(participant_id, crate::accounts::AccountFamily::SettlementSuspense, corridor_id);
+        let transit = AccountId::new(
+            participant_id,
+            crate::accounts::AccountFamily::OutboundTransitPayable,
+            corridor_id,
+        );
+        let settled = AccountId::new(
+            participant_id,
+            crate::accounts::AccountFamily::SettlementSuspense,
+            corridor_id,
+        );
 
         TransferCommand {
             id: self.next_id(),
@@ -355,8 +441,16 @@ impl PostingEngine {
         participant_id: u64,
         amount_kobo: u64,
     ) -> TransferCommand {
-        let reversal = AccountId::new(participant_id, crate::accounts::AccountFamily::ReversalSuspense, 0);
-        let prefund = AccountId::new(participant_id, crate::accounts::AccountFamily::PrefundNGN, 0);
+        let reversal = AccountId::new(
+            participant_id,
+            crate::accounts::AccountFamily::ReversalSuspense,
+            0,
+        );
+        let prefund = AccountId::new(
+            participant_id,
+            crate::accounts::AccountFamily::PrefundNGN,
+            0,
+        );
 
         TransferCommand {
             id: self.next_id(),
@@ -402,9 +496,9 @@ mod tests {
     fn test_funding_postings_starter_tier() {
         let mut engine = PostingEngine::new();
         let result = engine.generate_funding_postings(
-            1001, // participant
-            0,    // Starter tier
-            1,    // NG-GH corridor
+            1001,       // participant
+            0,          // Starter tier
+            1,          // NG-GH corridor
             75_000_000, // ₦750,000
         );
 
@@ -421,20 +515,23 @@ mod tests {
         let mut engine = PostingEngine::new();
         let result = engine.generate_funding_postings(
             2002,
-            1, // Growth tier
-            5, // NG-GB corridor
+            1,           // Growth tier
+            5,           // NG-GB corridor
             180_000_000, // ₦1.8M
         );
 
         assert_eq!(result.switch_fee_kobo, 22_500); // $0.15
-        // NG-GB corridor fee: 120_000 - 10% discount = 108_000
+                                                    // NG-GB corridor fee: 120_000 - 10% discount = 108_000
         assert_eq!(result.corridor_fee_kobo, 108_000);
         // FX spread: 180M * 100bps / 10000 = 1_800_000
         assert_eq!(result.fx_spread_kobo, 1_800_000);
         // FX share: 5% of spread = 90_000
         assert_eq!(result.fx_share_back_kobo, 90_000);
         // Verify balanced books
-        assert_eq!(result.batch.total_debit_kobo, result.batch.total_credit_kobo);
+        assert_eq!(
+            result.batch.total_debit_kobo,
+            result.batch.total_credit_kobo
+        );
     }
 
     #[test]
@@ -442,13 +539,13 @@ mod tests {
         let mut engine = PostingEngine::new();
         let result = engine.generate_funding_postings(
             3003,
-            3, // Premium tier
-            10, // NG-CN corridor
+            3,           // Premium tier
+            10,          // NG-CN corridor
             675_000_000, // ₦6.75M
         );
 
         assert_eq!(result.switch_fee_kobo, 7_500); // $0.05
-        // NG-CN corridor fee: 180_000 - 35% discount = 117_000
+                                                   // NG-CN corridor fee: 180_000 - 35% discount = 117_000
         assert_eq!(result.corridor_fee_kobo, 117_000);
         // FX spread: 675M * 80bps / 10000 = 5_400_000
         assert_eq!(result.fx_spread_kobo, 5_400_000);

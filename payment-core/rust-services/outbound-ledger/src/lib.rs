@@ -1,5 +1,5 @@
 //! Outbound Remittance Ledger Service
-//! 
+//!
 //! Ultra-low-latency double-entry posting engine for the National Outbound
 //! Remittance Switch. Translates remittance lifecycle events into TigerBeetle
 //! transfer commands following the "Three Truths" design principle where
@@ -17,14 +17,16 @@
 //! All amounts use fixed-point u64 in smallest currency unit (kobo for NGN).
 
 pub mod accounts;
-pub mod postings;
-pub mod fx_pricing;
 pub mod dynamic_pricing;
-pub mod settlement;
+pub mod fx_pricing;
 pub mod persistence;
+pub mod postings;
+pub mod settlement;
 
 pub use accounts::{AccountFamily, AccountId, ParticipantAccounts};
-pub use postings::{PostingEngine, TransferCommand, TransferBatch, PostingResult};
-pub use fx_pricing::{CorridorFxEngine, CorridorQuote, CorridorConfig};
-pub use dynamic_pricing::{DynamicPricingEngine, DynamicPrice, RTGSEngine, NettingEngine};
-pub use settlement::{SettlementPostingEngine, SettlementPostingBatch, ParticipantPosition, NettingSavings};
+pub use dynamic_pricing::{DynamicPrice, DynamicPricingEngine, NettingEngine, RTGSEngine};
+pub use fx_pricing::{CorridorConfig, CorridorFxEngine, CorridorQuote};
+pub use postings::{PostingEngine, PostingResult, TransferBatch, TransferCommand};
+pub use settlement::{
+    NettingSavings, ParticipantPosition, SettlementPostingBatch, SettlementPostingEngine,
+};

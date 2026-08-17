@@ -135,7 +135,7 @@ services:
     container_name: web-checkout-portal
     environment:
       # Database (PostgreSQL - MySQL removed)
-      DATABASE_URL: postgresql://payment_user:payment_pass_2024@postgres:5432/payment_switch
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
       
       # Redis
       REDIS_HOST: redis
@@ -217,7 +217,7 @@ services:
       TIGERBEETLE_ADDRESS: tigerbeetle:3001
       
       # PostgreSQL
-      DATABASE_URL: postgresql://payment_user:payment_pass_2024@postgres:5432/payment_switch
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
       
       # Redis
       REDIS_HOST: redis
@@ -257,7 +257,7 @@ services:
     container_name: fraud-detection-service
     environment:
       # PostgreSQL
-      DATABASE_URL: postgresql://payment_user:payment_pass_2024@postgres:5432/payment_switch
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
       
       # Redis
       REDIS_HOST: redis
@@ -304,7 +304,7 @@ services:
     container_name: data-pipeline-service
     environment:
       # PostgreSQL
-      DATABASE_URL: postgresql://payment_user:payment_pass_2024@postgres:5432/payment_switch
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
       
       # Kafka
       KAFKA_BROKERS: kafka:9092
@@ -490,7 +490,7 @@ services:
     command: serve
     environment:
       PERMIFY_DATABASE_ENGINE: postgres
-      PERMIFY_DATABASE_URI: postgres://payment_user:payment_pass_2024@postgres:5432/permify?sslmode=disable
+      PERMIFY_DATABASE_URI: ${PERMIFY_DATABASE_URI:?PERMIFY_DATABASE_URI must be set}
       PERMIFY_LOG_LEVEL: info
     ports:
       - "3476:3476"   # gRPC
