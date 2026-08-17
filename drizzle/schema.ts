@@ -385,7 +385,9 @@ export const technicalConfigurations = pgTable("technical_configurations", {
   status: technicalStatusEnum("status").default("draft"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  uniqueIndex("uq_technical_configurations_application_user").on(table.applicationId, table.userId),
+]);
 
 export type TechnicalConfiguration = typeof technicalConfigurations.$inferSelect;
 export type InsertTechnicalConfiguration = typeof technicalConfigurations.$inferInsert;
@@ -410,7 +412,9 @@ export const securityCredentials = pgTable("security_credentials", {
   hsmEnabled: boolean("hsm_enabled").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  uniqueIndex("uq_security_credentials_application_user").on(table.applicationId, table.userId),
+]);
 
 export type SecurityCredential = typeof securityCredentials.$inferSelect;
 export type InsertSecurityCredential = typeof securityCredentials.$inferInsert;
@@ -1147,8 +1151,9 @@ export type InsertSavedComparison = typeof savedComparisons.$inferInsert;
 export const technicalOnboardingReviews = pgTable("technical_onboarding_reviews", {
   id: serial("id").primaryKey(),
   configurationId: integer("configuration_id").notNull(),
-  applicationId: integer("application_id"),
-  reviewerId: integer("reviewer_id").notNull(),
+  applicationId: integer("application_id").notNull(),
+  // Null while pending; set only by the assigned administrator during review.
+  reviewerId: integer("reviewer_id"),
   status: reviewStatusEnum("status").default("pending").notNull(),
   comments: text("comments"),
   reviewNotes: text("review_notes"),
@@ -1281,7 +1286,9 @@ export const networkConfigurations = pgTable("network_configurations", {
   firewallRulesDoc: varchar("firewall_rules_doc", { length: 512 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => [
+  uniqueIndex("uq_network_configurations_application_user").on(table.applicationId, table.userId),
+]);
 
 export type NetworkConfiguration = typeof networkConfigurations.$inferSelect;
 export type InsertNetworkConfiguration = typeof networkConfigurations.$inferInsert;
