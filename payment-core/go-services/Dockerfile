@@ -7,15 +7,14 @@ RUN apk add --no-cache git ca-certificates
 
 # Copy go mod files
 COPY go.mod ./
-RUN go mod download || true
+RUN go mod download
 
 # Copy source code
 COPY . .
 
-# Build the ledger service binary (fallback to health-check stub if source not ready)
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o go-ledger-service ./cmd/mojaloop-service || \
-    (printf 'package main\nimport "net/http"\nfunc main() {\n\thttp.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })\n\thttp.ListenAndServe(":8080", nil)\n}\n' > /app/stub.go && \
-    CGO_ENABLED=0 GOOS=linux go build -o go-ledger-service /app/stub.go)
+# The image must contain the real ledger service. A compile failure stops the build;
+# it must never be replaced by a health-only stub that could mask a broken ledger.
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o go-ledger-service ./cmd/mojaloop-service
 
 # Final stage
 FROM alpine:3.19

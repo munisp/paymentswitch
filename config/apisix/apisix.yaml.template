@@ -200,8 +200,6 @@ routes:
         realm: payment-switch
         introspection_endpoint_auth_method: client_secret_post
         token_signing_alg_values_expected: RS256
-      proxy-rewrite:
-        regex_uri: ["^/api/v1/ledger/(.*)", "/api/v1/$1"]
       limit-req:
         rate: 5000
         burst: 2000
