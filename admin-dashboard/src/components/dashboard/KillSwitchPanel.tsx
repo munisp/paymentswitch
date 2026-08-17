@@ -6,7 +6,7 @@ import { Badge } from '../common/Badge';
 import { ConfirmModal } from '../common/Modal';
 import { Textarea } from '../common/Input';
 import { cn, formatDateTime } from '@/lib/utils';
-import type { KillSwitch } from '@/types';
+import type { KillSwitch } from '@/lib/api';
 
 interface KillSwitchPanelProps {
   killSwitches: KillSwitch[];
@@ -64,7 +64,7 @@ export function KillSwitchPanel({
             <CardTitle>Kill Switches</CardTitle>
           </div>
           <Badge variant="warning">
-            {killSwitches.filter((k) => k.status === 'ACTIVE').length} Active
+            {killSwitches.filter((killSwitch) => killSwitch.active).length} Active
           </Badge>
         </CardHeader>
         <CardContent>
@@ -74,7 +74,7 @@ export function KillSwitchPanel({
                 key={killSwitch.id}
                 className={cn(
                   'flex items-center justify-between p-4 rounded-lg border-2',
-                  killSwitch.status === 'ACTIVE'
+                  killSwitch.active
                     ? 'border-red-200 bg-red-50'
                     : 'border-gray-200 bg-white'
                 )}
@@ -83,7 +83,7 @@ export function KillSwitchPanel({
                   <div
                     className={cn(
                       'p-2 rounded-lg mr-3',
-                      killSwitch.status === 'ACTIVE'
+                      killSwitch.active
                         ? 'bg-red-100 text-red-600'
                         : 'bg-gray-100 text-gray-600'
                     )}
@@ -93,35 +93,35 @@ export function KillSwitchPanel({
                   <div>
                     <h4 className="font-medium text-gray-900">{killSwitch.name}</h4>
                     <p className="text-sm text-gray-500">
-                      {killSwitch.type} - {killSwitch.scope.value || 'All'}
+                      {killSwitch.type} - {killSwitch.scope || 'All'}
                     </p>
-                    {killSwitch.status === 'ACTIVE' && killSwitch.activatedAt && (
+                    {killSwitch.active && killSwitch.activated_at && (
                       <p className="text-xs text-red-600 mt-1">
-                        Activated {formatDateTime(killSwitch.activatedAt)} by{' '}
-                        {killSwitch.activatedBy}
+                        Activated {formatDateTime(killSwitch.activated_at)} by{' '}
+                        {killSwitch.activated_by}
                       </p>
                     )}
                   </div>
                 </div>
                 <div className="flex items-center space-x-2">
                   <Badge
-                    variant={killSwitch.status === 'ACTIVE' ? 'danger' : 'success'}
+                    variant={killSwitch.active ? 'danger' : 'success'}
                   >
-                    {killSwitch.status}
+                    {killSwitch.active ? 'ACTIVE' : 'INACTIVE'}
                   </Badge>
                   <Button
-                    variant={killSwitch.status === 'ACTIVE' ? 'secondary' : 'danger'}
+                    variant={killSwitch.active ? 'secondary' : 'danger'}
                     size="sm"
                     onClick={() => {
                       setSelectedSwitch(killSwitch);
                       setAction(
-                        killSwitch.status === 'ACTIVE' ? 'deactivate' : 'activate'
+                        killSwitch.active ? 'deactivate' : 'activate'
                       );
                       setShowConfirm(true);
                     }}
                   >
                     <Power className="h-4 w-4 mr-1" />
-                    {killSwitch.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                    {killSwitch.active ? 'Deactivate' : 'Activate'}
                   </Button>
                 </div>
               </div>

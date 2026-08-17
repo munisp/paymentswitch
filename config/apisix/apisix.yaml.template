@@ -112,7 +112,7 @@ routes:
     upstream_id: keycloak
     plugins:
       proxy-rewrite:
-        regex_uri: ["^/auth/(.*)", "/realms/payment-switch/protocol/openid-connect/$1"]
+        regex_uri: ["^/auth/(.*)", "/$1"]
 
   # Public API endpoints (no auth required)
   - id: public-api
@@ -124,7 +124,7 @@ routes:
         burst: 50
         key: remote_addr
       cors:
-        allow_origins: "${{PORTAL_ALLOWED_ORIGIN}}"
+        allow_origins: "__PORTAL_ALLOWED_ORIGIN__"
         allow_methods: "GET,POST,OPTIONS"
         allow_headers: "Content-Type,Authorization,X-Request-ID"
         expose_headers: "X-Request-ID"
@@ -153,7 +153,7 @@ routes:
         burst: 500
         key: consumer_name
       cors:
-        allow_origins: "${{PORTAL_ALLOWED_ORIGIN}}"
+        allow_origins: "__PORTAL_ALLOWED_ORIGIN__"
         allow_methods: "GET,POST,OPTIONS"
         allow_headers: "Content-Type,Authorization,X-Request-ID"
         expose_headers: "X-Request-ID"
@@ -180,7 +180,7 @@ routes:
         burst: 500
         key: consumer_name
       cors:
-        allow_origins: "${{PORTAL_ALLOWED_ORIGIN}}"
+        allow_origins: "__PORTAL_ALLOWED_ORIGIN__"
         allow_methods: "GET,POST,PUT,DELETE,PATCH,OPTIONS"
         allow_headers: "Content-Type,Authorization,X-Request-ID"
         expose_headers: "X-Request-ID"
