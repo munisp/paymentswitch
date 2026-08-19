@@ -1,26 +1,43 @@
 import 'package:flutter/foundation.dart';
+import 'package:local_auth/local_auth.dart' as local_auth;
 
 enum BiometricType { fingerprint, faceId, iris, none }
 
 class BiometricService {
+  BiometricService({local_auth.LocalAuthentication? localAuthentication})
+      : _localAuthentication = localAuthentication ?? local_auth.LocalAuthentication();
+
   static final BiometricService _instance = BiometricService._internal();
   factory BiometricService() => _instance;
-  BiometricService._internal();
+  BiometricService._internal() : _localAuthentication = local_auth.LocalAuthentication();
 
+  final local_auth.LocalAuthentication _localAuthentication;
   bool _isAvailable = false;
   BiometricType _type = BiometricType.none;
 
   Future<bool> checkAvailability() async {
     try {
-      // local_auth package would be used here:
-      // final auth = LocalAuthentication();
-      // _isAvailable = await auth.canCheckBiometrics;
-      // final biometrics = await auth.getAvailableBiometrics();
-      _isAvailable = true; // Platform check placeholder
-      _type = BiometricType.fingerprint;
+      final supported = await _localAuthentication.isDeviceSupported();
+      final canCheck = await _localAuthentication.canCheckBiometrics;
+      if (!supported || !canCheck) {
+        _isAvailable = false;
+        _type = BiometricType.none;
+        return false;
+      }
+      final biometrics = await _localAuthentication.getAvailableBiometrics();
+      _type = biometrics.contains(local_auth.BiometricType.face) || biometrics.contains(local_auth.BiometricType.strong)
+          ? BiometricType.faceId
+          : biometrics.contains(local_auth.BiometricType.iris)
+              ? BiometricType.iris
+              : biometrics.contains(local_auth.BiometricType.fingerprint) || biometrics.contains(local_auth.BiometricType.weak)
+                  ? BiometricType.fingerprint
+                  : BiometricType.none;
+      _isAvailable = _type != BiometricType.none;
       return _isAvailable;
-    } catch (e) {
-      debugPrint('[Biometric] Availability check failed: $e');
+    } catch (error) {
+      debugPrint('[Biometric] Availability check failed: $error');
+      _isAvailable = false;
+      _type = BiometricType.none;
       return false;
     }
   }
@@ -29,30 +46,24 @@ class BiometricService {
   bool get isAvailable => _isAvailable;
 
   Future<bool> authenticate({String reason = 'Verify your identity'}) async {
-    if (!_isAvailable) return false;
+    if (!await checkAvailability()) return false;
     try {
-      // final auth = LocalAuthentication();
-      // return await auth.authenticate(
-      //   localizedReason: reason,
-      //   options: const AuthenticationOptions(
-      //     stickyAuth: true,
-      //     biometricOnly: true,
-      //   ),
-      // );
-      debugPrint('[Biometric] Authentication requested: $reason');
-      return true; // Placeholder - actual implementation uses local_auth
-    } catch (e) {
-      debugPrint('[Biometric] Authentication failed: $e');
+      return await _localAuthentication.authenticate(
+        localizedReason: reason,
+        options: const local_auth.AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: true,
+          sensitiveTransaction: true,
+        ),
+      );
+    } catch (error) {
+      debugPrint('[Biometric] Authentication failed: $error');
       return false;
     }
   }
 
-  Future<bool> authenticateForPayment(double amount, String currency) async {
-    final reason = 'Authorize payment of $currency ${amount.toStringAsFixed(2)}';
-    return authenticate(reason: reason);
-  }
+  Future<bool> authenticateForPayment(double amount, String currency) =>
+      authenticate(reason: 'Authorize payment of $currency ${amount.toStringAsFixed(2)}');
 
-  Future<bool> authenticateForLogin() async {
-    return authenticate(reason: 'Sign in to Payment Switch');
-  }
+  Future<bool> authenticateForLogin() => authenticate(reason: 'Sign in to Payment Switch');
 }

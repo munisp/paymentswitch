@@ -250,6 +250,47 @@
       ]
     },
     {
+      "clientId": "payment-switch-mobile",
+      "name": "Payment Switch Mobile",
+      "description": "Native mobile Authorization Code + PKCE client",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "${MOBILE_AUTH_REDIRECT_URI}"
+      ],
+      "webOrigins": [],
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": false,
+      "pkceCodeChallengeMethod": "S256",
+      "defaultClientScopes": [
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "offline_access"
+      ],
+      "protocolMappers": [
+        {
+          "name": "payment-switch-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "payment-switch-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
       "clientId": "payment-switch-api",
       "name": "Payment Switch API",
       "description": "Backend API for Payment Switch services",

@@ -183,6 +183,9 @@ services:
       PAYMENT_CORE_URL: http://go-ledger:8080
       FRAUD_DETECTION_URL: http://fraud-detection:8081
       ANALYTICS_URL: http://data-pipeline:8082
+      # Authoritative payment-rail, operations, monitoring, settlement, and developer configuration service
+      OPERATIONAL_CONFIGURATION_URL: ${OPERATIONAL_CONFIGURATION_URL:?OPERATIONAL_CONFIGURATION_URL must be set}
+      OPERATIONAL_CONFIGURATION_TOKEN: ${OPERATIONAL_CONFIGURATION_TOKEN:?OPERATIONAL_CONFIGURATION_TOKEN must be set}
       
       # Node Environment
       NODE_ENV: production
@@ -412,6 +415,7 @@ services:
       PORTAL_REDIRECT_URI: ${PORTAL_REDIRECT_URI:?PORTAL_REDIRECT_URI must be set}
       ADMIN_DASHBOARD_ALLOWED_ORIGIN: ${ADMIN_DASHBOARD_ALLOWED_ORIGIN:?ADMIN_DASHBOARD_ALLOWED_ORIGIN must be set}
       ADMIN_AUTH_REDIRECT_URI: ${ADMIN_AUTH_REDIRECT_URI:?ADMIN_AUTH_REDIRECT_URI must be set}
+      MOBILE_AUTH_REDIRECT_URI: ${MOBILE_AUTH_REDIRECT_URI:?MOBILE_AUTH_REDIRECT_URI must be set}
     volumes:
       - ./config/keycloak/realm-export.json:/opt/keycloak/data/import/payment-switch-realm.json:ro
     depends_on:

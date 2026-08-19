@@ -12,7 +12,6 @@ import { startRetryProcessor } from "../onboarding/retryScheduler";
 import { startTestScheduler } from "../onboarding/testScheduler";
 import { startRateAlertMonitor } from "../jobs/rateAlertMonitor";
 import { startCleanupJob } from "../jobs/cleanupJob";
-import { seedOutboundData } from "../services/outboundRemittanceDbService";
 import { startTransferLifecycleWorker, stopTransferLifecycleWorker } from "../services/transferLifecycleWorker";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { generalRateLimiter, rateLimitErrorHandler } from "../middleware/rateLimitMiddleware";
@@ -182,13 +181,6 @@ async function startServer() {
     
     // Start cleanup job
     startCleanupJob();
-    
-    // Seed outbound remittance data (idempotent — only runs if tables are empty)
-    try {
-      await seedOutboundData();
-    } catch (err) {
-      logger.warn({ err }, 'Outbound remittance seeding skipped');
-    }
     
     // Start transfer lifecycle background worker
     startTransferLifecycleWorker();
