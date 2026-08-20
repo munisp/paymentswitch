@@ -20,17 +20,16 @@ data:
     
     # Allow payment processing for authenticated users with valid roles
     allow if {
-      input.method == "POST"
-      input.path == "/api/v1/payments/process"
+      input.request.method == "POST"
+      input.request.path == "/api/v1/payments/process"
       has_valid_token
       has_payment_role
-      not_rate_limited
     }
     
     # Allow payment status queries for authenticated users
     allow if {
-      input.method == "GET"
-      startswith(input.path, "/api/v1/payments/status/")
+      input.request.method == "GET"
+      startswith(input.request.path, "/api/v1/payments/status/")
       has_valid_token
       has_query_role
     }
@@ -55,10 +54,8 @@ data:
       "payment:query" in input.verified_jwt.roles
     }
     
-    # Check if request is not rate limited
-    not_rate_limited if {
-      input.rate_limit.current < input.rate_limit.max
-    }
+    # APISIX limit-req is enforced independently in the gateway plugin chain.
+    # The standard OPA input envelope does not contain live rate-limit counters.
     
     # Deny reasons
     reason["invalid_token"] if {
@@ -71,9 +68,6 @@ data:
       not has_query_role
     }
     
-    reason["rate_limit_exceeded"] if {
-      input.rate_limit.current >= input.rate_limit.max
-    }
 
   fraud-detection-policy.rego: |
     package fraud.detection

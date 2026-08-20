@@ -244,8 +244,12 @@ metadata:
   namespace: payment-switch
 spec:
   serviceName: tigerbeetle
-  replicas: 3
+  # TigerBeetle recommends six replicas on dedicated machines for production.
+  # Cluster membership is fixed at format time; do not scale this StatefulSet.
+  replicas: 6
   podManagementPolicy: Parallel
+  updateStrategy:
+    type: OnDelete
   selector:
     matchLabels:
       app: tigerbeetle
@@ -262,24 +266,36 @@ spec:
                   app: tigerbeetle
               topologyKey: kubernetes.io/hostname
       
+      securityContext:
+        seccompProfile:
+          # TigerBeetle uses io_uring. Production admission controls must permit
+          # this profile only for the dedicated ledger namespace.
+          type: Unconfined
       containers:
         - name: tigerbeetle
-          image: ghcr.io/tigerbeetle/tigerbeetle:latest
+          image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9
           imagePullPolicy: IfNotPresent
-          
-          command:
-            - /tigerbeetle
-            - start
-            - --cluster=0
-            - --replica=$(POD_INDEX)
-            - --addresses=tigerbeetle-0.tigerbeetle.payment-switch:3000,tigerbeetle-1.tigerbeetle.payment-switch:3000,tigerbeetle-2.tigerbeetle.payment-switch:3000
-            - /data/cluster_0_replica_$(POD_INDEX).tigerbeetle
-          
+          securityContext:
+            capabilities:
+              add: ["IPC_LOCK"]
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              ordinal="${HOSTNAME##*-}"
+              data_file="/data/${TIGERBEETLE_CLUSTER_ID}_${ordinal}.tigerbeetle"
+              addresses="tigerbeetle-0.tigerbeetle.payment-switch.svc.cluster.local:3000,tigerbeetle-1.tigerbeetle.payment-switch.svc.cluster.local:3000,tigerbeetle-2.tigerbeetle.payment-switch.svc.cluster.local:3000,tigerbeetle-3.tigerbeetle.payment-switch.svc.cluster.local:3000,tigerbeetle-4.tigerbeetle.payment-switch.svc.cluster.local:3000,tigerbeetle-5.tigerbeetle.payment-switch.svc.cluster.local:3000"
+              case "$ordinal" in 0|1|2|3|4|5) ;; *) echo "invalid StatefulSet ordinal: $ordinal" >&2; exit 1;; esac
+              test -n "${TIGERBEETLE_CLUSTER_ID:-}" || { echo "TIGERBEETLE_CLUSTER_ID is required" >&2; exit 1; }
+              if [ ! -f "$data_file" ]; then
+                /tigerbeetle format --cluster="$TIGERBEETLE_CLUSTER_ID" --replica-count=6 --replica="$ordinal" "$data_file"
+              fi
+              exec /tigerbeetle start --addresses="$addresses" "$data_file"
           env:
-            - name: POD_INDEX
+            - name: TIGERBEETLE_CLUSTER_ID
               valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
+                secretKeyRef:
+                  name: tigerbeetle-credentials
+                  key: cluster-id
           
           ports:
             - containerPort: 3000
