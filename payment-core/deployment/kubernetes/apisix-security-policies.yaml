@@ -430,7 +430,9 @@ spec:
     - name: opa
       enable: true
       config:
-        host: http://opa.apisix:8181
+        # The adapter independently verifies Keycloak RS256/JWKS claims and
+        # constructs input.verified_jwt before it calls the internal OPA server.
+        host: http://opa-verified-claims-adapter.payment-switch.svc.cluster.local:8080
         policy: payment/authorization
         with_route: true
         with_service: true
