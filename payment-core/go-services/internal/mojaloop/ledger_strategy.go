@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -198,8 +199,12 @@ func (o *LedgerOrchestrator) executeInTigerBeetle(ctx context.Context, req *Exec
 	// Use the real TigerBeetle client for transfer execution
 	client := GetTigerBeetleClient()
 
-	// Get currency ledger
-	ledger := GetCurrencyLedger(req.Currency)
+	// Get currency ledger. An unsupported currency must fail before any
+	// account movement; it must never be routed to a default ledger.
+	ledger, err := RequireCurrencyLedger(req.Currency)
+	if err != nil {
+		return nil, err
+	}
 
 	// Execute payment transfer with two-phase commit
 	result, err := ExecutePaymentTransfer(
@@ -447,10 +452,18 @@ func GetCurrencyLedger(currency string) uint32 {
 		"UGX": 9,
 		"RWF": 10,
 	}
-	if ledger, ok := currencyLedgers[currency]; ok {
-		return ledger
+	return currencyLedgers[strings.ToUpper(strings.TrimSpace(currency))]
+}
+
+// RequireCurrencyLedger returns the configured TigerBeetle ledger or rejects an
+// unsupported currency. Ledger zero is reserved and must never be used as a
+// silent fallback for a payment instruction.
+func RequireCurrencyLedger(currency string) (uint32, error) {
+	ledger := GetCurrencyLedger(currency)
+	if ledger == 0 {
+		return 0, fmt.Errorf("unsupported settlement currency %q", currency)
 	}
-	return 1 // Default to USD ledger
+	return ledger, nil
 }
 
 // Singleton instance

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/big"
 	"net"
 	"sync"
 	"time"
@@ -328,6 +329,14 @@ func (c *Client) GetAccountBalance(ctx context.Context, accountID uint64) (*Bala
 	}
 
 	account := accounts[0]
+	available, err := checkedSignedDifference(account.CreditsPosted, account.DebitsPosted)
+	if err != nil {
+		return nil, fmt.Errorf("posted balance for account %d is not representable: %w", accountID, err)
+	}
+	pending, err := checkedSignedDifference(account.CreditsPending, account.DebitsPending)
+	if err != nil {
+		return nil, fmt.Errorf("pending balance for account %d is not representable: %w", accountID, err)
+	}
 
 	return &Balance{
 		AccountID:        account.ID,
@@ -335,9 +344,18 @@ func (c *Client) GetAccountBalance(ctx context.Context, accountID uint64) (*Bala
 		DebitsPosted:     account.DebitsPosted,
 		CreditsPending:   account.CreditsPending,
 		CreditsPosted:    account.CreditsPosted,
-		AvailableBalance: int64(account.CreditsPosted) - int64(account.DebitsPosted),
-		PendingBalance:   int64(account.CreditsPending) - int64(account.DebitsPending),
+		AvailableBalance: available,
+		PendingBalance:   pending,
 	}, nil
+}
+
+func checkedSignedDifference(credits, debits uint64) (int64, error) {
+	value := new(big.Int).SetUint64(credits)
+	value.Sub(value, new(big.Int).SetUint64(debits))
+	if !value.IsInt64() {
+		return 0, fmt.Errorf("balance difference overflows int64")
+	}
+	return value.Int64(), nil
 }
 
 // sendRequest sends a request to TigerBeetle and receives the response

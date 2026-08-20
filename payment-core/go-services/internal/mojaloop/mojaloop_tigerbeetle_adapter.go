@@ -153,8 +153,17 @@ func (a *ProductionMojaloopAdapter) PrepareTransfer(
 		timeout = 30
 	}
 
-	// Create PENDING transfer in TigerBeetle
-	ledger := GetCurrencyLedger(req.Currency)
+	// Reject an unsupported currency before creating any pending movement.
+	ledger, err := RequireCurrencyLedger(req.Currency)
+	if err != nil {
+		return &PrepareTransferResponse{
+			Success:          false,
+			TransferID:       req.TransferID,
+			State:            TransferStateAborted,
+			ErrorCode:        "3200",
+			ErrorDescription: err.Error(),
+		}, nil
+	}
 	result, err := a.tbClient.CreateTransfer(
 		ctx,
 		tbTransferID,
@@ -393,9 +402,12 @@ func (a *ProductionMojaloopAdapter) RegisterParticipant(
 	accountID uint64,
 	currency string,
 ) error {
-	// Create account in TigerBeetle
-	ledger := GetCurrencyLedger(currency)
-	_, err := a.tbClient.CreateAccount(
+	// Create account in TigerBeetle only for a configured currency ledger.
+	ledger, err := RequireCurrencyLedger(currency)
+	if err != nil {
+		return err
+	}
+	_, err = a.tbClient.CreateAccount(
 		ctx,
 		accountID,
 		ledger,
@@ -421,24 +433,28 @@ func (a *ProductionMojaloopAdapter) GetTransfer(ctx context.Context, transferID 
 	return a.store.GetTransfer(ctx, transferID)
 }
 
-// Singleton for production adapter
+// Singleton for production adapter. Initialization is deliberately retryable:
+// a temporary database outage must produce an explicit unavailable response, not
+// permanently cache a nil adapter through sync.Once.
 var (
-	productionAdapter     *ProductionMojaloopAdapter
-	productionAdapterOnce sync.Once
+	productionAdapter   *ProductionMojaloopAdapter
+	productionAdapterMu sync.Mutex
 )
 
-// GetProductionMojaloopAdapter returns the singleton production adapter
-// This requires TransferStore to be initialized first
-func GetProductionMojaloopAdapter() *ProductionMojaloopAdapter {
-	productionAdapterOnce.Do(func() {
-		store, err := GetTransferStore()
-		if err != nil {
-			log.Printf("Warning: Failed to get transfer store: %v", err)
-			return
-		}
-		productionAdapter = NewProductionMojaloopAdapter(store)
-	})
-	return productionAdapter
+// GetProductionMojaloopAdapter returns the durable adapter or an explicit
+// initialization error. Callers must surface this as service unavailable.
+func GetProductionMojaloopAdapter() (*ProductionMojaloopAdapter, error) {
+	productionAdapterMu.Lock()
+	defer productionAdapterMu.Unlock()
+	if productionAdapter != nil {
+		return productionAdapter, nil
+	}
+	store, err := GetTransferStore()
+	if err != nil {
+		return nil, fmt.Errorf("production transfer store unavailable: %w", err)
+	}
+	productionAdapter = NewProductionMojaloopAdapter(store)
+	return productionAdapter, nil
 }
 
 // RegisterParticipant registers a Mojaloop participant with a TigerBeetle account
@@ -451,9 +467,13 @@ func (a *MojaloopTigerBeetleAdapter) RegisterParticipant(
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Create account in TigerBeetle
-	ledger := GetCurrencyLedger(currency)
-	_, err := a.tbClient.CreateAccount(
+	// Development adapter remains unreachable from production routes, but it
+	// must also refuse unsupported currencies rather than defaulting to USD.
+	ledger, err := RequireCurrencyLedger(currency)
+	if err != nil {
+		return err
+	}
+	_, err = a.tbClient.CreateAccount(
 		ctx,
 		accountID,
 		ledger,

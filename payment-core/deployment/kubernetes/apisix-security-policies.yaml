@@ -35,26 +35,24 @@ data:
       has_query_role
     }
     
-    # Check if user has valid JWT token
+    # OPA must never parse an unverified bearer token itself. APISIX/OIDC must
+    # validate the signature, issuer, audience, and expiry first, then pass a
+    # trusted verified_jwt object into this policy input. Missing evidence denies.
     has_valid_token if {
-      token := input.headers.authorization
-      startswith(token, "Bearer ")
-      jwt_payload := io.jwt.decode(trim_prefix(token, "Bearer "))[1]
-      jwt_payload.exp > time.now_ns() / 1000000000
+      input.verified_jwt.valid == true
+      input.verified_jwt.exp > time.now_ns() / 1000000000
     }
     
-    # Check if user has payment processing role
+    # Check roles only from the gateway-provided verified claim set.
     has_payment_role if {
-      token := input.headers.authorization
-      jwt_payload := io.jwt.decode(trim_prefix(token, "Bearer "))[1]
-      "payment:process" in jwt_payload.roles
+      has_valid_token
+      "payment:process" in input.verified_jwt.roles
     }
     
-    # Check if user has query role
+    # Check query access only from the gateway-provided verified claim set.
     has_query_role if {
-      token := input.headers.authorization
-      jwt_payload := io.jwt.decode(trim_prefix(token, "Bearer "))[1]
-      "payment:query" in jwt_payload.roles
+      has_valid_token
+      "payment:query" in input.verified_jwt.roles
     }
     
     # Check if request is not rate limited

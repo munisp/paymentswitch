@@ -7,10 +7,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"sync"
-	"time"
+
+	realtigerbeetle "github.com/payment-switch/go-services/internal/tigerbeetle"
 )
 
 // TigerBeetle Constants
@@ -160,13 +160,13 @@ func TransferFromBytes(data []byte) *Transfer {
 
 // TigerBeetleClient is a production client for TigerBeetle
 type TigerBeetleClient struct {
-	host      string
-	port      int
-	clusterID uint64
-	conn      net.Conn
-	connected bool
-	requestID uint64
-	mu        sync.Mutex
+	host       string
+	port       int
+	clusterID  uint64
+	realClient *realtigerbeetle.Client
+	connected  bool
+	requestID  uint64
+	mu         sync.Mutex
 }
 
 // TigerBeetleConfig holds configuration for the TigerBeetle client
@@ -212,43 +212,52 @@ func NewTigerBeetleClient(config *TigerBeetleConfig) *TigerBeetleClient {
 	}
 }
 
-// Connect establishes a connection to the TigerBeetle cluster
+// Connect initializes the pooled production TigerBeetle transport. The cluster
+// identifier is mandatory: a zero/default value could target the wrong ledger.
 func (c *TigerBeetleClient) Connect(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	if c.connected {
+	if c.connected && c.realClient != nil {
 		return nil
 	}
-
-	addr := fmt.Sprintf("%s:%d", c.host, c.port)
-	dialer := net.Dialer{Timeout: 5 * time.Second}
-
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return fmt.Errorf("failed to connect to TigerBeetle at %s: %w", addr, err)
+	if c.clusterID == 0 || c.clusterID > uint64(^uint32(0)) {
+		return fmt.Errorf("TIGERBEETLE_CLUSTER_ID must be a nonzero uint32")
 	}
-
-	c.conn = conn
+	addr := fmt.Sprintf("%s:%d", c.host, c.port)
+	client, err := realtigerbeetle.NewClient(uint32(c.clusterID), []string{addr}, 10)
+	if err != nil {
+		return fmt.Errorf("failed to initialize TigerBeetle client for %s: %w", addr, err)
+	}
+	c.realClient = client
 	c.connected = true
-	log.Printf("Connected to TigerBeetle at %s", addr)
+	log.Printf("Initialized pooled TigerBeetle client for %s", addr)
 	return nil
 }
 
-// Disconnect closes the connection to TigerBeetle
+// Disconnect closes the pooled production TigerBeetle transport.
 func (c *TigerBeetleClient) Disconnect() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	if !c.connected || c.conn == nil {
+	if c.realClient == nil {
+		c.connected = false
 		return nil
 	}
-
-	err := c.conn.Close()
+	err := c.realClient.Close()
+	c.realClient = nil
 	c.connected = false
-	c.conn = nil
-	log.Println("Disconnected from TigerBeetle")
 	return err
+}
+
+func (c *TigerBeetleClient) productionClient(ctx context.Context) (*realtigerbeetle.Client, error) {
+	if err := c.ensureConnected(ctx); err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.realClient == nil {
+		return nil, fmt.Errorf("TigerBeetle client is unavailable")
+	}
+	return c.realClient, nil
 }
 
 func (c *TigerBeetleClient) nextRequestID() uint64 {
@@ -273,48 +282,37 @@ func (c *TigerBeetleClient) CreateAccount(
 	flags AccountFlags,
 	userData uint64,
 ) (*CreateAccountResult, error) {
-	if err := c.ensureConnected(ctx); err != nil {
+	client, err := c.productionClient(ctx)
+	if err != nil {
 		return nil, err
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	account := &Account{
-		ID:          accountID,
-		Ledger:      ledger,
-		Code:        code,
-		Flags:       flags,
-		UserData128: userData,
+	if err := client.CreateAccounts(ctx, []realtigerbeetle.Account{{
+		ID: accountID, Ledger: ledger, Code: code, Flags: uint16(flags), UserData: userData,
+	}}); err != nil {
+		return nil, fmt.Errorf("TigerBeetle account creation failed: %w", err)
 	}
-
-	log.Printf("Creating account %d on ledger %d", accountID, ledger)
-
-	// In production, this would send the actual TigerBeetle protocol message
-	_ = account.ToBytes()
-
 	return &CreateAccountResult{Success: true}, nil
 }
 
 // GetAccount looks up an account by ID
 func (c *TigerBeetleClient) GetAccount(ctx context.Context, accountID uint64) (*Account, error) {
-	if err := c.ensureConnected(ctx); err != nil {
+	client, err := c.productionClient(ctx)
+	if err != nil {
 		return nil, err
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	log.Printf("Looking up account %d", accountID)
-
-	// In production, this would query TigerBeetle
-	// Return a simulated account for now
+	accounts, err := client.LookupAccounts(ctx, []uint64{accountID})
+	if err != nil {
+		return nil, fmt.Errorf("TigerBeetle account lookup failed: %w", err)
+	}
+	if len(accounts) != 1 {
+		return nil, fmt.Errorf("TigerBeetle account %d not found", accountID)
+	}
+	a := accounts[0]
 	return &Account{
-		ID:            accountID,
-		Ledger:        1,
-		Code:          1,
-		CreditsPosted: 1000000, // $10,000.00 in cents
-		DebitsPosted:  0,
+		ID: a.ID, DebitsPending: a.DebitsPending, DebitsPosted: a.DebitsPosted,
+		CreditsPending: a.CreditsPending, CreditsPosted: a.CreditsPosted,
+		UserData64: a.UserData, Ledger: a.Ledger, Code: a.Code,
+		Flags: AccountFlags(a.Flags), Timestamp: a.Timestamp,
 	}, nil
 }
 
@@ -350,36 +348,24 @@ func (c *TigerBeetleClient) CreateTransfer(
 	pending bool,
 	timeout uint32,
 ) (*CreateTransferResult, error) {
-	if err := c.ensureConnected(ctx); err != nil {
+	if transferID == 0 || debitAccountID == 0 || creditAccountID == 0 || debitAccountID == creditAccountID || amount == 0 || ledger == 0 {
+		return nil, fmt.Errorf("invalid TigerBeetle transfer parameters")
+	}
+	client, err := c.productionClient(ctx)
+	if err != nil {
 		return nil, err
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	transferFlags := flags
+	transferFlags := uint16(flags)
 	if pending {
-		transferFlags |= TransferFlagPending
+		transferFlags |= uint16(realtigerbeetle.TransferFlagPending)
 	}
-
-	transfer := &Transfer{
-		ID:              transferID,
-		DebitAccountID:  debitAccountID,
-		CreditAccountID: creditAccountID,
-		Amount:          amount,
-		Ledger:          ledger,
-		Code:            code,
-		Flags:           transferFlags,
-		Timeout:         timeout,
-		UserData128:     userData,
+	if err := client.CreateTransfers(ctx, []realtigerbeetle.Transfer{{
+		ID: transferID, DebitAccountID: debitAccountID, CreditAccountID: creditAccountID,
+		Amount: amount, Ledger: ledger, Code: code, Flags: transferFlags,
+		UserData: userData, Timeout: uint64(timeout),
+	}}); err != nil {
+		return nil, fmt.Errorf("TigerBeetle transfer creation failed: %w", err)
 	}
-
-	log.Printf("Creating transfer %d: %d -> %d, amount=%d, pending=%v",
-		transferID, debitAccountID, creditAccountID, amount, pending)
-
-	// In production, this would send the actual TigerBeetle protocol message
-	_ = transfer.ToBytes()
-
 	return &CreateTransferResult{Success: true}, nil
 }
 
@@ -389,23 +375,18 @@ func (c *TigerBeetleClient) PostPendingTransfer(
 	transferID uint64,
 	pendingID uint64,
 ) (*CreateTransferResult, error) {
-	if err := c.ensureConnected(ctx); err != nil {
+	if transferID == 0 || pendingID == 0 || transferID == pendingID {
+		return nil, fmt.Errorf("invalid pending-transfer post identifiers")
+	}
+	client, err := c.productionClient(ctx)
+	if err != nil {
 		return nil, err
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	transfer := &Transfer{
-		ID:        transferID,
-		PendingID: pendingID,
-		Flags:     TransferFlagPostPendingTransfer,
+	if err := client.CreateTransfers(ctx, []realtigerbeetle.Transfer{{
+		ID: transferID, PendingID: pendingID, Flags: uint16(realtigerbeetle.TransferFlagPostPendingTransfer),
+	}}); err != nil {
+		return nil, fmt.Errorf("TigerBeetle pending-transfer post failed: %w", err)
 	}
-
-	log.Printf("Posting pending transfer %d", pendingID)
-
-	_ = transfer.ToBytes()
-
 	return &CreateTransferResult{Success: true}, nil
 }
 
@@ -415,23 +396,18 @@ func (c *TigerBeetleClient) VoidPendingTransfer(
 	transferID uint64,
 	pendingID uint64,
 ) (*CreateTransferResult, error) {
-	if err := c.ensureConnected(ctx); err != nil {
+	if transferID == 0 || pendingID == 0 || transferID == pendingID {
+		return nil, fmt.Errorf("invalid pending-transfer void identifiers")
+	}
+	client, err := c.productionClient(ctx)
+	if err != nil {
 		return nil, err
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	transfer := &Transfer{
-		ID:        transferID,
-		PendingID: pendingID,
-		Flags:     TransferFlagVoidPendingTransfer,
+	if err := client.CreateTransfers(ctx, []realtigerbeetle.Transfer{{
+		ID: transferID, PendingID: pendingID, Flags: uint16(realtigerbeetle.TransferFlagVoidPendingTransfer),
+	}}); err != nil {
+		return nil, fmt.Errorf("TigerBeetle pending-transfer void failed: %w", err)
 	}
-
-	log.Printf("Voiding pending transfer %d", pendingID)
-
-	_ = transfer.ToBytes()
-
 	return &CreateTransferResult{Success: true}, nil
 }
 
@@ -448,33 +424,7 @@ func (c *TigerBeetleClient) CreateLinkedTransfers(
 	ctx context.Context,
 	transfers []LinkedTransfer,
 ) (*CreateTransferResult, error) {
-	if err := c.ensureConnected(ctx); err != nil {
-		return nil, err
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for i, t := range transfers {
-		var flags TransferFlags
-		if i < len(transfers)-1 {
-			flags = TransferFlagLinked
-		}
-
-		log.Printf("Linked transfer %d/%d: %d -> %d, amount=%d",
-			i+1, len(transfers), t.DebitAccountID, t.CreditAccountID, t.Amount)
-
-		transfer := &Transfer{
-			ID:              t.TransferID,
-			DebitAccountID:  t.DebitAccountID,
-			CreditAccountID: t.CreditAccountID,
-			Amount:          t.Amount,
-			Flags:           flags,
-		}
-		_ = transfer.ToBytes()
-	}
-
-	return &CreateTransferResult{Success: true}, nil
+	return nil, fmt.Errorf("legacy Mojaloop TigerBeetle client is disabled: it cannot create durable linked transfers")
 }
 
 func (c *TigerBeetleClient) ensureConnected(ctx context.Context) error {
