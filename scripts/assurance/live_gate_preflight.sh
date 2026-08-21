@@ -69,6 +69,23 @@ for variable in \
   required "$variable"
 done
 
+# A populated variable is not sufficient evidence. Reject obvious mock/example
+# sentinels so local simulation configuration cannot be mistaken for a live gate.
+for variable in \
+  POSTGRES_PASSWORD DATABASE_URL PERMIFY_DATABASE_URI REDIS_PASSWORD \
+  MOJALOOP_POSTGRES_PASSWORD JWT_SECRET GRAFANA_PASSWORD APISIX_ADMIN_KEY \
+  KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_APISIX_CLIENT_SECRET \
+  KEYCLOAK_CLIENT_SECRET OPERATIONAL_CONFIGURATION_TOKEN ADMIN_KEYCLOAK_CLIENT_SECRET \
+  ADMIN_AUTH_STATE_SECRET VALID_USER_BEARER_TOKEN VALID_NONADMIN_BEARER_TOKEN \
+  VALID_ADMIN_BEARER_TOKEN; do
+  value="${!variable:-}"
+  if [[ "${ASSURANCE_MOCK_MODE:-false}" == "true" ]]; then
+    fail "$variable is mock-only; live gates require a real isolated value"
+  elif [[ "$value" =~ (REPLACE_WITH|MOCK_ONLY|MOCK_|EXAMPLE|CHANGE_ME|NOT_A_REAL|PLACEHOLDER) ]]; then
+    fail "$variable contains a mock/example sentinel"
+  fi
+done
+
 if [[ -n "${TLS_CA_FILE:-}" && -r "${TLS_CA_FILE:-/nonexistent}" ]]; then
   pass 'TLS_CA_FILE is readable'
 else
