@@ -13,7 +13,7 @@ This service provides:
 import json
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional, Callable
 from dataclasses import dataclass, field, asdict
@@ -58,7 +58,7 @@ class Metric:
     type: MetricType
     value: float
     labels: Dict[str, str] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     unit: str = ""
     description: str = ""
 
@@ -101,7 +101,7 @@ class Alert:
     source: str
     labels: Dict[str, str] = field(default_factory=dict)
     annotations: Dict[str, str] = field(default_factory=dict)
-    starts_at: datetime = field(default_factory=datetime.utcnow)
+    starts_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     ends_at: Optional[datetime] = None
     acknowledged_by: Optional[str] = None
     acknowledged_at: Optional[datetime] = None
@@ -122,7 +122,7 @@ class SLO:
     current_value: float = 0.0
     error_budget_remaining: float = 100.0
     status: str = "healthy"  # healthy, warning, critical
-    last_calculated: datetime = field(default_factory=datetime.utcnow)
+    last_calculated: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -135,8 +135,8 @@ class SLI:
     good_events: int = 0
     total_events: int = 0
     value: float = 0.0  # Percentage
-    window_start: datetime = field(default_factory=datetime.utcnow)
-    window_end: datetime = field(default_factory=datetime.utcnow)
+    window_start: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    window_end: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class MetricsCollector:
@@ -321,7 +321,7 @@ class StructuredLogger:
             return None
         
         entry = LogEntry(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             level=level,
             message=message,
             service=self.service_name,
@@ -493,8 +493,8 @@ class AlertManager:
             
             alert = self._alerts[fingerprint]
             alert.status = AlertStatus.RESOLVED
-            alert.resolved_at = datetime.utcnow()
-            alert.ends_at = datetime.utcnow()
+            alert.resolved_at = datetime.now(timezone.utc)
+            alert.ends_at = datetime.now(timezone.utc)
         
         # Send resolution notification
         for channel in self._notification_channels:
@@ -514,7 +514,7 @@ class AlertManager:
             alert = self._alerts[fingerprint]
             alert.status = AlertStatus.ACKNOWLEDGED
             alert.acknowledged_by = user
-            alert.acknowledged_at = datetime.utcnow()
+            alert.acknowledged_at = datetime.now(timezone.utc)
         
         return alert
     
@@ -596,8 +596,8 @@ class SLOTracker:
                 name=name,
                 description="",
                 metric_name=name,
-                window_start=datetime.utcnow(),
-                window_end=datetime.utcnow(),
+                window_start=datetime.now(timezone.utc),
+                window_end=datetime.now(timezone.utc),
             )
         
         sli = self._slis[name]
@@ -605,7 +605,7 @@ class SLOTracker:
         if good:
             sli.good_events += 1
         sli.value = (sli.good_events / sli.total_events) * 100 if sli.total_events > 0 else 0
-        sli.window_end = datetime.utcnow()
+        sli.window_end = datetime.now(timezone.utc)
     
     def calculate_slo(self, name: str) -> Optional[SLO]:
         """Calculate current SLO status"""
@@ -633,7 +633,7 @@ class SLOTracker:
         else:
             slo.status = "critical"
         
-        slo.last_calculated = datetime.utcnow()
+        slo.last_calculated = datetime.now(timezone.utc)
         return slo
     
     def get_all_slos(self) -> List[SLO]:
@@ -777,7 +777,7 @@ class ObservabilityService:
         """Get data for observability dashboard"""
         return {
             "service": self.service_name,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "metrics": {
                 "requests_total": self.metrics.get_counter("http_requests_total"),
                 "errors_total": self.metrics.get_counter("http_errors_total"),

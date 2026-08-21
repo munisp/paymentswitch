@@ -9,7 +9,7 @@ Integrates with: Prometheus, Grafana, Kafka, OpenSearch, Redis
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
 from uuid import uuid4
@@ -270,11 +270,11 @@ class IncidentResponseService:
         incident = Incident(
             title=rule.name,
             severity=rule.severity,
-            detected_at=datetime.utcnow().isoformat(),
+            detected_at=datetime.now(timezone.utc).isoformat(),
             alert_rule=rule_name,
             affected_services=self._get_affected_services(rule_name),
             timeline=[{
-                "time": datetime.utcnow().isoformat(),
+                "time": datetime.now(timezone.utc).isoformat(),
                 "event": "detected",
                 "detail": f"{rule.metric} = {metric_value} (threshold: {rule.condition} {rule.threshold})",
             }],
@@ -299,11 +299,11 @@ class IncidentResponseService:
         for i, inc in enumerate(self.active_incidents):
             if inc.id == incident_id:
                 inc.status = IncidentStatus.RESOLVED
-                inc.resolved_at = datetime.utcnow().isoformat()
+                inc.resolved_at = datetime.now(timezone.utc).isoformat()
                 detected = datetime.fromisoformat(inc.detected_at)
-                inc.mttr_minutes = (datetime.utcnow() - detected).total_seconds() / 60
+                inc.mttr_minutes = (datetime.now(timezone.utc) - detected).total_seconds() / 60
                 inc.timeline.append({
-                    "time": datetime.utcnow().isoformat(),
+                    "time": datetime.now(timezone.utc).isoformat(),
                     "event": "resolved",
                     "detail": resolution,
                 })
@@ -329,7 +329,7 @@ class IncidentResponseService:
             "p1_active": len([i for i in self.active_incidents if i.severity == Severity.P1_CRITICAL]),
             "p2_active": len([i for i in self.active_incidents if i.severity == Severity.P2_HIGH]),
             "resolved_24h": len([i for i in self.resolved_incidents if i.resolved_at and
-                               datetime.fromisoformat(i.resolved_at) > datetime.utcnow() - timedelta(hours=24)]),
+                               datetime.fromisoformat(i.resolved_at) > datetime.now(timezone.utc) - timedelta(hours=24)]),
             "avg_mttr_minutes": sum(i.mttr_minutes for i in self.resolved_incidents if i.mttr_minutes) /
                                max(len([i for i in self.resolved_incidents if i.mttr_minutes]), 1),
             "alert_rules_count": len(self.alert_rules),

@@ -12,6 +12,36 @@ const log = createChildLogger('grpc-client');
 const GRPC_TIMEOUT_MS = parseInt(process.env.GRPC_TIMEOUT_MS ?? '5000', 10);
 const GRPC_MAX_RETRIES = parseInt(process.env.GRPC_MAX_RETRIES ?? '3', 10);
 const GRPC_RETRY_BASE_MS = 150;
+const GRPC_RETRY_MAX_BACKOFF_MS = 10_000;
+
+export function parseRetryAfterMs(
+  value: string | null | undefined,
+  nowMs = Date.now(),
+): number | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) {
+    return Math.min(GRPC_RETRY_MAX_BACKOFF_MS, Number(trimmed) * 1000);
+  }
+  const timestamp = Date.parse(trimmed);
+  if (Number.isNaN(timestamp)) return undefined;
+  return Math.min(GRPC_RETRY_MAX_BACKOFF_MS, Math.max(0, timestamp - nowMs));
+}
+
+export function calculateRetryDelayMs(
+  attempt: number,
+  retryAfter: string | null | undefined,
+  random = Math.random,
+  nowMs = Date.now(),
+): number {
+  const serverDelay = parseRetryAfterMs(retryAfter, nowMs);
+  if (serverDelay !== undefined) return serverDelay;
+  const cap = Math.min(
+    GRPC_RETRY_MAX_BACKOFF_MS,
+    GRPC_RETRY_BASE_MS * Math.pow(2, Math.max(0, attempt)),
+  );
+  return Math.min(cap, Math.floor(random() * (cap + 1)));
+}
 
 interface GrpcCallOptions {
   timeout?: number;
@@ -72,7 +102,10 @@ async function grpcCallWithRetry<T>(
 
       if (res.status === 503 || res.status === 429 || res.status === 500) {
         if (attempt < maxRetries - 1) {
-          const delay = GRPC_RETRY_BASE_MS * Math.pow(2, attempt);
+          const delay = calculateRetryDelayMs(
+            attempt,
+            res.headers.get('Retry-After'),
+          );
           log.warn({ method, attempt: attempt + 1, status: res.status, delay }, 'gRPC call failed, retrying');
           await new Promise(r => setTimeout(r, delay));
           continue;
@@ -85,7 +118,7 @@ async function grpcCallWithRetry<T>(
     } catch (err) {
       clearTimeout(timer);
       if (attempt < maxRetries - 1) {
-        const delay = GRPC_RETRY_BASE_MS * Math.pow(2, attempt);
+        const delay = calculateRetryDelayMs(attempt, undefined);
         log.warn({ method, attempt: attempt + 1, err, delay }, 'gRPC call error, retrying');
         await new Promise(r => setTimeout(r, delay));
         continue;

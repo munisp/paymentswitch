@@ -9,7 +9,7 @@ Covers:
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from enum import Enum
 from typing import Optional
 import csv
@@ -61,7 +61,7 @@ class GeneratedReport:
     content: str  # Serialized report content
     format: str
     row_count: int
-    generated_at: datetime = field(default_factory=datetime.utcnow)
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     submitted_at: Optional[datetime] = None
     cbn_reference: Optional[str] = None
     validation_errors: list = field(default_factory=list)
@@ -240,7 +240,7 @@ class CBNReportingService:
             "report_type": "monthly_compliance",
             "period": f"{year}-{month:02d}",
             "metrics": compliance_data,
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "institution": "National Outbound Remittance Platform",
         }, indent=2)
         
@@ -302,8 +302,8 @@ class CBNReportingService:
         
         # Simulate submission to CBN eFASS portal
         report.status = ReportStatus.SUBMITTED
-        report.submitted_at = datetime.utcnow()
-        report.cbn_reference = f"CBN-{report.report_type.value.upper()}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        report.submitted_at = datetime.now(timezone.utc)
+        report.cbn_reference = f"CBN-{report.report_type.value.upper()}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
         
         return {
             "success": True,

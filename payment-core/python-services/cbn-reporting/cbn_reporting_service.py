@@ -15,7 +15,7 @@ Integrates with: PostgreSQL, OpenSearch, Kafka, Lakehouse
 import json
 import logging
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from enum import Enum
 from typing import Optional
 from uuid import uuid4
@@ -223,7 +223,7 @@ class CBNReportingService:
             frequency=ReportFrequency.MONTHLY,
             period_start=period_start.isoformat(),
             period_end=period_end.isoformat(),
-            generated_at=datetime.utcnow().isoformat(),
+            generated_at=datetime.now(timezone.utc).isoformat(),
             due_date=(period_end + timedelta(days=15)).isoformat(),
             regulator="CBN",
             department="Trade & Exchange Department",
@@ -240,7 +240,7 @@ class CBNReportingService:
             frequency=ReportFrequency.DAILY,
             period_start=report_date.isoformat(),
             period_end=report_date.isoformat(),
-            generated_at=datetime.utcnow().isoformat(),
+            generated_at=datetime.now(timezone.utc).isoformat(),
             due_date=(report_date + timedelta(days=1)).isoformat(),
             regulator="CBN",
             department="Banking Supervision",
@@ -283,12 +283,12 @@ class CBNReportingService:
             reporting_entity="Payment Switch Platform",
             suspect_name=suspect_name,
             transaction_amount_ngn=amount_ngn,
-            transaction_date=datetime.utcnow().isoformat(),
+            transaction_date=datetime.now(timezone.utc).isoformat(),
             suspicion_reason=reason,
             risk_indicators=risk_indicators,
             priority="HIGH" if amount_ngn > 50_000_000 else "MEDIUM",
             filed_by="Automated AML Engine",
-            filed_date=datetime.utcnow().isoformat(),
+            filed_date=datetime.now(timezone.utc).isoformat(),
         )
         self.str_filings.append(str_report)
         return str_report
@@ -304,7 +304,7 @@ class CBNReportingService:
             frequency=ReportFrequency.QUARTERLY,
             period_start=q_start.isoformat(),
             period_end=q_end.isoformat(),
-            generated_at=datetime.utcnow().isoformat(),
+            generated_at=datetime.now(timezone.utc).isoformat(),
             due_date=(q_end + timedelta(days=30)).isoformat(),
             regulator="CBN",
             department="Risk Management",
@@ -366,7 +366,7 @@ class CBNReportingService:
             frequency=ReportFrequency.QUARTERLY,
             period_start=f"{year}-{(quarter-1)*3+1:02d}-01",
             period_end=f"{year}-{quarter*3:02d}-28",
-            generated_at=datetime.utcnow().isoformat(),
+            generated_at=datetime.now(timezone.utc).isoformat(),
             due_date=f"{year}-{quarter*3:02d}-28",
             regulator="CBN",
             department="Financial Policy & Regulation",
