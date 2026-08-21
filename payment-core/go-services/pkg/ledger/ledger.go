@@ -449,18 +449,20 @@ func NewLedgerFactory(tigerbeetleAddresses []string, tigerbeetleClusterID uint64
 
 // Create creates a new ledger store
 func (f *LedgerFactory) Create(ctx context.Context) (LedgerStore, error) {
-	// Try TigerBeetle first if configured
 	if f.useTigerBeetle {
-		// TigerBeetle client would be created here
-		// For now, we fall back to Postgres since TigerBeetle requires io_uring
-		// which is not available in all environments
+		store, err := NewTigerBeetleStore(f.tigerbeetleClusterID, f.tigerbeetleAddresses)
+		if err != nil {
+			return nil, fmt.Errorf("configured TigerBeetle backend unavailable: %w", err)
+		}
+		if err := store.Ping(ctx); err != nil {
+			_ = store.Close()
+			return nil, fmt.Errorf("configured TigerBeetle backend failed health check: %w", err)
+		}
+		return store, nil
 	}
-
-	// Fall back to Postgres
 	if f.postgresDB != nil {
 		return NewPostgresLedger(f.postgresDB)
 	}
-
 	return nil, errors.New("no ledger backend available")
 }
 

@@ -1,6 +1,7 @@
 import { createChildLogger } from '../lib/logger';
 import { getDb } from '../db';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
+import { createHash } from 'crypto';
 import { mobileMoneyTransfers } from '../../drizzle/payments-schema';
 
 const log = createChildLogger('mobileMoney');
@@ -127,15 +128,18 @@ export async function validateMobileMoneyAccount(params: {
  * Send money to mobile money wallet
  */
 export async function sendMobileMoneyTransfer(params: {
+  ownerId: string;
+  idempotencyKey: string;
   remittanceId: string;
   provider: string;
   recipientPhone: string;
   amount: number;
   narration?: string;
 }): Promise<MobileMoneyTransfer> {
-  // Generate reference
-  const { randomBytes } = require('crypto');
-  const reference = `MOMO_${Date.now()}_${randomBytes(5).toString('hex')}`;
+  if (!params.ownerId.trim() || !params.idempotencyKey.trim()) {
+    throw new Error('ownerId and idempotencyKey are required');
+  }
+  const reference = `MOMO_${createHash('sha256').update(`${params.ownerId}:${params.idempotencyKey}`).digest('hex').slice(0, 32)}`;
 
   // Validate amount limits
   const providerInfo = getMobileMoneyProviders().find(p => p.id === params.provider);
@@ -164,6 +168,23 @@ export async function sendMobileMoneyTransfer(params: {
     throw new Error(`Mobile money provider ${params.provider} is not configured`);
   }
 
+  const existing = await db.select().from(mobileMoneyTransfers).where(and(
+    eq(mobileMoneyTransfers.ownerId, params.ownerId),
+    eq(mobileMoneyTransfers.idempotencyKey, params.idempotencyKey),
+  )).limit(1);
+  if (existing.length > 0) {
+    return {
+      reference: existing[0].reference,
+      provider: existing[0].provider,
+      recipientPhone: existing[0].recipientPhone,
+      amount: Number(existing[0].amount),
+      fee: Number(existing[0].fee),
+      status: existing[0].status as MobileMoneyTransfer['status'],
+      message: 'Existing idempotent transfer returned',
+      transactionId: existing[0].transactionId || undefined,
+    };
+  }
+
   const fee = calculateMobileMoneyFee(params.amount, params.provider);
   const result: MobileMoneyTransfer = {
     reference,
@@ -177,9 +198,47 @@ export async function sendMobileMoneyTransfer(params: {
   };
 
   try {
+    await db.insert(mobileMoneyTransfers).values({
+      id: reference,
+      ownerId: params.ownerId,
+      idempotencyKey: params.idempotencyKey,
+      remittanceId: params.remittanceId,
+      reference,
+      provider: params.provider,
+      recipientPhone: params.recipientPhone,
+      amount: String(params.amount),
+      fee: String(fee),
+      status: 'pending',
+      transactionId: null,
+    });
+  } catch (error) {
+    const duplicate = await db.select().from(mobileMoneyTransfers).where(and(
+      eq(mobileMoneyTransfers.ownerId, params.ownerId),
+      eq(mobileMoneyTransfers.idempotencyKey, params.idempotencyKey),
+    )).limit(1);
+    if (duplicate.length > 0) {
+      return {
+        reference: duplicate[0].reference,
+        provider: duplicate[0].provider,
+        recipientPhone: duplicate[0].recipientPhone,
+        amount: Number(duplicate[0].amount),
+        fee: Number(duplicate[0].fee),
+        status: duplicate[0].status as MobileMoneyTransfer['status'],
+        message: 'Existing idempotent transfer returned',
+        transactionId: duplicate[0].transactionId || undefined,
+      };
+    }
+    throw error;
+  }
+
+  try {
     const response = await fetch(`${apiUrl}/transfers`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'Idempotency-Key': params.idempotencyKey,
+      },
       body: JSON.stringify({
         reference,
         recipientPhone: params.recipientPhone,
@@ -201,19 +260,16 @@ export async function sendMobileMoneyTransfer(params: {
   }
 
   try {
-    await db.insert(mobileMoneyTransfers).values({
-      id: reference,
-      remittanceId: params.remittanceId,
-      reference,
-      provider: params.provider,
-      recipientPhone: params.recipientPhone,
-      amount: String(params.amount),
-      fee: String(fee),
+    await db.update(mobileMoneyTransfers).set({
       status: result.status,
-      transactionId: result.transactionId,
-    });
+      transactionId: result.transactionId ?? null,
+      completedAt: result.status === 'successful' || result.status === 'failed' ? new Date() : null,
+    }).where(and(
+      eq(mobileMoneyTransfers.ownerId, params.ownerId),
+      eq(mobileMoneyTransfers.reference, reference),
+    ));
   } catch (err) {
-    log.error({ err, reference }, '[Mobile Money] DB persist error');
+    log.error({ err, reference }, '[Mobile Money] DB result update error');
     throw new Error('Mobile money transfer result could not be persisted');
   }
 
@@ -223,7 +279,7 @@ export async function sendMobileMoneyTransfer(params: {
 /**
  * Get mobile money transfer status
  */
-export async function getMobileMoneyTransferStatus(reference: string): Promise<{
+export async function getMobileMoneyTransferStatus(ownerId: string, reference: string): Promise<{
   reference: string;
   status: 'successful' | 'pending' | 'failed';
   message: string;
@@ -232,7 +288,7 @@ export async function getMobileMoneyTransferStatus(reference: string): Promise<{
   const db = await getDb();
   if (db) {
     try {
-      const rows = await db.select().from(mobileMoneyTransfers).where(eq(mobileMoneyTransfers.reference, reference)).limit(1);
+      const rows = await db.select().from(mobileMoneyTransfers).where(and(eq(mobileMoneyTransfers.ownerId, ownerId), eq(mobileMoneyTransfers.reference, reference))).limit(1);
       if (rows.length > 0) {
         return {
           reference,
@@ -370,6 +426,7 @@ export async function checkMobileMoneyBalance(params: {
  * Get mobile money transaction history
  */
 export async function getMobileMoneyHistory(params: {
+  ownerId: string;
   remittanceId?: string;
   provider?: string;
   limit?: number;
@@ -384,7 +441,7 @@ export async function getMobileMoneyHistory(params: {
   const db = await getDb();
   if (db) {
     try {
-      const rows = await db.select().from(mobileMoneyTransfers).orderBy(desc(mobileMoneyTransfers.createdAt)).limit(params.limit || 50);
+      const rows = await db.select().from(mobileMoneyTransfers).where(eq(mobileMoneyTransfers.ownerId, params.ownerId)).orderBy(desc(mobileMoneyTransfers.createdAt)).limit(params.limit || 50);
       return rows.map(r => ({
         reference: r.reference,
         provider: r.provider,

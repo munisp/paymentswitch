@@ -4,7 +4,8 @@
  * card processing, open banking, and trade payments.
  */
 
-import { pgTable, text, timestamp, decimal, integer, boolean, jsonb, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, decimal, integer, boolean, jsonb, serial, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // --- Government Payments ---
 
@@ -250,6 +251,8 @@ export const billPayments = pgTable("bill_payments", {
 
 export const mobileMoneyTransfers = pgTable("mobile_money_transfers", {
   id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().default(""),
+  idempotencyKey: text("idempotency_key").notNull().default(""),
   remittanceId: text("remittance_id"),
   reference: text("reference").notNull(),
   provider: text("provider").notNull(),
@@ -261,7 +264,10 @@ export const mobileMoneyTransfers = pgTable("mobile_money_transfers", {
   providerResponse: jsonb("provider_response"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
-});
+}, (table) => ({
+  ownerIdempotencyUnique: uniqueIndex("mobile_money_owner_idempotency_unique").on(table.ownerId, table.idempotencyKey).where(sql`${table.idempotencyKey} <> ''`),
+  ownerReferenceIndex: index("mobile_money_owner_reference_idx").on(table.ownerId, table.reference),
+}));
 
 // --- Agent Cash Collection ---
 

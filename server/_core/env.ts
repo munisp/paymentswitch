@@ -8,6 +8,15 @@ function validateEnv() {
   if (!process.env.OAUTH_SERVER_URL && !process.env.KEYCLOAK_URL) {
     warnings.push("OAUTH_SERVER_URL or KEYCLOAK_URL should be configured for authentication");
   }
+
+  if (process.env.NODE_ENV === "production") {
+    const required = ["DATABASE_URL", "REDIS_URL", "KEYCLOAK_URL", "KEYCLOAK_REALM", "KEYCLOAK_CLIENT_ID", "ALLOWED_ORIGINS"];
+    for (const key of required) {
+      if (!process.env[key]?.trim()) warnings.push(`${key} is required in production`);
+    }
+    const origins = process.env.ALLOWED_ORIGINS?.split(",").map(value => value.trim()).filter(Boolean) ?? [];
+    if (origins.includes("*")) warnings.push("ALLOWED_ORIGINS must not contain * in production");
+  }
   
   if (!process.env.JWT_SECRET) {
     if (process.env.NODE_ENV === "production") {
@@ -17,7 +26,7 @@ function validateEnv() {
   }
   
   if (warnings.length > 0 && process.env.NODE_ENV === "production") {
-    log.error({ warnings: warnings.join("; ") }, "[ENV] Configuration warnings");
+    throw new Error(`FATAL: invalid production configuration: ${warnings.join("; ")}`);
   }
 }
 

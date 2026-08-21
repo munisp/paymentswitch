@@ -3,14 +3,14 @@
 import unittest
 from datetime import datetime, date
 
-from sar_filing import SARFilingService, SARPriority, SARStatus
-from sanctions_rescreening import (
+from outbound_compliance.sar_filing import SARFilingService, SARPriority, SARStatus
+from outbound_compliance.sanctions_rescreening import (
     SanctionsRescreeningService,
     ListUpdateType,
     BeneficiaryRecord,
     RescreeningStatus,
 )
-from cbn_reporting import CBNReportingService, ReportType, ReportStatus
+from outbound_compliance.cbn_reporting import CBNReportingService, ReportType, ReportStatus
 
 
 class TestSARFiling(unittest.TestCase):

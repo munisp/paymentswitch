@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
 	"net"
@@ -21,6 +22,8 @@ const (
 	OperationLookupTransfers = 131
 	AccountSize              = 128
 	TransferSize             = 128
+	// MaxResponseSize bounds peer-controlled allocations before decoding.
+	MaxResponseSize          = 16 << 20
 )
 
 // Account flags
@@ -358,6 +361,16 @@ func checkedSignedDifference(credits, debits uint64) (int64, error) {
 	return value.Int64(), nil
 }
 
+func writeFull(conn net.Conn, data []byte) error {
+	for len(data) > 0 {
+		n, err := conn.Write(data)
+		if err != nil { return err }
+		if n <= 0 { return io.ErrShortWrite }
+		data = data[n:]
+	}
+	return nil
+}
+
 // sendRequest sends a request to TigerBeetle and receives the response
 func (c *Client) sendRequest(ctx context.Context, conn net.Conn, operation uint8, data []byte) ([]byte, error) {
 	// Build request packet: [operation: 1 byte][data_length: 4 bytes][data: N bytes]
@@ -370,14 +383,13 @@ func (c *Client) sendRequest(ctx context.Context, conn net.Conn, operation uint8
 		return nil, err
 	}
 
-	// Send header
-	if _, err := conn.Write(header); err != nil {
+	// Send header and payload completely. net.Conn.Write may legally return
+	// a short write without an error, so every byte must be accounted for.
+	if err := writeFull(conn, header); err != nil {
 		return nil, fmt.Errorf("failed to write header: %w", err)
 	}
-
-	// Send data
 	if len(data) > 0 {
-		if _, err := conn.Write(data); err != nil {
+		if err := writeFull(conn, data); err != nil {
 			return nil, fmt.Errorf("failed to write data: %w", err)
 		}
 	}
@@ -389,27 +401,22 @@ func (c *Client) sendRequest(ctx context.Context, conn net.Conn, operation uint8
 
 	// Read response header
 	respHeader := make([]byte, 5)
-	if _, err := conn.Read(respHeader); err != nil {
+	if _, err := io.ReadFull(conn, respHeader); err != nil {
 		return nil, fmt.Errorf("failed to read response header: %w", err)
 	}
 
 	responseLength := binary.LittleEndian.Uint32(respHeader[1:])
-
-	// Read response data
+	if responseLength > MaxResponseSize {
+		return nil, fmt.Errorf("response length %d exceeds maximum %d", responseLength, MaxResponseSize)
+	}
 	if responseLength == 0 {
 		return nil, nil
 	}
 
-	responseData := make([]byte, responseLength)
-	totalRead := 0
-	for totalRead < int(responseLength) {
-		n, err := conn.Read(responseData[totalRead:])
-		if err != nil {
-			return nil, fmt.Errorf("failed to read response data: %w", err)
-		}
-		totalRead += n
+	responseData := make([]byte, int(responseLength))
+	if _, err := io.ReadFull(conn, responseData); err != nil {
+		return nil, fmt.Errorf("failed to read response data: %w", err)
 	}
-
 	return responseData, nil
 }
 

@@ -138,8 +138,10 @@ export const paymentGatewayRouter = router({
 
   getSession: protectedProcedure
     .input(z.object({ sessionId: z.string() }))
-    .query(async ({ input }) => {
-      return await sessionStore.get<GatewaySession>(input.sessionId) || null;
+    .query(async ({ ctx, input }) => {
+      const session = await sessionStore.get<GatewaySession>(input.sessionId);
+      if (!session || session.merchantId !== `merchant_${ctx.user.id}`) return null;
+      return session;
     }),
 
   processPayment: protectedProcedure
@@ -148,9 +150,11 @@ export const paymentGatewayRouter = router({
       paymentMethod: z.enum(['card', 'bank_transfer', 'ussd', 'qr_code', 'mobile_money', 'crypto']),
       paymentDetails: z.record(z.string(), z.string()).optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const session = await sessionStore.get<GatewaySession>(input.sessionId);
-      if (!session) return { success: false, error: 'Session not found' };
+      if (!session || session.merchantId !== `merchant_${ctx.user.id}`) {
+        return { success: false, error: 'Session not found' };
+      }
       if (session.status !== 'created') return { success: false, error: `Session is ${session.status}` };
       if (new Date(session.expiresAt) < new Date()) {
         session.status = 'expired';

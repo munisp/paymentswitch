@@ -10,6 +10,9 @@ fn bench_funding_postings(c: &mut Criterion) {
 
 fn bench_fx_quote(c: &mut Criterion) {
     let mut engine = CorridorFxEngine::new();
+    engine
+        .set_authoritative_rate(5, 1_900_000_000_000)
+        .expect("benchmark fixture must configure a valid authoritative rate");
     c.bench_function("fx_quote_ng_gb", |b| {
         b.iter(|| engine.generate_quote(5, 180_000_000).unwrap())
     });

@@ -257,7 +257,9 @@ impl PostingEngine {
             .saturating_sub(corridor_fee_raw * schedule.corridor_discount_pct as u64 / 100);
         let fx_spread = principal_kobo * corridor.fx_spread_bps as u64 / 10_000;
         let fx_share_back = fx_spread * schedule.fx_revenue_share_pct as u64 / 100;
-        let cbn_levy = (switch_fee + corridor_fee) * schedule.cbn_levy_bps as u64 / 10_000;
+        let switch_levy = switch_fee * schedule.cbn_levy_bps as u64 / 10_000;
+        let corridor_levy = corridor_fee * schedule.cbn_levy_bps as u64 / 10_000;
+        let cbn_levy = switch_levy + corridor_levy;
         let net_debit = principal_kobo + switch_fee + corridor_fee + fx_spread - fx_share_back;
 
         // Build transfer commands
@@ -289,7 +291,7 @@ impl PostingEngine {
         );
         let levy_acct = AccountId::new(0, crate::accounts::AccountFamily::CbnLevyPayable, 0);
 
-        let mut transfers = Vec::with_capacity(7);
+        let mut transfers = Vec::with_capacity(8);
         let base_id = self.next_id();
 
         // 1. Principal: prefund → transit (pending until settlement)
@@ -364,15 +366,31 @@ impl PostingEngine {
             });
         }
 
-        // 6. CBN levy: fee income → cbn levy payable
-        if cbn_levy > 0 {
+        // 6. CBN levy: debit each originating income account separately.
+        // This prevents the corridor-fee levy from being misposted against
+        // switch-fee income and keeps the account-level journal balanced.
+        if switch_levy > 0 {
             transfers.push(TransferCommand {
                 id: base_id + 5,
                 debit_account_id: fee_acct,
                 credit_account_id: levy_acct,
-                amount: cbn_levy,
+                amount: switch_levy,
                 pending: false,
-                linked: false, // Last in linked chain
+                linked: corridor_levy > 0,
+                code: TransferCode::CbnLevy as u16,
+                ledger: 1,
+                user_data_128: 0,
+                timestamp: self.now_ns(),
+            });
+        }
+        if corridor_levy > 0 {
+            transfers.push(TransferCommand {
+                id: base_id + 6,
+                debit_account_id: corr_acct,
+                credit_account_id: levy_acct,
+                amount: corridor_levy,
+                pending: false,
+                linked: false,
                 code: TransferCode::CbnLevy as u16,
                 ledger: 1,
                 user_data_128: 0,
