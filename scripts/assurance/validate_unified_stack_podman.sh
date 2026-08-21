@@ -53,6 +53,7 @@ run_compose ps >"$EVIDENCE_DIR/ps.log"
 run_compose logs --no-color keycloak apisix go-ledger >"$EVIDENCE_DIR/identity-ledger.log" 2>&1 || true
 
 # Runtime evidence remains incomplete until the repository gates pass.
+export ASSURANCE_CONTAINER_RUNTIME=podman
 scripts/assurance/live_gate_preflight.sh 2>&1 | tee "$EVIDENCE_DIR/preflight.log"
 scripts/assurance/run_live_identity_gates.sh 2>&1 | tee "$EVIDENCE_DIR/identity-gates.log"
 scripts/assurance/run_dependency_recovery_gates.sh 2>&1 | tee "$EVIDENCE_DIR/recovery-gates.log"

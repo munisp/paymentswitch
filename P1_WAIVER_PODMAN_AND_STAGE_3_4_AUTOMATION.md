@@ -29,6 +29,7 @@ Install Podman and a Compose provider on the isolated staging host. On distribut
 podman --version
 podman info
 podman compose version || podman-compose version
+export ASSURANCE_CONTAINER_RUNTIME=podman
 ```
 
 Prepare the real isolated `.env.assurance`, CA-signed gateway certificate/key, and disposable volumes. Do not use `ASSURANCE_MOCK_MODE` or sentinel values. Run the wrapper:
@@ -63,7 +64,8 @@ CONTAINER_RUNTIME=auto scripts/assurance/run_stage_3_4_pipeline.sh
 For Podman-only staging:
 
 ```bash
-CONTAINER_RUNTIME=podman scripts/assurance/run_stage_3_4_pipeline.sh
+CONTAINER_RUNTIME=podman ASSURANCE_CONTAINER_RUNTIME=podman \
+  scripts/assurance/run_stage_3_4_pipeline.sh
 ```
 
 For Docker-only staging:

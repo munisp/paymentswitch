@@ -20,15 +20,32 @@ else
   pass 'isolated-environment acknowledgement present'
 fi
 
-for command in docker curl jq openssl go cargo rustc node pnpm; do
+for command in curl jq openssl go cargo rustc node pnpm; do
   command_required "$command"
 done
 
-if docker compose version >/dev/null 2>&1; then
-  pass 'docker compose v2 is available'
-else
-  fail 'docker compose v2 is required'
-fi
+container_runtime="${ASSURANCE_CONTAINER_RUNTIME:-docker}"
+case "$container_runtime" in
+  docker)
+    command_required docker
+    if docker compose version >/dev/null 2>&1; then
+      pass 'docker compose v2 is available'
+    else
+      fail 'docker compose v2 is required for ASSURANCE_CONTAINER_RUNTIME=docker'
+    fi
+    ;;
+  podman)
+    command_required podman
+    if podman compose version >/dev/null 2>&1 || command -v podman-compose >/dev/null 2>&1; then
+      pass 'Podman Compose provider is available'
+    else
+      fail 'podman compose or podman-compose is required for ASSURANCE_CONTAINER_RUNTIME=podman'
+    fi
+    ;;
+  *)
+    fail 'ASSURANCE_CONTAINER_RUNTIME must be docker or podman'
+    ;;
+esac
 
 for variable in \
   POSTGRES_PASSWORD \

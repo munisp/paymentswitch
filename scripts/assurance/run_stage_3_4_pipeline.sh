@@ -71,6 +71,7 @@ compose ps >"$EVIDENCE_DIR/ps.log"
 compose logs --no-color keycloak apisix postgres go-ledger >"$EVIDENCE_DIR/service-logs.log" 2>&1 || true
 
 step "Stage 2 preflight"
+export ASSURANCE_CONTAINER_RUNTIME="$RUNTIME"
 scripts/assurance/live_gate_preflight.sh 2>&1 | tee "$EVIDENCE_DIR/preflight.log"
 step "Stage 3 identity gate"
 scripts/assurance/run_live_identity_gates.sh 2>&1 | tee "$EVIDENCE_DIR/identity-gates.log"
