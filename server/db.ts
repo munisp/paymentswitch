@@ -79,8 +79,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
 
   const db = await getDb();
   if (!db) {
-    log.warn("Cannot upsert user: database not available");
-    return;
+    throw new Error("PostgreSQL is required for user persistence");
   }
 
   try {

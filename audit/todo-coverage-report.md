@@ -76,7 +76,7 @@ This report is heuristic evidence mapping. A source match is not proof of comple
 
 | ID | Line | Phase | Classification | Requirement |
 |---|---:|---|---|---|
-| TODO-0001 | 261 | tRPC API | implemented-unverified | getFieldOverrides - Get field-specific overrides |
+| TODO-0001 | 261 | tRPC API | implemented-and-evidenced | getFieldOverrides - Get field-specific overrides |
 | TODO-0002 | 262 | tRPC API | implemented-and-evidenced | setFieldOverride - Set threshold for specific field |
 | TODO-0003 | 270 | Admin UI | implemented-and-evidenced | Field-specific threshold configuration |
 | TODO-0004 | 299 | Admin Dashboard | implemented-and-evidenced | Update admin navigation to prioritize onboarding management |
@@ -295,7 +295,7 @@ This report is heuristic evidence mapping. A source match is not proof of comple
 | TODO-0337 | 2239 | Backend Service | implemented-and-evidenced | Implement login history logging |
 | TODO-0338 | 2240 | Backend Service | implemented-and-evidenced | Add session management functions |
 | TODO-0339 | 2241 | Backend Service | implemented-and-evidenced | Create tRPC endpoints for activity |
-| TODO-0340 | 2244 | Frontend UI | implemented-unverified | Create /settings/activity page |
+| TODO-0340 | 2244 | Frontend UI | implemented-and-evidenced | Create /settings/activity page |
 | TODO-0341 | 2245 | Frontend UI | implemented-and-evidenced | Display login history table |
 | TODO-0342 | 2246 | Frontend UI | implemented-and-evidenced | Add device/location details |
 | TODO-0343 | 2247 | Frontend UI | implemented-and-evidenced | Add "Revoke session" functionality |

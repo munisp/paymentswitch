@@ -27,9 +27,9 @@ jobs:
           - name: web-portal
             dockerfile: Dockerfile
             context: .
-          - name: nginx-gateway
-            dockerfile: monitoring/nginx/Dockerfile
-            context: monitoring/nginx
+          - name: apisix-gateway
+            dockerfile: config/apisix/Dockerfile
+            context: .
     
     steps:
       - name: Checkout code
@@ -107,7 +107,9 @@ jobs:
     steps:
       - name: Send Slack notification
         uses: 8398a7/action-slack@v3
-        if: ${{ secrets.SLACK_WEBHOOK_URL }}
+        if: env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           status: ${{ job.status }}
           text: |
@@ -115,7 +117,5 @@ jobs:
             Repository: ${{ github.repository }}
             Branch: ${{ github.ref_name }}
             Commit: ${{ github.sha }}
-            Images: web-portal, nginx-gateway
-          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+            Images: web-portal, apisix-gateway
+          webhook_url: ${{ env.SLACK_WEBHOOK_URL }}
