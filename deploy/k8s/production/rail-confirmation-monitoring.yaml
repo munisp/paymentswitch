@@ -1,0 +1,108 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: go-ledger-reconciliation
+  namespace: payment-switch
+  labels:
+    app.kubernetes.io/name: go-ledger-reconciliation
+    monitoring: payment-switch
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: go-ledger-reconciliation
+  endpoints:
+    - port: reconciliation-https
+      path: /metrics
+      scheme: https
+      interval: 15s
+      scrapeTimeout: 10s
+      tlsConfig:
+        ca:
+          secret:
+            name: go-ledger-reconciliation-mtls
+            key: ca.crt
+        serverName: go-ledger-reconciliation.payment-switch.svc.cluster.local
+        insecureSkipVerify: false
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: rail-confirmation-alerts
+  namespace: payment-switch
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: paymentswitch.rail-confirmation
+      rules:
+        - alert: RailConfirmationsUnverified
+          expr: increase(paymentswitch_rail_confirmation_unverified_total[10m]) > 0
+          for: 5m
+          labels:
+            severity: critical
+            service: rail-confirmation-ingest
+          annotations:
+            summary: Rail confirmations are failing independent verification
+            description: "{{ $value }} verification failures occurred in the last 10 minutes; settlement must remain quarantined."
+            runbook_url: https://github.com/munisp/paymentswitch/blob/main/audit/TIGERBEETLE_POSTGRES_PROLONGED_PARTITION_RUNBOOK.md
+        - alert: RailConfirmationPersistenceFailure
+          expr: increase(paymentswitch_rail_confirmation_persistence_failures_total[5m]) > 0
+          for: 2m
+          labels:
+            severity: critical
+            service: rail-confirmation-ingest
+          annotations:
+            summary: Verified rail evidence cannot be persisted
+            description: "A valid confirmation was verified but PostgreSQL persistence failed; do not acknowledge settlement."
+        - alert: RailSigningKeyExpired
+          expr: paymentswitch_rail_signing_key_expiry_seconds < 0
+          for: 1m
+          labels:
+            severity: critical
+            service: rail-confirmation-ingest
+          annotations:
+            summary: Active rail signing key is expired
+            description: "The most recently used rail signing key has expired; reject confirmations and rotate through the controlled key ceremony."
+        - alert: RailSigningKeyExpiringSoon
+          expr: paymentswitch_rail_signing_key_expiry_seconds >= 0 and paymentswitch_rail_signing_key_expiry_seconds < 604800
+          for: 15m
+          labels:
+            severity: warning
+            service: rail-confirmation-ingest
+          annotations:
+            summary: Rail signing key expires within seven days
+            description: "Rotate the key through the approved rail key lifecycle before expiry."
+        - alert: RailConfirmationIngestUnavailable
+          expr: absent(up{service="go-ledger-reconciliation"}) or rate(paymentswitch_rail_confirmation_ingest_requests_total[10m]) == 0
+          for: 15m
+          labels:
+            severity: warning
+            service: rail-confirmation-ingest
+          annotations:
+            summary: Rail confirmation ingest telemetry is unavailable
+            description: "No healthy scrape or traffic has been observed; validate the mTLS route and dependency state."
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rail-confirmation-grafana-dashboard
+  namespace: payment-switch-monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  rail-confirmation-overview.json: |
+    {
+      "title": "Paymentswitch Rail Confirmation Evidence",
+      "schemaVersion": 39,
+      "refresh": "15s",
+      "time": {"from": "now-6h", "to": "now"},
+      "panels": [
+        {"type":"stat","title":"Unverified confirmations","targets":[{"expr":"increase(paymentswitch_rail_confirmation_unverified_total[1h])"}],"gridPos":{"x":0,"y":0,"w":6,"h":4}},
+        {"type":"stat","title":"Verified confirmations","targets":[{"expr":"increase(paymentswitch_rail_confirmation_verified_total[1h])"}],"gridPos":{"x":6,"y":0,"w":6,"h":4}},
+        {"type":"stat","title":"Key expiry seconds","targets":[{"expr":"paymentswitch_rail_signing_key_expiry_seconds"}],"gridPos":{"x":12,"y":0,"w":6,"h":4}},
+        {"type":"timeseries","title":"Verification failures / 5m","targets":[{"expr":"rate(paymentswitch_rail_confirmation_verification_failures_total[5m])"}],"gridPos":{"x":0,"y":4,"w":12,"h":8}},
+        {"type":"timeseries","title":"Persistence failures / 5m","targets":[{"expr":"rate(paymentswitch_rail_confirmation_persistence_failures_total[5m])"}],"gridPos":{"x":12,"y":4,"w":12,"h":8}},
+        {"type":"timeseries","title":"Ingest and verification throughput","targets":[{"expr":"rate(paymentswitch_rail_confirmation_ingest_requests_total[5m])","legendFormat":"requests"},{"expr":"rate(paymentswitch_rail_confirmation_verified_total[5m])","legendFormat":"verified"}],"gridPos":{"x":0,"y":12,"w":24,"h":8}}
+      ]
+    }

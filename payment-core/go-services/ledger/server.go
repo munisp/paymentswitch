@@ -405,9 +405,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to configure reconciliation mTLS: %v", err)
 	}
+	reconciliationMux := http.NewServeMux()
+	reconciliationMux.Handle(reconciliation.LookupSettlementPath, reconciliationProjection.Handler())
+	reconciliationMux.Handle(reconciliation.RailConfirmationIngestPath, reconciliation.RailConfirmationIngestHandler(db, 2<<20, reconciliationToken))
+	reconciliationMux.HandleFunc("/metrics", reconciliation.MetricsHandler)
 	reconciliationHTTP := &http.Server{
-		Addr:              ":" + reconciliationPort,
-		Handler:           reconciliationProjection.Handler(),
+		Addr:    ":" + reconciliationPort,
+		Handler: reconciliationMux,
+
 		TLSConfig:         reconciliationTLSConfig,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
