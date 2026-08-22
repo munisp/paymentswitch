@@ -200,6 +200,7 @@ async def execute_settlement(
     """
     settlement_id = f"settlement-{uuid.uuid4()}"
     timestamp = datetime.utcnow().isoformat()
+    dispatch_started = False
     
     try:
         row = await db.get_window(request.windowId)
@@ -222,6 +223,7 @@ async def execute_settlement(
         if not positions:
             raise HTTPException(status_code=409, detail="No persisted participant positions are available for settlement")
         total_amount = sum((abs(position.netPosition) for position in positions if position.netPosition > 0), Decimal("0.00"))
+        dispatch_started = True
         ledger_result = await _ledger_request("/v1/settlements/execute", {
             "settlementId": settlement_id,
             "windowId": request.windowId,
@@ -254,10 +256,15 @@ async def execute_settlement(
     except HTTPException:
         raise
     except Exception as e:
+        if dispatch_started:
+            try:
+                await db.mark_window_reconciliation_required(request.windowId)
+            except Exception as quarantine_error:
+                logger.critical("Unable to quarantine ambiguous settlement window %s: %s", request.windowId, quarantine_error)
         logger.error(f"Settlement execution failed: {e}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Settlement execution failed: {str(e)}"
+            status_code=503 if dispatch_started else 500,
+            detail="Settlement outcome requires reconciliation" if dispatch_started else f"Settlement execution failed: {str(e)}"
         )
 
 

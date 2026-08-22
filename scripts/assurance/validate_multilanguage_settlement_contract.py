@@ -35,7 +35,11 @@ REQUIRED = {
     ),
     "python_settlement_finality": (
         ROOT / "payment-core/services/settlement/routers.py",
-        ["SETTLEMENT_LEDGER_URL", "finalityCertificate", "No persisted participant positions", "authoritative ledger"],
+        ["SETTLEMENT_LEDGER_URL", "finalityCertificate", "No persisted participant positions", "authoritative ledger", "mark_window_reconciliation_required"],
+    ),
+    "python_settlement_entrypoint": (
+        ROOT / "payment-core/services/settlement/main.py",
+        ["app.include_router(settlement_router)", "persistence.get_pool", "SETTLEMENT_LEDGER_URL"],
     ),
     "postgres_reconciliation_state": (
         ROOT / "drizzle/0050_payment_session_reconciliation_required.sql",
@@ -54,6 +58,10 @@ FORBIDDEN = {
     "python_fabricated_settlement": (
         ROOT / "payment-core/services/settlement/routers.py",
         ["actual_balance = expected_balance", "simulate with realistic data", "Decimal(\"1000.00\")"],
+    ),
+    "python_legacy_in_memory_entrypoint": (
+        ROOT / "payment-core/services/settlement/main.py",
+        ["settlement_windows:", "participant_positions:", "In-memory storage"],
     ),
 }
 

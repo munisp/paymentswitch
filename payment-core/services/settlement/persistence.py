@@ -134,6 +134,20 @@ async def update_window_status(window_id: str, status: str, end_time: Optional[d
             )
 
 
+async def mark_window_reconciliation_required(window_id: str) -> None:
+    """Quarantine a processing settlement window after an ambiguous external dispatch outcome."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """UPDATE settlement_windows
+               SET status='RECONCILIATION_REQUIRED', updated_at=NOW()
+               WHERE window_id=$1 AND status='PROCESSING'""",
+            window_id,
+        )
+        if result != "UPDATE 1":
+            raise RuntimeError("settlement window is not in PROCESSING state")
+
+
 async def finalize_window(window_id: str, total_amount: Decimal, settlement_reference: str, finality_certificate: Dict):
     """Atomically mark a processing window settled only with durable rail finality evidence."""
     if not settlement_reference or not finality_certificate:
