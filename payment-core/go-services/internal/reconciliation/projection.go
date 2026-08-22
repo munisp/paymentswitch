@@ -107,8 +107,12 @@ func (p *Projection) lookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	transfer := transfers[0]
+	if subtle.ConstantTimeCompare(transfer.ID[:], id[:]) != 1 {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "TigerBeetle lookup returned an unexpected transfer identity"})
+		return
+	}
 	ledgerEvidence := map[string]any{
-		"canonicalTransferId128": request.CanonicalTransferID128,
+		"canonicalTransferId128": hex.EncodeToString(transfer.ID[:]),
 		"amountMinor":            transfer.Amount,
 		"ledger":                 transfer.Ledger,
 		"code":                   transfer.Code,

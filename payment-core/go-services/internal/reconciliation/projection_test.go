@@ -2,6 +2,7 @@ package reconciliation
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -31,6 +32,17 @@ type fakeEvidence struct {
 
 func (f fakeEvidence) LookupPaymentSagaEvidence(_ context.Context, _ string) (*database.PaymentSagaEvidence, error) {
 	return f.evidence, f.err
+}
+
+func id128(t *testing.T, hexID string) [16]byte {
+	t.Helper()
+	var id [16]byte
+	decoded, err := hex.DecodeString(hexID)
+	if err != nil || len(decoded) != 16 {
+		t.Fatalf("invalid test id: %s", hexID)
+	}
+	copy(id[:], decoded)
+	return id
 }
 
 func request(t *testing.T, h http.Handler, token, id string) *httptest.ResponseRecorder {
@@ -71,7 +83,7 @@ func TestProjectionRequiresTokenAndFull128BitIdentifier(t *testing.T) {
 
 func TestProjectionReturnsSettledOnlyWithLedgerAndRailEvidence(t *testing.T) {
 	id := strings.Repeat("a", 32)
-	ledger := &fakeLedger{transfers: []tigerbeetle.Transfer128{{Amount: 2500, Ledger: 1, Code: 2}}}
+	ledger := &fakeLedger{transfers: []tigerbeetle.Transfer128{{ID: id128(t, id), Amount: 2500, Ledger: 1, Code: 2}}}
 	evidence := fakeEvidence{evidence: &database.PaymentSagaEvidence{
 		State:               "SETTLED",
 		FinalityCertificate: json.RawMessage(`{"settlementReference":"rail-123","signature":"verified"}`),
@@ -94,15 +106,29 @@ func TestProjectionReturnsSettledOnlyWithLedgerAndRailEvidence(t *testing.T) {
 }
 
 func TestProjectionReturnsPendingWithoutRailFinality(t *testing.T) {
-	ledger := &fakeLedger{transfers: []tigerbeetle.Transfer128{{Amount: 1}}}
+	pendingID := strings.Repeat("b", 32)
+	ledger := &fakeLedger{transfers: []tigerbeetle.Transfer128{{ID: id128(t, pendingID), Amount: 1}}}
 	evidence := fakeEvidence{evidence: &database.PaymentSagaEvidence{State: "SETTLED", FinalityCertificate: json.RawMessage(`{"signature":"verified"}`)}}
 	projection, err := NewProjection(ledger, evidence, "secret")
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := decodeResponse(t, request(t, projection.Handler(), "secret", strings.Repeat("b", 32)))
+	response := decodeResponse(t, request(t, projection.Handler(), "secret", pendingID))
 	if response.Status != "pending" {
 		t.Fatalf("expected pending, got %s", response.Status)
+	}
+}
+
+func TestProjectionRejectsMismatchedTigerBeetleIdentity(t *testing.T) {
+	requestedID := strings.Repeat("c", 32)
+	ledger := &fakeLedger{transfers: []tigerbeetle.Transfer128{{ID: id128(t, strings.Repeat("d", 32))}}}
+	projection, err := NewProjection(ledger, fakeEvidence{}, "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := request(t, projection.Handler(), "secret", requestedID)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", w.Code)
 	}
 }
 

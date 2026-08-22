@@ -31,6 +31,9 @@ REQUIRED = (
     "POSTGRES_DB",
     "POSTGRES_USER",
     "POSTGRES_PASSWORD",
+    "SETTLEMENT_LEDGER_CA_FILE",
+    "SETTLEMENT_LEDGER_CLIENT_CERT_FILE",
+    "SETTLEMENT_LEDGER_CLIENT_KEY_FILE",
 )
 
 
@@ -86,6 +89,9 @@ class CrossStorePartitionRecoveryIntegration(unittest.IsolatedAsyncioTestCase):
         client = AuthoritativeLedgerClient(
             os.environ["RECONCILIATION_PROJECTION_URL"],
             os.environ["SETTLEMENT_LEDGER_RECONCILIATION_TOKEN"],
+            os.environ["SETTLEMENT_LEDGER_CA_FILE"],
+            os.environ["SETTLEMENT_LEDGER_CLIENT_CERT_FILE"],
+            os.environ["SETTLEMENT_LEDGER_CLIENT_KEY_FILE"],
         )
         worker = SettlementReconciliationWorker(client, worker_id=f"integration-{uuid.uuid4()}")
         claimed = await worker.run_once(limit=1)
