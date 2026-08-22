@@ -54,9 +54,9 @@ jobs:
           pnpm run check
           pnpm exec vitest run server/api/paymentRestRoutes.test.ts server/lib/iso20022.test.ts
 
-      - name: Verify Go money-movement controls
+      - name: Verify Go money-movement and reconciliation projection controls
         working-directory: payment-core/go-services
-        run: go test ./internal/mojaloop/... ./pkg/ledger/...
+        run: go test ./internal/mojaloop/... ./pkg/ledger/... ./internal/reconciliation/... ./internal/tigerbeetle/...
 
       - name: Verify Rust ledger and RTGS controls
         working-directory: payment-core/rust-services/outbound-ledger
@@ -78,6 +78,7 @@ jobs:
         run: |
           test -s drizzle/0051_multilanguage_idempotency_settlement_contract.sql
           test -s drizzle/0052_cross_store_reconciliation_saga.sql
+          test -s drizzle/0053_reconciliation_resolution_idempotency_transition.sql
           grep -q 'settlement-reconciliation-worker' deploy/k8s/production/settlement-reconciliation-worker.yaml
           git diff --check
 

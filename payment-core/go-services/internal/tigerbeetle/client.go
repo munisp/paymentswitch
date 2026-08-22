@@ -23,7 +23,7 @@ const (
 	AccountSize              = 128
 	TransferSize             = 128
 	// MaxResponseSize bounds peer-controlled allocations before decoding.
-	MaxResponseSize          = 16 << 20
+	MaxResponseSize = 16 << 20
 )
 
 // Account flags
@@ -284,6 +284,58 @@ func (c *Client) LookupAccounts(ctx context.Context, accountIDs []uint64) ([]Acc
 	return accounts, nil
 }
 
+// Transfer128 preserves the complete 128-bit TigerBeetle identity used by reconciliation.
+type Transfer128 struct {
+	ID              [16]byte
+	DebitAccountID  [16]byte
+	CreditAccountID [16]byte
+	PendingID       [16]byte
+	Ledger          uint32
+	Code            uint16
+	Flags           uint16
+	Amount          uint64
+	Timestamp       uint64
+}
+
+// LookupTransfers128 looks up transfers using complete 16-byte TigerBeetle IDs.
+// It exists alongside the legacy 64-bit API so new financial recovery paths never
+// truncate an identifier’s upper word.
+func (c *Client) LookupTransfers128(ctx context.Context, transferIDs [][16]byte) ([]Transfer128, error) {
+	if len(transferIDs) == 0 {
+		return nil, nil
+	}
+	data := make([]byte, len(transferIDs)*16)
+	for i, id := range transferIDs {
+		copy(data[i*16:(i+1)*16], id[:])
+	}
+	conn, err := c.getConnection()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection: %w", err)
+	}
+	defer c.returnConnection(conn)
+	response, err := c.sendRequest(ctx, conn, OperationLookupTransfers, data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup 128-bit transfers: %w", err)
+	}
+	if len(response)%TransferSize != 0 {
+		return nil, fmt.Errorf("invalid lookup response size %d", len(response))
+	}
+	transfers := make([]Transfer128, len(response)/TransferSize)
+	for i := range transfers {
+		chunk := response[i*TransferSize : (i+1)*TransferSize]
+		copy(transfers[i].ID[:], chunk[0:16])
+		copy(transfers[i].DebitAccountID[:], chunk[16:32])
+		copy(transfers[i].CreditAccountID[:], chunk[32:48])
+		copy(transfers[i].PendingID[:], chunk[56:72])
+		transfers[i].Ledger = binary.LittleEndian.Uint32(chunk[80:84])
+		transfers[i].Code = binary.LittleEndian.Uint16(chunk[84:86])
+		transfers[i].Flags = binary.LittleEndian.Uint16(chunk[86:88])
+		transfers[i].Amount = binary.LittleEndian.Uint64(chunk[88:96])
+		transfers[i].Timestamp = binary.LittleEndian.Uint64(chunk[96:104])
+	}
+	return transfers, nil
+}
+
 // LookupTransfers looks up multiple transfers by ID
 func (c *Client) LookupTransfers(ctx context.Context, transferIDs []uint64) ([]Transfer, error) {
 	if len(transferIDs) == 0 {
@@ -364,8 +416,12 @@ func checkedSignedDifference(credits, debits uint64) (int64, error) {
 func writeFull(conn net.Conn, data []byte) error {
 	for len(data) > 0 {
 		n, err := conn.Write(data)
-		if err != nil { return err }
-		if n <= 0 { return io.ErrShortWrite }
+		if err != nil {
+			return err
+		}
+		if n <= 0 {
+			return io.ErrShortWrite
+		}
 		data = data[n:]
 	}
 	return nil

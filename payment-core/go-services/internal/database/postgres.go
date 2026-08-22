@@ -572,3 +572,29 @@ func (db *DB) InsertAuditLog(ctx context.Context, log *AuditLog) error {
 
 	return nil
 }
+
+// PaymentSagaEvidence is the immutable finality evidence persisted by the settlement saga.
+type PaymentSagaEvidence struct {
+	State               string
+	LedgerResult        json.RawMessage
+	FinalityCertificate json.RawMessage
+	CompletedAt         *time.Time
+}
+
+// LookupPaymentSagaEvidence retrieves evidence by the complete canonical 128-bit transfer ID.
+// A missing saga is not an error: callers must classify it as an unresolved/unknown outcome.
+func (db *DB) LookupPaymentSagaEvidence(ctx context.Context, canonicalTransferID128 string) (*PaymentSagaEvidence, error) {
+	row := db.conn.QueryRowContext(ctx, `
+		SELECT state, ledger_result, finality_certificate, completed_at
+		FROM payment_sagas
+		WHERE canonical_transfer_id_128 = $1
+	`, canonicalTransferID128)
+	var evidence PaymentSagaEvidence
+	if err := row.Scan(&evidence.State, &evidence.LedgerResult, &evidence.FinalityCertificate, &evidence.CompletedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("lookup payment saga evidence: %w", err)
+	}
+	return &evidence, nil
+}

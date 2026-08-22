@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,9 +19,10 @@ import (
 
 	"github.com/payment-switch/go-services/internal/database"
 	"github.com/payment-switch/go-services/internal/integration"
+	"github.com/payment-switch/go-services/internal/reconciliation"
 	"github.com/payment-switch/go-services/internal/tigerbeetle"
-	pb "github.com/payment-switch/go-services/pkg/grpc/ledger"
 	grpcInterceptors "github.com/payment-switch/go-services/pkg/grpc/interceptors"
+	pb "github.com/payment-switch/go-services/pkg/grpc/ledger"
 )
 
 // server implements the LedgerService gRPC server
@@ -342,13 +344,49 @@ func main() {
 	defer db.Close()
 
 	keycloakConfig := integration.DefaultKeycloakConfig()
-	if value := os.Getenv("KEYCLOAK_URL"); value != "" { keycloakConfig.BaseURL = value }
-	if value := os.Getenv("KEYCLOAK_REALM"); value != "" { keycloakConfig.Realm = value }
-	if value := os.Getenv("KEYCLOAK_CLIENT_ID"); value != "" { keycloakConfig.ClientID = value }
-	if value := os.Getenv("KEYCLOAK_REQUIRED_AUDIENCE"); value != "" { keycloakConfig.RequiredAudience = value }
-	if value := os.Getenv("KEYCLOAK_REQUIRED_ISSUER"); value != "" { keycloakConfig.RequiredIssuer = value }
+	if value := os.Getenv("KEYCLOAK_URL"); value != "" {
+		keycloakConfig.BaseURL = value
+	}
+	if value := os.Getenv("KEYCLOAK_REALM"); value != "" {
+		keycloakConfig.Realm = value
+	}
+	if value := os.Getenv("KEYCLOAK_CLIENT_ID"); value != "" {
+		keycloakConfig.ClientID = value
+	}
+	if value := os.Getenv("KEYCLOAK_REQUIRED_AUDIENCE"); value != "" {
+		keycloakConfig.RequiredAudience = value
+	}
+	if value := os.Getenv("KEYCLOAK_REQUIRED_ISSUER"); value != "" {
+		keycloakConfig.RequiredIssuer = value
+	}
+	reconciliationToken := os.Getenv("LEDGER_RECONCILIATION_TOKEN")
+	reconciliationProjection, err := reconciliation.NewProjection(tbClient, db, reconciliationToken)
+	if err != nil {
+		log.Fatalf("Failed to initialize reconciliation projection: %v", err)
+	}
+	reconciliationPort := os.Getenv("LEDGER_RECONCILIATION_PORT")
+	if reconciliationPort == "" {
+		reconciliationPort = "8081"
+	}
+	reconciliationHTTP := &http.Server{
+		Addr:              ":" + reconciliationPort,
+		Handler:           reconciliationProjection.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       30 * time.Second,
+	}
+	go func() {
+		log.Printf("Ledger reconciliation projection listening on port %s", reconciliationPort)
+		if serveErr := reconciliationHTTP.ListenAndServe(); serveErr != nil && serveErr != http.ErrServerClosed {
+			log.Fatalf("Reconciliation projection failed: %v", serveErr)
+		}
+	}()
+
 	keycloakValidator, err := integration.NewKeycloakJWTValidator(keycloakConfig)
-	if err != nil { log.Fatalf("Failed to initialize Keycloak JWT validator: %v", err) }
+	if err != nil {
+		log.Fatalf("Failed to initialize Keycloak JWT validator: %v", err)
+	}
 
 	// Create gRPC server
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
@@ -359,11 +397,11 @@ func main() {
 	grpcServer := grpc.NewServer(
 		grpc.MaxRecvMsgSize(10*1024*1024), // 10MB
 		grpc.MaxSendMsgSize(10*1024*1024), // 10MB
-			grpc.ChainUnaryInterceptor(
-				grpcInterceptors.ServerUnaryRecoveryInterceptor(),
-				grpcInterceptors.ServerUnaryLoggingInterceptor(),
-				grpcInterceptors.LedgerUnaryAuthInterceptor(grpcInterceptors.LedgerAuthConfig{Validator: keycloakValidator}),
-			),
+		grpc.ChainUnaryInterceptor(
+			grpcInterceptors.ServerUnaryRecoveryInterceptor(),
+			grpcInterceptors.ServerUnaryLoggingInterceptor(),
+			grpcInterceptors.LedgerUnaryAuthInterceptor(grpcInterceptors.LedgerAuthConfig{Validator: keycloakValidator}),
+		),
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionIdle:     5 * time.Minute,
 			MaxConnectionAge:      30 * time.Minute,
@@ -390,8 +428,12 @@ func main() {
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 		<-sigChan
 
-		log.Println("Shutting down gRPC server...")
+		log.Println("Shutting down ledger services...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = reconciliationHTTP.Shutdown(shutdownCtx)
 		grpcServer.GracefulStop()
+
 	}()
 
 	// Start server

@@ -239,8 +239,10 @@ async def execute_settlement(
         })
         settlement_reference = ledger_result.get("settlementReference")
         finality_certificate = ledger_result.get("finalityCertificate")
-        if not isinstance(settlement_reference, str) or not isinstance(finality_certificate, dict):
+        if not isinstance(settlement_reference, str) or not settlement_reference.strip() or not isinstance(finality_certificate, dict):
             raise RuntimeError("authoritative ledger response lacks settlement finality evidence")
+        # The finality certificate is self-contained for reconciliation projection.
+        finality_certificate = {**finality_certificate, "settlementReference": settlement_reference}
         await db.complete_settlement_saga(
             settlement_id,
             request.windowId,
