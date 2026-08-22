@@ -96,6 +96,40 @@ describe('CircuitBreaker', () => {
     await expect(probe).resolves.toBe('recovered');
   });
 
+  it('limits half-open probes under concurrent load', async () => {
+    const limited = new CircuitBreaker({
+      name: 'half-open-load',
+      failureThreshold: 1,
+      successThreshold: 1,
+      resetTimeout: 10,
+      maxHalfOpenRequests: 1,
+    });
+    await expect(limited.execute(() => Promise.reject(new Error('fail')))).rejects.toThrow('fail');
+    await new Promise(r => setTimeout(r, 20));
+
+    let release!: () => void;
+    let probePromise!: Promise<string>;
+    let entered = 0;
+    const calls = Array.from({ length: 100 }, () => limited.execute(() => {
+      entered++;
+      probePromise = new Promise<string>(resolve => {
+        release = () => resolve('recovered');
+      });
+      return probePromise;
+    }));
+    const resultsPromise = Promise.allSettled(calls);
+    await Promise.resolve();
+    release();
+    const results = await resultsPromise;
+
+    const capacityErrors = results.filter(result =>
+      result.status === 'rejected' && /probe capacity/i.test(String(result.reason)),
+    );
+    expect(entered).toBe(1);
+    expect(capacityErrors).toHaveLength(99);
+    await expect(probePromise).resolves.toBe('recovered');
+  });
+
   it('does not count classified business errors as circuit failures', async () => {
     const classified = new CircuitBreaker({
       name: 'classified',
