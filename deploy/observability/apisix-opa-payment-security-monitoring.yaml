@@ -1,0 +1,314 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: paymentswitch-apisix
+  namespace: paymentswitch
+  labels:
+    release: kube-prometheus
+    app.kubernetes.io/part-of: paymentswitch
+spec:
+  namespaceSelector:
+    matchNames:
+      - paymentswitch
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: apisix
+  podMetricsEndpoints:
+    - port: metrics
+      path: /apisix/prometheus/metrics
+      interval: 15s
+      scrapeTimeout: 5s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: paymentswitch-apisix-security
+  namespace: paymentswitch
+  labels:
+    release: kube-prometheus
+    app.kubernetes.io/part-of: paymentswitch
+spec:
+  namespaceSelector:
+    matchNames:
+      - paymentswitch
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: apisix
+  podMetricsEndpoints:
+    - port: authz-metrics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 5s
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_container_name]
+          regex: opa-authz-sidecar
+          action: keep
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: paymentswitch-opa-diagnostics
+  namespace: paymentswitch
+  labels:
+    release: kube-prometheus
+    app.kubernetes.io/part-of: paymentswitch
+spec:
+  namespaceSelector:
+    matchNames:
+      - paymentswitch
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opa-authz
+  podMetricsEndpoints:
+    - port: diagnostics
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 5s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: paymentswitch-api
+  namespace: paymentswitch
+  labels:
+    release: kube-prometheus
+    app.kubernetes.io/part-of: paymentswitch
+spec:
+  namespaceSelector:
+    matchNames:
+      - paymentswitch
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: paymentswitch-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 5s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: paymentswitch-apisix-opa-payment-security
+  namespace: paymentswitch
+  labels:
+    release: kube-prometheus
+    app.kubernetes.io/part-of: paymentswitch
+spec:
+  groups:
+    - name: paymentswitch.gateway-security
+      rules:
+        - alert: PaymentswitchApisixHigh5xxRate
+          expr: |
+            sum(rate(apisix_http_status{code=~"5.."}[5m]))
+            / clamp_min(sum(rate(apisix_http_status[5m])), 0.001) > 0.01
+          for: 10m
+          labels:
+            severity: critical
+            service: apisix
+            paging: "true"
+          annotations:
+            summary: APISIX gateway 5xx rate exceeds one percent
+            description: Gateway 5xx responses have exceeded 1% for ten minutes. Correlate with authorization sidecar, OPA, upstream, and trace IDs before changing traffic policy.
+            runbook_url: https://runbooks.example.com/paymentswitch/apisix-opa-fail-closed
+        - alert: PaymentswitchAuthorizationDependencyFailure
+          expr: increase(paymentswitch_authz_dependency_failures_total[5m]) > 0
+          for: 2m
+          labels:
+            severity: critical
+            service: authorization
+            paging: "true"
+          annotations:
+            summary: Authorization sidecar cannot obtain a valid OPA decision
+            description: At least one OPA transport, response, or decision parsing failure occurred. The gateway is denying with 503 by design; inspect OPA mTLS, policy health, and NetworkPolicy.
+            runbook_url: https://runbooks.example.com/paymentswitch/apisix-opa-fail-closed
+        - alert: PaymentswitchAuthorizationLatencyHigh
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(paymentswitch_authz_decision_duration_seconds_bucket[5m])) by (le)
+            ) > 1
+          for: 10m
+          labels:
+            severity: warning
+            service: authorization
+          annotations:
+            summary: Authorization sidecar p95 latency exceeds one second
+            description: APISIX authorization capacity is at risk. Inspect OPA evaluation latency, TLS handshake reuse, DNS, and sidecar CPU saturation.
+        - alert: PaymentswitchOpaTargetDown
+          expr: up{job=~".*opa.*"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: opa
+            paging: "true"
+          annotations:
+            summary: OPA metrics target is down
+            description: Prometheus cannot scrape an OPA diagnostics target for two minutes. Confirm OPA pod readiness and diagnostics endpoint reachability.
+    - name: paymentswitch.payment-api
+      rules:
+        - alert: PaymentswitchPaymentApiErrorRatioHigh
+          expr: |
+            sum(rate(paymentswitch_payment_route_requests_total{outcome=~"client_error|denied|dependency_error|server_error"}[5m]))
+            / clamp_min(sum(rate(paymentswitch_payment_route_requests_total[5m])), 0.001) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+            service: payment-api
+          annotations:
+            summary: Payment REST API error ratio exceeds five percent
+            description: Investigate the operation/outcome dashboard split. Dependency errors require OPA, Permify, workflow, and database checks; denials should be correlated with expected tenant and MFA policy decisions.
+        - alert: PaymentswitchPaymentApiDependencyErrors
+          expr: increase(paymentswitch_payment_route_requests_total{outcome="dependency_error"}[5m]) > 0
+          for: 2m
+          labels:
+            severity: critical
+            service: payment-api
+            paging: "true"
+          annotations:
+            summary: Payment API is failing closed on an authorization or orchestration dependency
+            description: One or more payment API requests returned a dependency error. Review traceparent and authorization decision ID to isolate the failed dependency.
+        - alert: PaymentswitchPaymentApiMetricsTargetDown
+          expr: up{job=~".*paymentswitch.*api.*"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            service: payment-api
+          annotations:
+            summary: Payment API metrics target is down
+            description: Prometheus cannot scrape the payment API metrics endpoint. Verify ServiceMonitor labels, service port naming, and pod readiness.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: paymentswitch-apisix-opa-payment-security-dashboard
+  namespace: paymentswitch
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: paymentswitch
+data:
+  dashboard.json: |
+    {
+      "annotations": {
+        "list": [
+          {
+            "builtIn": 1,
+            "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+            "enable": true,
+            "hide": true,
+            "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts",
+            "type": "dashboard"
+          }
+        ]
+      },
+      "description": "Post-deployment security and payment health dashboard. Queries require APISIX Prometheus scraping, OPA diagnostics scraping, the OPA authorization sidecar /metrics endpoint, and the payment-switch /metrics endpoint.",
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.01 }] }, "unit": "percentunit" }, "overrides": [] },
+          "gridPos": { "h": 7, "w": 6, "x": 0, "y": 0 },
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "expr": "sum(rate(apisix_http_status{job=~\"$apisix_job\",code=~\"5..\"}[5m])) / clamp_min(sum(rate(apisix_http_status{job=~\"$apisix_job\"}[5m])), 0.001)", "legendFormat": "APISIX 5xx ratio", "refId": "A" }],
+          "title": "Gateway 5xx Ratio (5m)",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.05 }, { "color": "red", "value": 0.10 }] }, "unit": "percentunit" }, "overrides": [] },
+          "gridPos": { "h": 7, "w": 6, "x": 6, "y": 0 },
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "expr": "sum(rate(paymentswitch_authz_decisions_total{outcome=\"deny\"}[5m])) / clamp_min(sum(rate(paymentswitch_authz_decisions_total[5m])), 0.001)", "legendFormat": "Denied authorization ratio", "refId": "A" }],
+          "title": "Authorization Denial Ratio (5m)",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0 }] }, "unit": "short" }, "overrides": [] },
+          "gridPos": { "h": 7, "w": 6, "x": 12, "y": 0 },
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "expr": "sum(increase(paymentswitch_authz_dependency_failures_total[10m]))", "legendFormat": "OPA dependency failures", "refId": "A" }],
+          "title": "Authorization Dependency Failures (10m)",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [], "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.02 }, { "color": "red", "value": 0.05 }] }, "unit": "percentunit" }, "overrides": [] },
+          "gridPos": { "h": 7, "w": 6, "x": 18, "y": 0 },
+          "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+          "targets": [{ "expr": "sum(rate(paymentswitch_payment_route_requests_total{outcome=~\"client_error|denied|dependency_error|server_error\"}[5m])) / clamp_min(sum(rate(paymentswitch_payment_route_requests_total[5m])), 0.001)", "legendFormat": "Payment error ratio", "refId": "A" }],
+          "title": "Payment API Error Ratio (5m)",
+          "type": "stat"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never" }, "unit": "reqps" }, "overrides": [] },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+          "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "targets": [
+            { "expr": "sum(rate(apisix_http_status{job=~\"$apisix_job\"}[5m]))", "legendFormat": "All gateway requests", "refId": "A" },
+            { "expr": "sum(rate(apisix_http_status{job=~\"$apisix_job\",code=~\"2..\"}[5m]))", "legendFormat": "Gateway 2xx", "refId": "B" },
+            { "expr": "sum(rate(apisix_http_status{job=~\"$apisix_job\",code=~\"4..\"}[5m]))", "legendFormat": "Gateway 4xx", "refId": "C" },
+            { "expr": "sum(rate(apisix_http_status{job=~\"$apisix_job\",code=~\"5..\"}[5m]))", "legendFormat": "Gateway 5xx", "refId": "D" }
+          ],
+          "title": "APISIX Request Rate by Status Class",
+          "type": "timeseries"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never" }, "unit": "s" }, "overrides": [] },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+          "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "targets": [
+            { "expr": "histogram_quantile(0.95, sum(rate(paymentswitch_authz_decision_duration_seconds_bucket[5m])) by (le))", "legendFormat": "Authorization sidecar p95", "refId": "A" },
+            { "expr": "histogram_quantile(0.99, sum(rate(paymentswitch_authz_decision_duration_seconds_bucket[5m])) by (le))", "legendFormat": "Authorization sidecar p99", "refId": "B" },
+            { "expr": "histogram_quantile(0.95, sum(rate(opa_http_request_duration_seconds_bucket{job=~\"$opa_job\"}[5m])) by (le))", "legendFormat": "OPA HTTP p95", "refId": "C" }
+          ],
+          "title": "Authorization and OPA Latency",
+          "type": "timeseries"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 65, "showPoints": "never" }, "unit": "ops" }, "overrides": [] },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+          "options": { "legend": { "calcs": ["lastNotNull", "total"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "targets": [
+            { "expr": "sum by (action, outcome, reason) (rate(paymentswitch_authz_decisions_total[5m]))", "legendFormat": "{{action}} / {{outcome}} / {{reason}}", "refId": "A" },
+            { "expr": "sum by (dependency, reason) (rate(paymentswitch_authz_dependency_failures_total[5m]))", "legendFormat": "dependency {{dependency}} / {{reason}}", "refId": "B" }
+          ],
+          "title": "Authorization Decisions and Dependency Failures",
+          "type": "timeseries"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "$datasource" },
+          "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never" }, "unit": "reqps" }, "overrides": [] },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+          "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+          "targets": [
+            { "expr": "sum by (operation, outcome) (rate(paymentswitch_payment_route_requests_total[5m]))", "legendFormat": "{{operation}} / {{outcome}}", "refId": "A" },
+            { "expr": "sum(rate(paymentswitch_payment_route_duration_seconds_sum[5m])) / clamp_min(sum(rate(paymentswitch_payment_route_duration_seconds_count[5m])), 0.001)", "legendFormat": "Average payment API latency", "refId": "B" }
+          ],
+          "title": "Payment API Throughput and Average Latency",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 39,
+      "tags": ["paymentswitch", "security", "apisix", "opa", "post-deployment"],
+      "templating": {
+        "list": [
+          { "current": { "selected": false, "text": "Prometheus", "value": "" }, "hide": 0, "includeAll": false, "label": "Datasource", "multi": false, "name": "datasource", "options": [], "query": "prometheus", "refresh": 1, "type": "datasource" },
+          { "allValue": ".*", "current": { "selected": true, "text": "All", "value": "$__all" }, "datasource": { "type": "prometheus", "uid": "$datasource" }, "definition": "label_values(up, job)", "hide": 0, "includeAll": true, "label": "APISIX job", "multi": false, "name": "apisix_job", "options": [], "query": { "query": "label_values(apisix_http_status, job)", "refId": "PrometheusVariableQueryEditor-APISIX" }, "refresh": 1, "type": "query" },
+          { "allValue": ".*", "current": { "selected": true, "text": "All", "value": "$__all" }, "datasource": { "type": "prometheus", "uid": "$datasource" }, "definition": "label_values(opa_http_request_duration_seconds_count, job)", "hide": 0, "includeAll": true, "label": "OPA job", "multi": false, "name": "opa_job", "options": [], "query": { "query": "label_values(opa_http_request_duration_seconds_count, job)", "refId": "PrometheusVariableQueryEditor-OPA" }, "refresh": 1, "type": "query" }
+        ]
+      },
+      "time": { "from": "now-6h", "to": "now" },
+      "timezone": "browser",
+      "title": "Payment Switch — APISIX, OPA, and Payment Security",
+      "uid": "paymentswitch-apisix-opa-security",
+      "version": 1
+    }

@@ -212,9 +212,15 @@ spec:
         - name: opa-authz-sidecar
           image: ghcr.io/munisp/paymentswitch-opa-authz-sidecar:v1.0.0
           imagePullPolicy: IfNotPresent
+          ports:
+            - name: authz-metrics
+              containerPort: 9464
+              protocol: TCP
           env:
             - name: LISTEN_ADDRESS
               value: 127.0.0.1:9444
+            - name: METRICS_LISTEN_ADDRESS
+              value: 0.0.0.0:9464
             - name: OPA_URL
               value: https://opa-authz.paymentswitch.svc.cluster.local:8443
             - name: OPA_CA_CERT

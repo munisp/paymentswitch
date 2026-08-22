@@ -18,14 +18,18 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type config struct {
-	ListenAddress string
-	OPAURL        string
-	CACert        string
-	ClientCert    string
-	ClientKey     string
+	ListenAddress        string
+	OPAURL               string
+	CACert               string
+	ClientCert           string
+	ClientKey            string
+	MetricsListenAddress string
 }
 
 type userInfo struct {
@@ -70,6 +74,39 @@ type server struct {
 	client *http.Client
 }
 
+var (
+	authorizationDecisions = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "paymentswitch_authz_decisions_total",
+			Help: "Authorization sidecar decisions grouped by derived action, outcome, and bounded reason.",
+		},
+		[]string{"action", "outcome", "reason"},
+	)
+	authorizationDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "paymentswitch_authz_decision_duration_seconds",
+			Help:    "Authorization sidecar decision latency grouped by derived action and outcome.",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"action", "outcome"},
+	)
+	authorizationDependencyFailures = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "paymentswitch_authz_dependency_failures_total",
+			Help: "Authorization sidecar dependency failures grouped by dependency and bounded reason.",
+		},
+		[]string{"dependency", "reason"},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(
+		authorizationDecisions,
+		authorizationDuration,
+		authorizationDependencyFailures,
+	)
+}
+
 func requiredEnv(name string) (string, error) {
 	value := strings.TrimSpace(os.Getenv(name))
 	if value == "" {
@@ -96,11 +133,12 @@ func loadConfig() (config, error) {
 		return config{}, err
 	}
 	return config{
-		ListenAddress: envOr("LISTEN_ADDRESS", "127.0.0.1:9444"),
-		OPAURL:        strings.TrimRight(opaURL, "/"),
-		CACert:        ca,
-		ClientCert:    cert,
-		ClientKey:     key,
+		ListenAddress:        envOr("LISTEN_ADDRESS", "127.0.0.1:9444"),
+		OPAURL:               strings.TrimRight(opaURL, "/"),
+		CACert:               ca,
+		ClientCert:           cert,
+		ClientKey:            key,
+		MetricsListenAddress: envOr("METRICS_LISTEN_ADDRESS", "0.0.0.0:9464"),
 	}, nil
 }
 
@@ -240,17 +278,28 @@ func decisionID(request *http.Request) string {
 }
 
 func (s *server) authorize(response http.ResponseWriter, request *http.Request) {
+	started := time.Now()
+	action := "unknown"
+	outcome := "error"
+	reason := "internal"
+	defer func() {
+		authorizationDecisions.WithLabelValues(action, outcome, reason).Inc()
+		authorizationDuration.WithLabelValues(action, outcome).Observe(time.Since(started).Seconds())
+	}()
+
 	id := decisionID(request)
 	response.Header().Set("X-Authorization-Decision-ID", id)
 	if traceparent := strings.TrimSpace(request.Header.Get("Traceparent")); traceparent != "" {
 		response.Header().Set("Traceparent", traceparent)
 	}
 	if request.Method != http.MethodGet {
+		outcome, reason = "deny", "method"
 		http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	claims, err := decodeUserInfo(request.Header.Get("X-Userinfo"))
 	if err != nil {
+		outcome, reason = "deny", "identity"
 		http.Error(response, "verified identity is required", http.StatusUnauthorized)
 		return
 	}
@@ -259,6 +308,7 @@ func (s *server) authorize(response http.ResponseWriter, request *http.Request) 
 		requestedTenant = claims.TenantID
 	}
 	if requestedTenant != claims.TenantID {
+		outcome, reason = "deny", "tenant_mismatch"
 		http.Error(response, "tenant mismatch", http.StatusForbidden)
 		return
 	}
@@ -269,6 +319,7 @@ func (s *server) authorize(response http.ResponseWriter, request *http.Request) 
 		request.Header.Get("Idempotency-Key"),
 	)
 	if err != nil {
+		outcome, reason = "deny", "route"
 		http.Error(response, "route is not authorized", http.StatusForbidden)
 		return
 	}
@@ -285,6 +336,8 @@ func (s *server) authorize(response http.ResponseWriter, request *http.Request) 
 	input.Resource.TenantSnake = claims.TenantID
 	payload, err := json.Marshal(opaRequest{Input: input})
 	if err != nil {
+		reason = "request_encoding"
+		authorizationDependencyFailures.WithLabelValues("opa", reason).Inc()
 		http.Error(response, "authorization dependency unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -292,6 +345,8 @@ func (s *server) authorize(response http.ResponseWriter, request *http.Request) 
 	defer cancel()
 	opaRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, s.opaURL+"/v1/data/paymentswitch/authz/allow", bytes.NewReader(payload))
 	if err != nil {
+		reason = "request_creation"
+		authorizationDependencyFailures.WithLabelValues("opa", reason).Inc()
 		http.Error(response, "authorization dependency unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -301,24 +356,32 @@ func (s *server) authorize(response http.ResponseWriter, request *http.Request) 
 	}
 	opaResponseValue, err := s.client.Do(opaRequest)
 	if err != nil {
+		reason = "transport"
+		authorizationDependencyFailures.WithLabelValues("opa", reason).Inc()
 		http.Error(response, "authorization dependency unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	defer opaResponseValue.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(opaResponseValue.Body, 64*1024))
 	if err != nil || opaResponseValue.StatusCode < 200 || opaResponseValue.StatusCode >= 300 {
+		reason = "invalid_response"
+		authorizationDependencyFailures.WithLabelValues("opa", reason).Inc()
 		http.Error(response, "authorization dependency unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	var decision opaResponse
 	if err := json.Unmarshal(body, &decision); err != nil || decision.Result == nil {
+		reason = "invalid_decision"
+		authorizationDependencyFailures.WithLabelValues("opa", reason).Inc()
 		http.Error(response, "authorization dependency unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if !*decision.Result {
+		outcome, reason = "deny", "policy"
 		http.Error(response, "forbidden", http.StatusForbidden)
 		return
 	}
+	outcome, reason = "allow", "policy"
 	response.WriteHeader(http.StatusOK)
 }
 
@@ -351,6 +414,20 @@ func main() {
 		log.Fatal(err)
 	}
 	service := &server{opaURL: cfg.OPAURL, client: client}
+	go func() {
+		metricsServer := &http.Server{
+			Addr:              cfg.MetricsListenAddress,
+			Handler:           promhttp.Handler(),
+			ReadHeaderTimeout: 2 * time.Second,
+			ReadTimeout:       3 * time.Second,
+			WriteTimeout:      3 * time.Second,
+			IdleTimeout:       30 * time.Second,
+		}
+		log.Printf("OPA authorization sidecar metrics listening on %s", cfg.MetricsListenAddress)
+		if err := metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("OPA authorization sidecar metrics server: %v", err)
+		}
+	}()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusOK)
