@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -296,6 +299,32 @@ func (s *server) SyncBalanceToPostgres(ctx context.Context, req *pb.SyncBalanceR
 	}, nil
 }
 
+func reconciliationMTLSConfig(certFile, keyFile, clientCAFile string) (*tls.Config, error) {
+	if certFile == "" || keyFile == "" || clientCAFile == "" {
+		return nil, fmt.Errorf("LEDGER_RECONCILIATION_TLS_CERT_FILE, LEDGER_RECONCILIATION_TLS_KEY_FILE, and LEDGER_RECONCILIATION_CLIENT_CA_FILE are required")
+	}
+	if filepath.Clean(certFile) == "." || filepath.Clean(keyFile) == "." || filepath.Clean(clientCAFile) == "." {
+		return nil, fmt.Errorf("invalid reconciliation TLS file path")
+	}
+	if _, err := tls.LoadX509KeyPair(certFile, keyFile); err != nil {
+		return nil, fmt.Errorf("load reconciliation server certificate: %w", err)
+	}
+	pem, err := os.ReadFile(clientCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("read reconciliation client CA: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("reconciliation client CA contains no certificates")
+	}
+	return &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientCAs:  pool,
+		NextProtos: []string{"http/1.1"},
+	}, nil
+}
+
 func main() {
 	// Get configuration from environment
 	port := os.Getenv("LEDGER_SERVICE_PORT")
@@ -368,17 +397,29 @@ func main() {
 	if reconciliationPort == "" {
 		reconciliationPort = "8081"
 	}
+	reconciliationTLSConfig, err := reconciliationMTLSConfig(
+		os.Getenv("LEDGER_RECONCILIATION_TLS_CERT_FILE"),
+		os.Getenv("LEDGER_RECONCILIATION_TLS_KEY_FILE"),
+		os.Getenv("LEDGER_RECONCILIATION_CLIENT_CA_FILE"),
+	)
+	if err != nil {
+		log.Fatalf("Failed to configure reconciliation mTLS: %v", err)
+	}
 	reconciliationHTTP := &http.Server{
 		Addr:              ":" + reconciliationPort,
 		Handler:           reconciliationProjection.Handler(),
+		TLSConfig:         reconciliationTLSConfig,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       30 * time.Second,
 	}
 	go func() {
-		log.Printf("Ledger reconciliation projection listening on port %s", reconciliationPort)
-		if serveErr := reconciliationHTTP.ListenAndServe(); serveErr != nil && serveErr != http.ErrServerClosed {
+		log.Printf("Ledger mTLS reconciliation projection listening on port %s", reconciliationPort)
+		if serveErr := reconciliationHTTP.ListenAndServeTLS(
+			os.Getenv("LEDGER_RECONCILIATION_TLS_CERT_FILE"),
+			os.Getenv("LEDGER_RECONCILIATION_TLS_KEY_FILE"),
+		); serveErr != nil && serveErr != http.ErrServerClosed {
 			log.Fatalf("Reconciliation projection failed: %v", serveErr)
 		}
 	}()

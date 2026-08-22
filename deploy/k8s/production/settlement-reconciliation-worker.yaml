@@ -60,10 +60,20 @@ spec:
                 secretKeyRef:
                   name: payment-core-runtime-secrets
                   key: settlement-ledger-reconciliation-token
+            - name: SETTLEMENT_LEDGER_CA_FILE
+              value: /run/reconciliation-client-tls/ca.crt
+            - name: SETTLEMENT_LEDGER_CLIENT_CERT_FILE
+              value: /run/reconciliation-client-tls/tls.crt
+            - name: SETTLEMENT_LEDGER_CLIENT_KEY_FILE
+              value: /run/reconciliation-client-tls/tls.key
             - name: SETTLEMENT_RECONCILIATION_INTERVAL_SECONDS
               value: "10"
             - name: SETTLEMENT_RECONCILIATION_LEASE_SECONDS
               value: "60"
+          volumeMounts:
+            - name: reconciliation-client-tls
+              mountPath: /run/reconciliation-client-tls
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -86,6 +96,17 @@ spec:
               command: ["python", "-c", "import os; assert os.environ.get('SETTLEMENT_LEDGER_URL')"]
             initialDelaySeconds: 5
             periodSeconds: 15
+      volumes:
+        - name: reconciliation-client-tls
+          secret:
+            secretName: settlement-reconciliation-client-mtls
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

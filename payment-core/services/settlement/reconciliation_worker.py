@@ -45,11 +45,23 @@ class AuthoritativeLedgerClient:
     transient request acknowledgement.
     """
 
-    def __init__(self, base_url: str, bearer_token: str | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        bearer_token: str | None = None,
+        ca_file: str | None = None,
+        client_cert_file: str | None = None,
+        client_key_file: str | None = None,
+    ) -> None:
         if not base_url.strip():
             raise ValueError("SETTLEMENT_LEDGER_URL is required")
         self.base_url = base_url.rstrip("/")
         self.bearer_token = bearer_token
+        self.ca_file = ca_file
+        self.client_cert_file = client_cert_file
+        self.client_key_file = client_key_file
+        if self.base_url.startswith("https://") and not (ca_file and client_cert_file and client_key_file):
+            raise ValueError("HTTPS reconciliation requires SETTLEMENT_LEDGER_CA_FILE and client certificate/key files")
 
     async def lookup_settlement(self, case: ReconciliationCase) -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {self.bearer_token}"} if self.bearer_token else {}
@@ -59,7 +71,11 @@ class AuthoritativeLedgerClient:
             "canonicalTransferId128": case.canonical_transfer_id_128,
         }
         timeout = float(os.getenv("SETTLEMENT_LEDGER_TIMEOUT_SECONDS", "5"))
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            verify=self.ca_file or True,
+            cert=(self.client_cert_file, self.client_key_file) if self.client_cert_file and self.client_key_file else None,
+        ) as client:
             response = await client.post(f"{self.base_url}/v1/reconciliation/settlements/lookup", json=payload, headers=headers)
         if response.status_code < 200 or response.status_code >= 300:
             raise RuntimeError(f"authoritative ledger lookup failed with status {response.status_code}")
@@ -230,6 +246,9 @@ async def main() -> None:  # pragma: no cover
         AuthoritativeLedgerClient(
             os.environ["SETTLEMENT_LEDGER_URL"],
             os.getenv("SETTLEMENT_LEDGER_RECONCILIATION_TOKEN"),
+            os.getenv("SETTLEMENT_LEDGER_CA_FILE"),
+            os.getenv("SETTLEMENT_LEDGER_CLIENT_CERT_FILE"),
+            os.getenv("SETTLEMENT_LEDGER_CLIENT_KEY_FILE"),
         )
     )
     await worker.run_forever()

@@ -1,0 +1,214 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-ledger-reconciliation
+  namespace: payment-switch
+  labels:
+    app.kubernetes.io/name: go-ledger
+    app.kubernetes.io/component: reconciliation-projection
+spec:
+  selector:
+    app.kubernetes.io/name: go-ledger
+  ports:
+    - name: reconciliation-https
+      port: 8443
+      targetPort: reconciliation
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-ledger
+  namespace: payment-switch
+  labels:
+    app.kubernetes.io/name: go-ledger
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: go-ledger
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: go-ledger
+    spec:
+      serviceAccountName: payment-core-runtime
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: go-ledger
+          image: ${GO_LEDGER_IMAGE:?GO_LEDGER_IMAGE must be set}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: grpc
+              containerPort: 50051
+            - name: reconciliation
+              containerPort: 8443
+          env:
+            - name: LEDGER_SERVICE_PORT
+              value: "50051"
+            - name: LEDGER_RECONCILIATION_PORT
+              value: "8443"
+            - name: LEDGER_RECONCILIATION_TLS_CERT_FILE
+              value: /run/reconciliation-tls/tls.crt
+            - name: LEDGER_RECONCILIATION_TLS_KEY_FILE
+              value: /run/reconciliation-tls/tls.key
+            - name: LEDGER_RECONCILIATION_CLIENT_CA_FILE
+              value: /run/reconciliation-tls/client-ca.crt
+            - name: LEDGER_RECONCILIATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: payment-core-runtime-secrets
+                  key: settlement-ledger-reconciliation-token
+            - name: POSTGRES_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: payment-core-runtime-secrets
+                  key: postgres-host
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: payment-core-runtime-secrets
+                  key: postgres-database
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: payment-core-runtime-secrets
+                  key: postgres-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: payment-core-runtime-secrets
+                  key: postgres-password
+            - name: TIGERBEETLE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: payment-core-runtime-secrets
+                  key: tigerbeetle-host
+            - name: TIGERBEETLE_PORT
+              value: "3000"
+            - name: KEYCLOAK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: payment-core-runtime-secrets
+                  key: keycloak-url
+            - name: KEYCLOAK_REALM
+              value: payment-switch
+            - name: KEYCLOAK_CLIENT_ID
+              value: ledger-service
+          volumeMounts:
+            - name: reconciliation-tls
+              mountPath: /run/reconciliation-tls
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: reconciliation
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: reconciliation-tls
+          secret:
+            secretName: go-ledger-reconciliation-mtls
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+              - key: client-ca.crt
+                path: client-ca.crt
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: go-ledger-reconciliation-ingress
+  namespace: payment-switch
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: go-ledger
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: apisix
+      ports:
+        - protocol: TCP
+          port: 8443
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: go-ledger
+      ports:
+        - protocol: TCP
+          port: 50051
+---
+# APISIX declarative fragment. Apply it through the controlled APISIX configuration
+# pipeline; the route must remain internal-only and is not exposed on public API hosts.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apisix-reconciliation-projection-route
+  namespace: payment-switch
+  labels:
+    app.kubernetes.io/name: apisix
+    app.kubernetes.io/component: internal-reconciliation
+immutable: true
+data:
+  reconciliation-route.yaml: |
+    upstreams:
+      - id: go-ledger-reconciliation
+        type: roundrobin
+        scheme: https
+        pass_host: node
+        tls:
+          client_cert: ${APISIX_RECONCILIATION_CLIENT_CERT_PEM}
+          client_key: ${APISIX_RECONCILIATION_CLIENT_KEY_PEM}
+          trusted_ca_cert: ${GO_LEDGER_RECONCILIATION_CA_PEM}
+          verify: true
+        nodes:
+          "go-ledger-reconciliation.payment-switch.svc.cluster.local:8443": 1
+    routes:
+      - id: internal-settlement-reconciliation
+        uri: /internal/v1/reconciliation/settlements/lookup
+        methods: [POST]
+        priority: 1000
+        upstream_id: go-ledger-reconciliation
+        plugins:
+          openid-connect:
+            client_id: apisix-gateway
+            client_secret: ${KEYCLOAK_APISIX_CLIENT_SECRET}
+            discovery: ${KEYCLOAK_DISCOVERY_URL}
+            bearer_only: true
+            realm: payment-switch
+            token_signing_alg_values_expected: RS256
+          proxy-rewrite:
+            uri: /v1/reconciliation/settlements/lookup
+          limit-req:
+            rate: 50
+            burst: 20
+            key: consumer_name
+          ip-restriction:
+            whitelist:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16

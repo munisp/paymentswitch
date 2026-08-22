@@ -82,6 +82,66 @@ jobs:
           grep -q 'settlement-reconciliation-worker' deploy/k8s/production/settlement-reconciliation-worker.yaml
           git diff --check
 
+  live-cross-store-partition-recovery:
+    name: Live cross-store partition recovery
+    needs: verify-payment-contracts
+    if: vars.RUN_LIVE_CROSS_STORE_RECOVERY == 'true'
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install recovery test dependencies
+        run: pip install asyncpg==0.29.0 httpx==0.25.2
+
+      - name: Materialize reconciliation mTLS files
+        env:
+          RECONCILIATION_CA_PEM: ${{ secrets.RECONCILIATION_CA_PEM }}
+          RECONCILIATION_CLIENT_CERT_PEM: ${{ secrets.RECONCILIATION_CLIENT_CERT_PEM }}
+          RECONCILIATION_CLIENT_KEY_PEM: ${{ secrets.RECONCILIATION_CLIENT_KEY_PEM }}
+        run: |
+          umask 077
+          mkdir -p "$RUNNER_TEMP/reconciliation-mtls"
+          printf '%s' "$RECONCILIATION_CA_PEM" > "$RUNNER_TEMP/reconciliation-mtls/ca.crt"
+          printf '%s' "$RECONCILIATION_CLIENT_CERT_PEM" > "$RUNNER_TEMP/reconciliation-mtls/tls.crt"
+          printf '%s' "$RECONCILIATION_CLIENT_KEY_PEM" > "$RUNNER_TEMP/reconciliation-mtls/tls.key"
+          test -s "$RUNNER_TEMP/reconciliation-mtls/ca.crt"
+          test -s "$RUNNER_TEMP/reconciliation-mtls/tls.crt"
+          test -s "$RUNNER_TEMP/reconciliation-mtls/tls.key"
+
+      - name: Run real cross-store partition recovery gate
+        env:
+          CROSS_STORE_INTEGRATION: '1'
+          INTEGRATION_POSTGRES_DSN: ${{ secrets.CROSS_STORE_INTEGRATION_POSTGRES_DSN }}
+          POSTGRES_HOST: ${{ secrets.CROSS_STORE_POSTGRES_HOST }}
+          POSTGRES_DB: ${{ secrets.CROSS_STORE_POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.CROSS_STORE_POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.CROSS_STORE_POSTGRES_PASSWORD }}
+          RECONCILIATION_PROJECTION_URL: ${{ secrets.RECONCILIATION_PROJECTION_URL }}
+          SETTLEMENT_LEDGER_RECONCILIATION_TOKEN: ${{ secrets.SETTLEMENT_LEDGER_RECONCILIATION_TOKEN }}
+          SETTLEMENT_LEDGER_CA_FILE: ${{ runner.temp }}/reconciliation-mtls/ca.crt
+          SETTLEMENT_LEDGER_CLIENT_CERT_FILE: ${{ runner.temp }}/reconciliation-mtls/tls.crt
+          SETTLEMENT_LEDGER_CLIENT_KEY_FILE: ${{ runner.temp }}/reconciliation-mtls/tls.key
+          CROSS_STORE_TEST_TRANSFER_ID_128: ${{ secrets.CROSS_STORE_TEST_TRANSFER_ID_128 }}
+          CROSS_STORE_TEST_SETTLEMENT_REFERENCE: ${{ secrets.CROSS_STORE_TEST_SETTLEMENT_REFERENCE }}
+        run: bash scripts/assurance/run_cross_store_partition_recovery.sh
+
+      - name: Upload live recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-cross-store-recovery-${{ github.run_id }}
+          path: .audit/cross-store-partition-recovery-*.log
+          if-no-files-found: warn
+          retention-days: 365
+
       - name: Upload assurance evidence
         if: always()
         uses: actions/upload-artifact@v4
