@@ -223,6 +223,34 @@ export function recordDraftSave(): void {
   );
 }
 
+export function recordPaymentRoute(
+  operation: "create" | "read" | "approve",
+  outcome: "success" | "client_error" | "denied" | "dependency_error" | "server_error",
+  durationSeconds: number
+): void {
+  add(
+    "paymentswitch_payment_route_requests_total",
+    "Payment REST requests grouped by operation and bounded outcome.",
+    "counter",
+    1,
+    { operation, outcome }
+  );
+  add(
+    "paymentswitch_payment_route_duration_seconds_sum",
+    "Total payment REST request duration in seconds.",
+    "counter",
+    durationSeconds,
+    { operation, outcome }
+  );
+  add(
+    "paymentswitch_payment_route_duration_seconds_count",
+    "Payment REST request duration observations.",
+    "counter",
+    1,
+    { operation, outcome }
+  );
+}
+
 export function renderPrometheus(): string {
   const lines: string[] = [];
   for (const [name, definition] of Array.from(metrics.entries())) {

@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Merchant, PaymentSession } from "../../drizzle/schema";
 import { getMerchantsByUserId } from "../db";
 import { logger } from "../lib/logger";
+import { recordPaymentRoute } from "../observability/metrics";
 import {
   authorizationHeaders,
   getTraceContext,
@@ -256,6 +257,29 @@ function decisionId(response: Response, action: string): string {
   return `${action}:${context.traceId}`;
 }
 
+type PaymentOperation = "create" | "read" | "approve";
+
+function observePaymentRoute(
+  response: Response,
+  operation: PaymentOperation
+): void {
+  const started = performance.now();
+  response.once("finish", () => {
+    const status = response.statusCode;
+    const outcome =
+      status >= 200 && status < 300
+        ? "success"
+        : status === 401 || status === 403
+          ? "denied"
+          : status >= 400 && status < 500
+            ? "client_error"
+            : status === 503
+              ? "dependency_error"
+              : "server_error";
+    recordPaymentRoute(operation, outcome, (performance.now() - started) / 1000);
+  });
+}
+
 function setDecisionHeaders(response: Response, action: string): void {
   const context = getTraceContext(response);
   const values = authorizationHeaders(context, decisionId(response, action));
@@ -368,6 +392,7 @@ export function createPaymentRestRouter(
   const router = Router();
 
   router.get("/api/v1/payments/:paymentId", async (request, response) => {
+    observePaymentRoute(response, "read");
     try {
       const principal = await requirePrincipal(request, response, dependencies);
       if (!principal) return;
@@ -409,6 +434,7 @@ export function createPaymentRestRouter(
   });
 
   router.post("/api/v1/payments", async (request, response) => {
+    observePaymentRoute(response, "create");
     try {
       const principal = await requirePrincipal(request, response, dependencies);
       if (!principal) return;
@@ -517,6 +543,7 @@ export function createPaymentRestRouter(
   router.post(
     "/api/v1/admin/payments/:paymentId/approve",
     async (request, response) => {
+      observePaymentRoute(response, "approve");
       try {
         const principal = await requirePrincipal(
           request,

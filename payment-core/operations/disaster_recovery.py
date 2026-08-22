@@ -38,6 +38,10 @@ class RecoveryStatus(Enum):
     CANCELLED = "cancelled"
 
 
+class LiveRecoveryExecutorRequiredError(RuntimeError):
+    """Raised when a plan-only helper is asked to claim a live backup or restore."""
+
+
 @dataclass
 class BackupMetadata:
     backup_id: str
@@ -104,61 +108,20 @@ class DisasterRecoveryService:
         components: Optional[List[str]] = None,
         retention_days: int = 30
     ) -> BackupMetadata:
-        """Create a backup of specified components"""
-        backup_id = f"backup-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
-        
-        if components is None:
-            components = ["delta_lake", "kafka_offsets", "tigerbeetle", "redis_state"]
-        
-        logger.info(f"Creating backup {backup_id} for components: {components}")
-        
-        # Collect Delta Lake tables
-        delta_tables = await self._get_delta_tables()
-        
-        # Collect Kafka topics
-        kafka_topics = await self._get_kafka_topics()
-        
-        # Create backup metadata
-        backup = BackupMetadata(
-            backup_id=backup_id,
-            backup_type=backup_type,
-            created_at=datetime.utcnow().isoformat(),
-            size_bytes=0,
-            components=components,
-            delta_tables=delta_tables,
-            kafka_topics=kafka_topics,
-            tigerbeetle_snapshot="tigerbeetle" in components,
-            retention_days=retention_days,
-            status="in_progress",
-            path=f"{self.backup_path}/{backup_id}"
+        """Refuse to claim a live backup without an approved backup executor.
+
+        This legacy helper can still create and persist recovery plans, but it does
+        not own PostgreSQL PITR, TigerBeetle replica recovery, Kafka offsets, or
+        Delta Lake snapshots. Returning fabricated byte counts here would create
+        dangerous false recovery evidence.
+        """
+        raise LiveRecoveryExecutorRequiredError(
+            "Live backup execution is not implemented by DisasterRecoveryService. "
+            "Use the approved PostgreSQL PITR runner, TigerBeetle recover runbook, "
+            "and Temporal persistence backup workflow; attach their immutable evidence "
+            "to the recovery plan before declaring a backup complete."
         )
-        
-        # Execute backup steps
-        total_size = 0
-        
-        if "delta_lake" in components:
-            size = await self._backup_delta_lake(backup_id, delta_tables)
-            total_size += size
-        
-        if "kafka_offsets" in components:
-            await self._backup_kafka_offsets(backup_id, kafka_topics)
-        
-        if "tigerbeetle" in components:
-            size = await self._backup_tigerbeetle(backup_id)
-            total_size += size
-        
-        if "redis_state" in components:
-            size = await self._backup_redis_state(backup_id)
-            total_size += size
-        
-        backup.size_bytes = total_size
-        backup.status = "completed"
-        
-        # Store backup metadata
-        self._save_backup_metadata(backup)
-        
-        logger.info(f"Backup {backup_id} completed: {total_size} bytes")
-        return backup
+
     
     async def _get_delta_tables(self) -> List[str]:
         """Get list of Delta Lake tables"""
@@ -185,30 +148,6 @@ class DisasterRecoveryService:
             "tigerbeetle.transfers",
             "tigerbeetle.accounts"
         ]
-    
-    async def _backup_delta_lake(self, backup_id: str, tables: List[str]) -> int:
-        """Backup Delta Lake tables"""
-        # In production, use Delta Lake CLONE or COPY operations
-        # For now, simulate backup
-        logger.info(f"Backing up {len(tables)} Delta Lake tables")
-        return 1024 * 1024 * 100  # Simulated 100MB
-    
-    async def _backup_kafka_offsets(self, backup_id: str, topics: List[str]):
-        """Backup Kafka consumer offsets"""
-        # In production, query Kafka for consumer group offsets
-        logger.info(f"Backing up offsets for {len(topics)} Kafka topics")
-    
-    async def _backup_tigerbeetle(self, backup_id: str) -> int:
-        """Backup TigerBeetle data"""
-        # In production, use TigerBeetle backup command
-        logger.info("Backing up TigerBeetle ledger")
-        return 1024 * 1024 * 50  # Simulated 50MB
-    
-    async def _backup_redis_state(self, backup_id: str) -> int:
-        """Backup Redis state"""
-        # In production, use Redis BGSAVE or RDB snapshot
-        logger.info("Backing up Redis state")
-        return 1024 * 1024 * 10  # Simulated 10MB
     
     def _save_backup_metadata(self, backup: BackupMetadata):
         """Save backup metadata to Redis"""
@@ -335,39 +274,21 @@ class DisasterRecoveryService:
         self.redis_client.setex(key, 86400 * 7, json.dumps(data))
     
     async def execute_recovery_plan(self, plan_id: str) -> Dict[str, Any]:
-        """Execute a recovery plan"""
+        """Refuse simulated execution; only an approved controlled runner may restore."""
         key = f"{self.prefix}plan:{plan_id}"
         plan_data = self.redis_client.get(key)
-        
         if not plan_data:
             raise ValueError(f"Recovery plan {plan_id} not found")
-        
+
         plan = json.loads(plan_data)
-        plan['status'] = RecoveryStatus.IN_PROGRESS.value
+        plan['status'] = RecoveryStatus.FAILED.value
+        plan['failure_reason'] = (
+            "Plan-only service cannot execute recovery. Run the approved, "
+            "change-controlled PostgreSQL/TigerBeetle/Temporal recovery automation "
+            "and attach verified evidence."
+        )
         self.redis_client.set(key, json.dumps(plan))
-        
-        logger.info(f"Executing recovery plan {plan_id}")
-        
-        results = []
-        for step in plan['steps']:
-            logger.info(f"Executing step {step['step']}: {step['action']}")
-            
-            # Simulate step execution
-            result = {
-                'step': step['step'],
-                'action': step['action'],
-                'status': 'completed',
-                'duration_minutes': step['estimated_minutes'] * 0.8,
-                'completed_at': datetime.utcnow().isoformat()
-            }
-            results.append(result)
-        
-        plan['status'] = RecoveryStatus.COMPLETED.value
-        plan['results'] = results
-        plan['completed_at'] = datetime.utcnow().isoformat()
-        self.redis_client.set(key, json.dumps(plan))
-        
-        return plan
+        raise LiveRecoveryExecutorRequiredError(plan['failure_reason'])
     
     async def create_replay_job(
         self,
@@ -454,11 +375,12 @@ class DisasterRecoveryService:
                         '1. Alert NOC team via PagerDuty',
                         '2. Activate transaction kill switch',
                         '3. Verify TigerBeetle cluster status',
-                        '4. If quorum lost, restore from backup',
-                        '5. Replay pending transactions from Kafka',
-                        '6. Run ledger reconciliation',
-                        '7. Deactivate kill switch',
-                        '8. Monitor for 30 minutes'
+                        '4. If one replica data file is permanently lost and quorum is healthy, use tigerbeetle recover; never tigerbeetle format',
+                        '5. If quorum is lost, preserve all evidence and escalate to the ledger recovery commander; do not restart or reformat replicas',
+                        '6. Replay pending transactions from Kafka only after ledger reconciliation proves a durable source of truth',
+                        '7. Run ledger reconciliation and prove no duplicate posting',
+                        '8. Deactivate kill switch only after dual control approval',
+                        '9. Monitor for 30 minutes'
                     ]
                 },
                 {
