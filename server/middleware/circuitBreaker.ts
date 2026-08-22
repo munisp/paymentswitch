@@ -28,6 +28,7 @@ export interface CircuitBreakerOptions {
   timeout?: number;
   resetTimeout?: number;
   monitorInterval?: number;
+  maxHalfOpenRequests?: number;
   fallback?: <T>() => T | Promise<T>;
   onStateChange?: (from: CircuitState, to: CircuitState) => void;
   onFailure?: (error: Error) => void;
@@ -54,6 +55,8 @@ export class CircuitBreaker extends EventEmitter {
   private successThreshold: number;
   private timeout: number;
   private resetTimeout: number;
+  private maxHalfOpenRequests: number;
+  private halfOpenInFlight: number = 0;
   private failures: number = 0;
   private successes: number = 0;
   private totalRequests: number = 0;
@@ -75,6 +78,7 @@ export class CircuitBreaker extends EventEmitter {
     this.successThreshold = options.successThreshold || 2;
     this.timeout = options.timeout || 30000; // 30 seconds
     this.resetTimeout = options.resetTimeout || 60000; // 60 seconds
+    this.maxHalfOpenRequests = Math.max(1, options.maxHalfOpenRequests ?? 1);
     this.fallback = options.fallback;
     this.onStateChange = options.onStateChange;
     this.onFailure = options.onFailure;
@@ -84,6 +88,7 @@ export class CircuitBreaker extends EventEmitter {
 
   async execute<T>(fn: () => Promise<T>): Promise<T> {
     this.totalRequests++;
+    let halfOpenProbe = false;
 
     if (this.state === CircuitState.OPEN) {
       if (Date.now() < this.nextAttempt) {
@@ -101,6 +106,19 @@ export class CircuitBreaker extends EventEmitter {
       this.transitionTo(CircuitState.HALF_OPEN);
     }
 
+    if (this.state === CircuitState.HALF_OPEN) {
+      if (this.halfOpenInFlight >= this.maxHalfOpenRequests) {
+        if (this.fallback) return this.fallback() as T;
+        throw new CircuitBreakerError(
+          `Circuit breaker '${this.name}' is HALF_OPEN and probe capacity is exhausted`,
+          this.name,
+          this.state,
+        );
+      }
+      this.halfOpenInFlight++;
+      halfOpenProbe = true;
+    }
+
     try {
       const result = await this.executeWithTimeout(fn);
       this.recordSuccess();
@@ -110,6 +128,8 @@ export class CircuitBreaker extends EventEmitter {
         this.recordFailure(error as Error);
       }
       throw error;
+    } finally {
+      if (halfOpenProbe) this.halfOpenInFlight--;
     }
   }
 
@@ -179,6 +199,11 @@ export class CircuitBreaker extends EventEmitter {
 
     if (newState === CircuitState.OPEN) {
       this.nextAttempt = Date.now() + this.resetTimeout;
+      this.halfOpenInFlight = 0;
+    }
+
+    if (newState === CircuitState.HALF_OPEN) {
+      this.halfOpenInFlight = 0;
     }
 
     if (newState === CircuitState.CLOSED) {
@@ -218,6 +243,7 @@ export class CircuitBreaker extends EventEmitter {
     this.consecutiveFailures = 0;
     this.consecutiveSuccesses = 0;
     this.nextAttempt = 0;
+    this.halfOpenInFlight = 0;
     this.emit('reset', this.getStats());
   }
 

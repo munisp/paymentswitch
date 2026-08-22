@@ -10,8 +10,12 @@ import { createChildLogger } from './logger';
 const log = createChildLogger('grpc-client');
 
 const GRPC_TIMEOUT_MS = parseInt(process.env.GRPC_TIMEOUT_MS ?? '5000', 10);
-const GRPC_MAX_RETRIES = parseInt(process.env.GRPC_MAX_RETRIES ?? '3', 10);
+const GRPC_MAX_ATTEMPTS = parseInt(
+  process.env.GRPC_MAX_ATTEMPTS ?? process.env.GRPC_MAX_RETRIES ?? '3',
+  10,
+);
 const GRPC_RETRY_BASE_MS = 150;
+const GRPC_RETRY_DEADLINE_MS = parseInt(process.env.GRPC_RETRY_DEADLINE_MS ?? '10_000', 10);
 const GRPC_RETRY_MAX_BACKOFF_MS = 10_000;
 
 export function parseRetryAfterMs(
@@ -43,9 +47,22 @@ export function calculateRetryDelayMs(
   return Math.min(cap, Math.floor(random() * (cap + 1)));
 }
 
+export class GrpcClientError extends Error {
+  constructor(
+    message: string,
+    public readonly status?: number,
+    public readonly retryable = false,
+  ) {
+    super(message);
+    this.name = 'GrpcClientError';
+  }
+}
+
 interface GrpcCallOptions {
   timeout?: number;
-  retries?: number;
+  attempts?: number;
+  retries?: number; // Deprecated alias for attempts.
+  retryDeadlineMs?: number;
   headers?: Record<string, string>;
 }
 
@@ -54,6 +71,8 @@ interface GrpcServiceConfig {
   baseUrl: string;
   failureThreshold?: number;
   resetTimeout?: number;
+  maxHalfOpenRequests?: number;
+  isFailure?: (error: Error) => boolean;
 }
 
 const circuitBreakers = new Map<string, CircuitBreaker>();
@@ -65,6 +84,9 @@ function getCircuitBreaker(config: GrpcServiceConfig): CircuitBreaker {
       name: `grpc-${config.name}`,
       failureThreshold: config.failureThreshold ?? 5,
       resetTimeout: config.resetTimeout ?? 30000,
+      maxHalfOpenRequests: config.maxHalfOpenRequests ?? 1,
+      isFailure: config.isFailure ?? ((error: Error) =>
+        error instanceof GrpcClientError && error.retryable),
       onStateChange: (from: CircuitState, to: CircuitState) => {
         log.warn({ service: config.name, from, to }, 'gRPC circuit breaker state change');
       },
@@ -81,9 +103,11 @@ async function grpcCallWithRetry<T>(
   opts: GrpcCallOptions = {},
 ): Promise<T | null> {
   const timeout = opts.timeout ?? GRPC_TIMEOUT_MS;
-  const maxRetries = opts.retries ?? GRPC_MAX_RETRIES;
+  const maxAttempts = opts.attempts ?? opts.retries ?? GRPC_MAX_ATTEMPTS;
+  const retryDeadlineMs = opts.retryDeadlineMs ?? GRPC_RETRY_DEADLINE_MS;
+  const startedAt = Date.now();
 
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
 
@@ -101,29 +125,57 @@ async function grpcCallWithRetry<T>(
       clearTimeout(timer);
 
       if (res.status === 503 || res.status === 429 || res.status === 500) {
-        if (attempt < maxRetries - 1) {
+        if (attempt < maxAttempts - 1) {
           const delay = calculateRetryDelayMs(
             attempt,
             res.headers.get('Retry-After'),
           );
-          log.warn({ method, attempt: attempt + 1, status: res.status, delay }, 'gRPC call failed, retrying');
+          if (Date.now() - startedAt + delay >= retryDeadlineMs) {
+            throw new GrpcClientError(
+              `gRPC ${method} retry deadline exceeded after HTTP ${res.status}`,
+              res.status,
+              true,
+            );
+          }
+          log.warn({ method, attempt: attempt + 1, maxAttempts, status: res.status, delay }, 'gRPC call failed, retrying');
           await new Promise(r => setTimeout(r, delay));
           continue;
         }
-        return null;
+        throw new GrpcClientError(
+          `gRPC ${method} exhausted attempts after HTTP ${res.status}`,
+          res.status,
+          true,
+        );
       }
 
-      if (!res.ok) return null;
+      if (!res.ok) {
+        throw new GrpcClientError(
+          `gRPC ${method} returned non-retryable HTTP ${res.status}`,
+          res.status,
+          false,
+        );
+      }
       return (await res.json()) as T;
     } catch (err) {
       clearTimeout(timer);
-      if (attempt < maxRetries - 1) {
+      if (attempt < maxAttempts - 1) {
         const delay = calculateRetryDelayMs(attempt, undefined);
-        log.warn({ method, attempt: attempt + 1, err, delay }, 'gRPC call error, retrying');
+        if (Date.now() - startedAt + delay >= retryDeadlineMs) {
+          throw new GrpcClientError(
+            `gRPC ${method} retry deadline exceeded after transport failure`,
+            undefined,
+            true,
+          );
+        }
+        log.warn({ method, attempt: attempt + 1, maxAttempts, err, delay }, 'gRPC call error, retrying');
         await new Promise(r => setTimeout(r, delay));
         continue;
       }
-      return null;
+      throw new GrpcClientError(
+        `gRPC ${method} exhausted attempts after transport failure`,
+        undefined,
+        true,
+      );
     }
   }
   return null;
@@ -131,7 +183,11 @@ async function grpcCallWithRetry<T>(
 
 /** Create a typed gRPC service client with circuit breaker and retries. */
 export function createGrpcServiceClient(config: GrpcServiceConfig) {
-  const cb = getCircuitBreaker(config);
+  const cb = getCircuitBreaker({
+    ...config,
+    isFailure: config.isFailure ?? ((error: Error) =>
+      error instanceof GrpcClientError && error.retryable),
+  });
 
   return {
     name: config.name,

@@ -75,6 +75,43 @@ describe('CircuitBreaker', () => {
     expect(stats.state).toBe(CircuitState.CLOSED);
   });
 
+  it('limits concurrent half-open probes', async () => {
+    const limited = new CircuitBreaker({
+      name: 'half-open-limit',
+      failureThreshold: 1,
+      successThreshold: 1,
+      resetTimeout: 10,
+      maxHalfOpenRequests: 1,
+    });
+    await expect(limited.execute(() => Promise.reject(new Error('fail')))).rejects.toThrow('fail');
+    await new Promise(r => setTimeout(r, 20));
+
+    let release!: () => void;
+    const probe = limited.execute(() => new Promise<string>(resolve => {
+      release = () => resolve('recovered');
+    }));
+    await expect(limited.execute(() => Promise.resolve('second-probe')))
+      .rejects.toThrow(/probe capacity/i);
+    release();
+    await expect(probe).resolves.toBe('recovered');
+  });
+
+  it('does not count classified business errors as circuit failures', async () => {
+    const classified = new CircuitBreaker({
+      name: 'classified',
+      failureThreshold: 1,
+      isFailure: error => error.message === 'dependency failure',
+    });
+    await expect(classified.execute(() => Promise.reject(new Error('business conflict'))))
+      .rejects.toThrow('business conflict');
+    expect(classified.getStats().state).toBe(CircuitState.CLOSED);
+    expect(classified.getStats().failures).toBe(0);
+
+    await expect(classified.execute(() => Promise.reject(new Error('dependency failure'))))
+      .rejects.toThrow('dependency failure');
+    expect(classified.getStats().state).toBe(CircuitState.OPEN);
+  });
+
   it('tracks total request count', async () => {
     await breaker.execute(() => Promise.resolve('a'));
     await breaker.execute(() => Promise.resolve('b'));
