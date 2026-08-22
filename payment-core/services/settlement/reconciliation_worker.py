@@ -130,6 +130,23 @@ class SettlementReconciliationWorker:
                 )
                 if case_row is None:
                     raise RuntimeError("reconciliation case lease was lost")
+                idempotency_key = f"settlement:{case.settlement_id}"[:64]
+                await conn.execute(
+                    """UPDATE payment_sagas
+                       SET state='SETTLED', ledger_result=$2, finality_certificate=$3,
+                           completed_at=NOW(), updated_at=NOW()
+                       WHERE idempotency_key=$1 AND state NOT IN ('SETTLED', 'REVERSED')""",
+                    idempotency_key,
+                    json.dumps(evidence),
+                    json.dumps(certificate),
+                )
+                await conn.execute(
+                    """UPDATE idempotency_keys
+                       SET status='completed', response=$2, response_status=200
+                       WHERE idempotency_key=$1 AND status='in_progress'""",
+                    idempotency_key,
+                    json.dumps({"settlementId": case.settlement_id, "settlementReference": reference}),
+                )
                 window = await conn.fetchrow(
                     """UPDATE settlement_windows
                        SET status='SETTLED', settlement_reference=$2, finality_certificate=$3,

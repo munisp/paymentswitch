@@ -5,6 +5,7 @@ Replaces in-memory dicts with database-backed storage.
 
 import os
 import json
+import hashlib
 import logging
 import uuid
 from typing import Optional, Dict, List
@@ -84,6 +85,21 @@ async def _ensure_schema(pool: Pool):
             CREATE INDEX IF NOT EXISTS idx_pp_window ON participant_positions(window_id);
             CREATE INDEX IF NOT EXISTS idx_pp_participant ON participant_positions(participant_id);
 
+            CREATE TABLE IF NOT EXISTS payment_sagas (
+                saga_id UUID PRIMARY KEY,
+                idempotency_key VARCHAR(64) NOT NULL UNIQUE REFERENCES idempotency_keys(idempotency_key),
+                aggregate_id TEXT NOT NULL,
+                canonical_transfer_id_128 CHAR(32) NOT NULL UNIQUE,
+                state TEXT NOT NULL DEFAULT 'ADMITTED',
+                request_payload JSONB NOT NULL,
+                ledger_result JSONB,
+                finality_certificate JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                completed_at TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS payment_sagas_state_idx ON payment_sagas(state, updated_at);
+
             CREATE TABLE IF NOT EXISTS settlement_reconciliation_cases (
                 case_id UUID PRIMARY KEY,
                 window_id TEXT NOT NULL REFERENCES settlement_windows(window_id),
@@ -143,6 +159,46 @@ async def create_window(window_id: str, currency: str, settlement_model: str) ->
         return dict(row)
 
 
+def _canonical_transfer_id_128(settlement_id: str) -> str:
+    return hashlib.sha256(settlement_id.encode("utf-8")).hexdigest()[:32]
+
+
+async def admit_settlement_saga(settlement_id: str, window_id: str, request_payload: Dict) -> str:
+    """Atomically persist idempotent saga intent and its outbox event before ledger dispatch."""
+    pool = await get_pool()
+    saga_id = str(uuid.uuid4())
+    idempotency_key = f"settlement:{settlement_id}"[:64]
+    canonical_transfer_id = _canonical_transfer_id_128(settlement_id)
+    request_json = json.dumps(request_payload, sort_keys=True)
+    request_hash = hashlib.sha256(request_json.encode("utf-8")).hexdigest()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """INSERT INTO idempotency_keys (idempotency_key, operation, request_hash, status)
+                   VALUES ($1, 'settlement_execute', $2, 'in_progress')
+                   ON CONFLICT (idempotency_key) DO NOTHING""",
+                idempotency_key, request_hash,
+            )
+            row = await conn.fetchrow(
+                """INSERT INTO payment_sagas
+                   (saga_id, idempotency_key, aggregate_id, canonical_transfer_id_128, request_payload)
+                   VALUES ($1, $2, $3, $4, $5)
+                   ON CONFLICT (idempotency_key) DO UPDATE SET updated_at=NOW()
+                   RETURNING saga_id, canonical_transfer_id_128""",
+                saga_id, idempotency_key, window_id, canonical_transfer_id, request_json,
+            )
+            await conn.execute(
+                """INSERT INTO outbox_events
+                   (aggregate_type, aggregate_id, event_type, payload, deduplication_key)
+                   VALUES ('settlement_window', $1, 'settlement.saga.admitted', $2, $3)
+                   ON CONFLICT (deduplication_key) DO NOTHING""",
+                window_id,
+                json.dumps({"sagaId": str(row["saga_id"]), "settlementId": settlement_id, "canonicalTransferId128": row["canonical_transfer_id_128"]}),
+                f"settlement-saga-admitted:{settlement_id}",
+            )
+    return canonical_transfer_id
+
+
 async def get_window(window_id: str) -> Optional[Dict]:
     """Fetch a settlement window by ID."""
     pool = await get_pool()
@@ -178,6 +234,52 @@ async def update_window_status(window_id: str, status: str, end_time: Optional[d
             )
 
 
+async def complete_settlement_saga(
+    settlement_id: str,
+    window_id: str,
+    total_amount: Decimal,
+    settlement_reference: str,
+    finality_certificate: Dict,
+    ledger_result: Dict,
+) -> None:
+    """Atomically persist finality in the saga, idempotency record, settlement window, and outbox."""
+    pool = await get_pool()
+    idempotency_key = f"settlement:{settlement_id}"[:64]
+    response = json.dumps({"settlementId": settlement_id, "settlementReference": settlement_reference})
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """UPDATE payment_sagas
+                   SET state='SETTLED', ledger_result=$2, finality_certificate=$3,
+                       completed_at=NOW(), updated_at=NOW()
+                   WHERE idempotency_key=$1 AND state NOT IN ('SETTLED', 'REVERSED')""",
+                idempotency_key, json.dumps(ledger_result), json.dumps(finality_certificate),
+            )
+            await conn.execute(
+                """UPDATE idempotency_keys
+                   SET status='completed', response=$2, response_status=200
+                   WHERE idempotency_key=$1 AND status='in_progress'""",
+                idempotency_key, response,
+            )
+            row = await conn.fetchrow(
+                """UPDATE settlement_windows
+                   SET status='SETTLED', total_amount=$2, settlement_reference=$3,
+                       finality_certificate=$4, settled_at=NOW(), updated_at=NOW()
+                   WHERE window_id=$1 AND status='PROCESSING'
+                   RETURNING window_id""",
+                window_id, total_amount, settlement_reference, json.dumps(finality_certificate),
+            )
+            if row is None:
+                raise RuntimeError("settlement window is not in PROCESSING state")
+            await conn.execute(
+                """INSERT INTO outbox_events
+                   (aggregate_type, aggregate_id, event_type, payload, deduplication_key)
+                   VALUES ('settlement_window', $1, 'settlement.saga.settled', $2, $3)
+                   ON CONFLICT (deduplication_key) DO NOTHING""",
+                window_id, response, f"settlement-saga-settled:{settlement_id}",
+            )
+
+
 async def mark_window_reconciliation_required(
     window_id: str,
     settlement_id: str,
@@ -197,6 +299,18 @@ async def mark_window_reconciliation_required(
             )
             if result != "UPDATE 1":
                 raise RuntimeError("settlement window is not in PROCESSING state")
+            idempotency_key = f"settlement:{settlement_id}"[:64]
+            await conn.execute(
+                """UPDATE payment_sagas SET state='RECONCILIATION_REQUIRED', updated_at=NOW()
+                   WHERE idempotency_key=$1 AND state NOT IN ('SETTLED', 'REVERSED')""",
+                idempotency_key,
+            )
+            await conn.execute(
+                """UPDATE idempotency_keys
+                   SET status='reconciliation_required', response=$2, response_status=503
+                   WHERE idempotency_key=$1 AND status='in_progress'""",
+                idempotency_key, json.dumps({"settlementId": settlement_id, "error": reason[:2000]}),
+            )
             existing_case = await conn.fetchrow(
                 """INSERT INTO settlement_reconciliation_cases
                    (case_id, window_id, settlement_id, canonical_transfer_id_128, reason)

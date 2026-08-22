@@ -198,7 +198,8 @@ async def execute_settlement(
     Returns:
         SettlementResponse with settlement details
     """
-    settlement_id = f"settlement-{uuid.uuid4()}"
+    # Stable per-window identity is mandatory for idempotent saga recovery across retries.
+    settlement_id = f"settlement-{request.windowId}"
     timestamp = datetime.utcnow().isoformat()
     dispatch_started = False
     
@@ -212,10 +213,9 @@ async def execute_settlement(
             )
         
         if row["status"] == SettlementStatus.SETTLED:
-            raise HTTPException(
-                status_code=400,
-                detail="Window already settled"
-            )
+            raise HTTPException(status_code=400, detail="Window already settled")
+        if row["status"] != SettlementStatus.PROCESSING:
+            raise HTTPException(status_code=409, detail="Window is not eligible for a new settlement dispatch")
         
         # Calculate net positions
         positions = await calculate_positions(request.windowId, request.participants)
@@ -223,9 +223,15 @@ async def execute_settlement(
         if not positions:
             raise HTTPException(status_code=409, detail="No persisted participant positions are available for settlement")
         total_amount = sum((abs(position.netPosition) for position in positions if position.netPosition > 0), Decimal("0.00"))
+        canonical_transfer_id_128 = await db.admit_settlement_saga(
+            settlement_id,
+            request.windowId,
+            {"currency": request.currency, "settlementModel": request.settlementModel.value, "positions": [position.dict() for position in positions]},
+        )
         dispatch_started = True
         ledger_result = await _ledger_request("/v1/settlements/execute", {
             "settlementId": settlement_id,
+            "canonicalTransferId128": canonical_transfer_id_128,
             "windowId": request.windowId,
             "currency": request.currency,
             "settlementModel": request.settlementModel.value,
@@ -235,7 +241,14 @@ async def execute_settlement(
         finality_certificate = ledger_result.get("finalityCertificate")
         if not isinstance(settlement_reference, str) or not isinstance(finality_certificate, dict):
             raise RuntimeError("authoritative ledger response lacks settlement finality evidence")
-        await db.finalize_window(request.windowId, total_amount, settlement_reference, finality_certificate)
+        await db.complete_settlement_saga(
+            settlement_id,
+            request.windowId,
+            total_amount,
+            settlement_reference,
+            finality_certificate,
+            ledger_result,
+        )
         
         logger.info(
             f"Executed settlement {settlement_id} for window {request.windowId}, "
@@ -262,6 +275,7 @@ async def execute_settlement(
                     request.windowId,
                     settlement_id,
                     str(e),
+                    canonical_transfer_id_128 if 'canonical_transfer_id_128' in locals() else None,
                 )
             except Exception as quarantine_error:
                 logger.critical("Unable to quarantine ambiguous settlement window %s: %s", request.windowId, quarantine_error)
