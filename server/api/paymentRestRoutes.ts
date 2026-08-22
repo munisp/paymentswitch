@@ -27,7 +27,7 @@ import {
   OpaUnavailableError,
   type PbacInput,
 } from "../security/opaClient";
-import { createPacs008, pacs008ToXml } from "../lib/iso20022";
+import { assertOfficialXsd, createPacs008, pacs008ToXml } from "../lib/iso20022";
 import {
   PermifyDeniedError,
   PermifyUnavailableError,
@@ -195,6 +195,8 @@ async function defaultSubmitWorkflow(
     remittanceInformation: command.description,
   });
   const iso20022Xml = pacs008ToXml(isoPayment);
+  const officialXsdPath = process.env.ISO20022_PACS008_XSD_PATH?.trim();
+  if (officialXsdPath) await assertOfficialXsd(iso20022Xml, officialXsdPath);
 
   try {
     const response = await fetch(

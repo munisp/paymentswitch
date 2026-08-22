@@ -28,8 +28,10 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# Install pnpm and production dependencies only
-RUN corepack enable && corepack prepare pnpm@10.4.1 --activate
+# Install the XSD validator required for fail-closed ISO 20022 certification checks,
+# then install pnpm and production dependencies only.
+RUN apk add --no-cache libxml2-utils && \
+    corepack enable && corepack prepare pnpm@10.4.1 --activate
 COPY package.json pnpm-lock.yaml ./
 COPY patches ./patches
 RUN pnpm install --prod
