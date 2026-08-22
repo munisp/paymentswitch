@@ -26,6 +26,7 @@ import {
   OpaUnavailableError,
   type PbacInput,
 } from "../security/opaClient";
+import { createPacs008, pacs008ToXml } from "../lib/iso20022";
 import {
   PermifyDeniedError,
   PermifyUnavailableError,
@@ -175,6 +176,25 @@ async function defaultSubmitWorkflow(
       "Payment orchestrator is not configured"
     );
   }
+  const commandMetadata = command.metadata ?? {};
+  const sourceAgent = typeof commandMetadata.sourceAgent === "string" ? commandMetadata.sourceAgent : "PSWTNGXX";
+  const beneficiaryAgent = typeof commandMetadata.beneficiaryAgent === "string" ? commandMetadata.beneficiaryAgent : "PSWTNGXX";
+  const isoPayment = createPacs008({
+    messageId: `PS-${payment.sessionId}`,
+    uetr: typeof commandMetadata.uetr === "string" ? commandMetadata.uetr : undefined,
+    instructionId: command.transferId ?? payment.sessionId,
+    endToEndId: command.transferId ?? payment.sessionId,
+    transactionId: payment.sessionId,
+    amount: (command.amount / 100).toFixed(2),
+    currency: command.currency,
+    debtor: { name: "Paymentswitch originator", account: command.sourceAccount, agent: sourceAgent },
+    creditor: { name: "Paymentswitch beneficiary", account: command.beneficiaryAccount, agent: beneficiaryAgent },
+    settlementMethod: "CLRG",
+    requestedExecutionDate: new Date().toISOString().slice(0, 10),
+    remittanceInformation: command.description,
+  });
+  const iso20022Xml = pacs008ToXml(isoPayment);
+
   try {
     const response = await fetch(
       `${endpoint.replace(/\/$/, "")}/api/v1/payments/initiate`,
@@ -200,10 +220,17 @@ async function defaultSubmitWorkflow(
           reference: command.transferId ?? payment.sessionId,
           description: command.description,
           metadata: {
-            ...(command.metadata ?? {}),
+            ...commandMetadata,
             admittedPaymentId: payment.sessionId,
             tenantId: payment.tenantId,
             amountMinor: command.amount,
+            iso20022: {
+              messageType: "pacs.008.001.13",
+              messageId: isoPayment.messageId,
+              uetr: isoPayment.uetr,
+              correlationId: isoPayment.correlationId,
+              payloadXml: iso20022Xml,
+            },
           },
         }),
         signal: AbortSignal.timeout(5_000),
