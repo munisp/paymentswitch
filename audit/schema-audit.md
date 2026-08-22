@@ -6,19 +6,19 @@ The audit treats `drizzle/schema.ts` as the portal's canonical PostgreSQL model 
 
 | Metric | Value |
 | --- | ---: |
-| Canonical Drizzle tables | 98 |
-| Canonical Drizzle columns | 1219 |
-| Explicit Drizzle foreign-key references | 4 |
-| ID-like columns requiring FK review | 137 |
+| Canonical Drizzle tables | 103 |
+| Canonical Drizzle columns | 1288 |
+| Explicit Drizzle foreign-key references | 12 |
+| ID-like columns requiring FK review | 149 |
 | Migration journal entries | 38 |
-| Migration SQL files | 33 |
+| Migration SQL files | 47 |
 | Journal entries with no SQL file | 7 |
-| SQL files absent from journal | 2 |
+| SQL files absent from journal | 16 |
 | Empty/comment-only migrations | 3 |
-| Drizzle tables never created by migration history | 61 |
-| Migration-created tables absent from Drizzle schema | 27 |
-| Indexes found in migration files | 62 |
-| Foreign keys found in migration files | 6 |
+| Drizzle tables never created by migration history | 60 |
+| Migration-created tables absent from Drizzle schema | 28 |
+| Indexes found in migration files | 94 |
+| Foreign keys found in migration files | 21 |
 
 ## Critical Defects
 
@@ -26,8 +26,8 @@ The audit treats `drizzle/schema.ts` as the portal's canonical PostgreSQL model 
 | --- | --- | --- |
 | Dialect split-brain | `drizzle.config.ts` declares PostgreSQL while `drizzle/meta/_journal.json` declares `mysql` and legacy SQL uses MySQL syntax | Clean PostgreSQL deployment cannot replay the recorded migration history. |
 | Incomplete history | 7 journal entries have no SQL file: 0003_natural_magdalene, 0004_lonely_mandrill, 0005_sturdy_radioactive_man, 0006_curly_thunderbolts, 0007_misty_piledriver, 0008_wonderful_wallflower, 0009_acoustic_malcolm_colcord | Migration replay is non-reproducible and state cannot be independently verified. |
-| Untracked performance changes | Out-of-journal files: 0038_performance_indexes, 0039_table_partitioning | Index and partition migrations may never run. |
-| No referential integrity in canonical model | `drizzle/schema.ts` contains 4 `.references()` calls across 98 tables | Orphaned records and cross-tenant data corruption are possible. |
+| Untracked performance changes | Out-of-journal files: 0038_performance_indexes, 0039_table_partitioning, 0040_platform_schema_repair, 0041_settlement_read_model, 0042_local_auth_and_onboarding_payload, 0042_onboarding_integrity, 0043_mobile_money_ownership_idempotency, 0043_onboarding_drafts, 0044_multipart_upload_sessions, 0044_tigerbeetle_128_bit_identifiers, 0045_multipart_cleanup_tracking, 0045_tigerbeetle_identifier_quarantine, 0046_multipart_trace_context, 0046_tigerbeetle_quarantine_immutability, 0047_api_credential_rate_limit_tier, 0048_payment_rest_security | Index and partition migrations may never run. |
+| No referential integrity in canonical model | `drizzle/schema.ts` contains 12 `.references()` calls across 103 tables | Orphaned records and cross-tenant data corruption are possible. |
 | Missing baseline | The first 3 empty/comment-only files include 0000_faulty_susan_delgado.sql, 0001_lucky_whiplash.sql, 0002_hesitant_harrier.sql | A new database cannot be built from migrations alone. |
 
 ## Tables Missing From Migration History
@@ -69,7 +69,6 @@ participant_billing
 payment_sessions
 pbac_policies
 pbac_role_assignments
-persistent_store
 prefund_accounts
 preview_sessions
 recurring_remittances
@@ -110,6 +109,7 @@ bank_transfers
 crypto_conversions
 exchange_rates
 kyc_verifications
+public
 rate_alert_history
 remittance_timeline
 remittance_webhooks
@@ -132,13 +132,21 @@ webhook_logs_y2026_q4
 
 | Table | Field | Column | Inferred Target |
 | --- | --- | --- | --- |
+| `local_credentials` | `userId` | `user_id` | `users` |
 | `merchants` | `userId` | `user_id` | `users` |
+| `merchants` | `tenantId` | `tenant_id` | `unresolved` |
 | `payment_sessions` | `sessionId` | `session_id` | `payment_sessions` |
 | `payment_sessions` | `merchantId` | `merchant_id` | `merchants` |
+| `payment_sessions` | `tenantId` | `tenant_id` | `unresolved` |
+| `payment_sessions` | `workflowId` | `workflow_id` | `unresolved` |
 | `transactions` | `transactionId` | `transaction_id` | `transactions` |
 | `transactions` | `sessionId` | `session_id` | `payment_sessions` |
 | `transactions` | `merchantId` | `merchant_id` | `merchants` |
 | `transactions` | `gatewayTransactionId` | `gateway_transaction_id` | `unresolved` |
+| `settlement_batches` | `settlementId` | `settlement_id` | `unresolved` |
+| `settlement_batches` | `participantId` | `participant_id` | `participants` |
+| `settlement_events` | `settlementBatchId` | `settlement_batch_id` | `unresolved` |
+| `settlement_events` | `actorUserId` | `actor_user_id` | `unresolved` |
 | `refunds` | `refundId` | `refund_id` | `refunds` |
 | `refunds` | `transactionId` | `transaction_id` | `transactions` |
 | `refunds` | `merchantId` | `merchant_id` | `merchants` |
@@ -167,6 +175,10 @@ webhook_logs_y2026_q4
 | `notification_type_preferences` | `userId` | `user_id` | `users` |
 | `participant_applications` | `userId` | `user_id` | `users` |
 | `participant_applications` | `taxId` | `tax_id` | `unresolved` |
+| `onboarding_drafts` | `userId` | `user_id` | `users` |
+| `onboarding_drafts` | `applicationId` | `application_id` | `participant_applications` |
+| `multipart_upload_sessions` | `userId` | `user_id` | `users` |
+| `multipart_upload_sessions` | `uploadId` | `upload_id` | `unresolved` |
 | `account_recovery_requests` | `userId` | `user_id` | `users` |
 | `trusted_devices` | `userId` | `user_id` | `users` |
 | `notification_preferences` | `userId` | `user_id` | `users` |
@@ -317,18 +329,18 @@ webhook_logs_y2026_q4
 | `idx_refunds_status` | `refunds` | `status` | `0038_performance_indexes.sql` |
 | `idx_refunds_created_at` | `refunds` | `created_at` | `0038_performance_indexes.sql` |
 | `idx_webhooks_merchant_id` | `webhooks` | `merchant_id` | `0038_performance_indexes.sql` |
-| `idx_webhook_logs_webhook_id` | `webhook_logs` | `webhook_id` | `0038_performance_indexes.sql` |
+| `idx_webhook_logs_merchant_id` | `webhook_logs` | `merchant_id` | `0038_performance_indexes.sql` |
 | `idx_webhook_logs_status` | `webhook_logs` | `status` | `0038_performance_indexes.sql` |
 | `idx_webhook_logs_created_at` | `webhook_logs` | `created_at` | `0038_performance_indexes.sql` |
-| `idx_webhook_logs_webhook_created` | `webhook_logs` | `webhook_id, created_at` | `0038_performance_indexes.sql` |
-| `idx_audit_log_user_id` | `audit_log` | `user_id` | `0038_performance_indexes.sql` |
-| `idx_audit_log_action` | `audit_log` | `action` | `0038_performance_indexes.sql` |
-| `idx_audit_log_created_at` | `audit_log` | `created_at` | `0038_performance_indexes.sql` |
-| `idx_audit_log_status` | `audit_log` | `status` | `0038_performance_indexes.sql` |
-| `idx_participants_status` | `participants` | `status` | `0038_performance_indexes.sql` |
-| `idx_participants_tier` | `participants` | `tier` | `0038_performance_indexes.sql` |
+| `idx_webhook_logs_merchant_created` | `webhook_logs` | `merchant_id, created_at DESC` | `0038_performance_indexes.sql` |
+| `idx_audit_logs_user_id` | `audit_logs` | `user_id` | `0038_performance_indexes.sql` |
+| `idx_audit_logs_action` | `audit_logs` | `action` | `0038_performance_indexes.sql` |
+| `idx_audit_logs_created_at` | `audit_logs` | `created_at` | `0038_performance_indexes.sql` |
+| `idx_audit_logs_status` | `audit_logs` | `status` | `0038_performance_indexes.sql` |
+| `idx_switch_participants_status` | `switch_participants` | `status` | `0038_performance_indexes.sql` |
+| `idx_switch_participants_tier` | `switch_participants` | `tier` | `0038_performance_indexes.sql` |
 | `idx_outbound_transfers_status` | `outbound_transfers` | `status` | `0038_performance_indexes.sql` |
-| `idx_outbound_transfers_created_at` | `outbound_transfers` | `created_at` | `0038_performance_indexes.sql` |
+| `idx_outbound_transfers_created_at` | `outbound_transfers` | `created_at DESC` | `0038_performance_indexes.sql` |
 | `idx_txn_part_merchant` | `transactions_partitioned` | `merchant_id, created_at DESC` | `0039_table_partitioning.sql` |
 | `idx_txn_part_status` | `transactions_partitioned` | `status, created_at DESC` | `0039_table_partitioning.sql` |
 | `idx_txn_part_reference` | `transactions_partitioned` | `reference` | `0039_table_partitioning.sql` |
@@ -336,3 +348,35 @@ webhook_logs_y2026_q4
 | `idx_audit_part_action` | `audit_log_partitioned` | `action, created_at DESC` | `0039_table_partitioning.sql` |
 | `idx_wh_log_part_webhook` | `webhook_logs_partitioned` | `webhook_id, created_at DESC` | `0039_table_partitioning.sql` |
 | `idx_wh_log_part_status` | `webhook_logs_partitioned` | `delivery_status, created_at DESC` | `0039_table_partitioning.sql` |
+| `idx_persistent_store_namespace_expiry` | `persistent_store` | `namespace, expires_at` | `0040_platform_schema_repair.sql` |
+| `idx_integration_tests_application_created` | `integration_tests` | `application_id, created_at DESC` | `0040_platform_schema_repair.sql` |
+| `idx_integration_tests_application_status` | `integration_tests` | `application_id, status` | `0040_platform_schema_repair.sql` |
+| `idx_sdk_downloads_application_downloaded` | `sdk_downloads` | `application_id, downloaded_at DESC` | `0040_platform_schema_repair.sql` |
+| `idx_technical_configurations_application_updated` | `technical_configurations` | `application_id, updated_at DESC` | `0040_platform_schema_repair.sql` |
+| `idx_integration_environments_application_type` | `integration_environments` | `application_id, environment_type, created_at DESC` | `0040_platform_schema_repair.sql` |
+| `idx_api_credentials_environment_active` | `api_credentials` | `environment_id, is_active, created_at DESC` | `0040_platform_schema_repair.sql` |
+| `idx_refunds_transaction_created` | `refunds` | `transaction_id, created_at DESC` | `0040_platform_schema_repair.sql` |
+| `idx_transactions_merchant_created` | `transactions` | `merchant_id, created_at DESC` | `0040_platform_schema_repair.sql` |
+| `settlement_batches_status_window_idx` | `settlement_batches` | `status, window_opened_at DESC` | `0041_settlement_read_model.sql` |
+| `settlement_batches_participant_window_idx` | `settlement_batches` | `participant_id, window_opened_at DESC` | `0041_settlement_read_model.sql` |
+| `settlement_batches_bank_window_idx` | `settlement_batches` | `bank_code, window_opened_at DESC` | `0041_settlement_read_model.sql` |
+| `settlement_events_batch_time_idx` | `settlement_events` | `settlement_batch_id, occurred_at ASC` | `0041_settlement_read_model.sql` |
+| `local_credentials_locked_until_idx` | `local_credentials` | `locked_until` | `0042_local_auth_and_onboarding_payload.sql` |
+| `participant_applications_user_created_idx` | `participant_applications` | `user_id, created_at DESC` | `0042_local_auth_and_onboarding_payload.sql` |
+| `uq_technical_configurations_application_user` | `technical_configurations` | `application_id, user_id` | `0042_onboarding_integrity.sql` |
+| `uq_security_credentials_application_user` | `security_credentials` | `application_id, user_id` | `0042_onboarding_integrity.sql` |
+| `uq_network_configurations_application_user` | `network_configurations` | `application_id, user_id` | `0042_onboarding_integrity.sql` |
+| `idx_technical_onboarding_reviews_configuration_status` | `technical_onboarding_reviews` | `configuration_id, status, created_at DESC` | `0042_onboarding_integrity.sql` |
+| `idx_technical_onboarding_reviews_application_status` | `technical_onboarding_reviews` | `application_id, status, created_at DESC` | `0042_onboarding_integrity.sql` |
+| `mobile_money_owner_idempotency_unique` | `mobile_money_transfers` | `owner_id, idempotency_key` | `0043_mobile_money_ownership_idempotency.sql` |
+| `mobile_money_owner_reference_idx` | `mobile_money_transfers` | `owner_id, reference` | `0043_mobile_money_ownership_idempotency.sql` |
+| `onboarding_drafts_updated_idx` | `onboarding_drafts` | `updated_at DESC` | `0043_onboarding_drafts.sql` |
+| `onboarding_drafts_application_idx` | `onboarding_drafts` | `application_id` | `0043_onboarding_drafts.sql` |
+| `multipart_upload_sessions_active_expiry_idx` | `multipart_upload_sessions` | `status, expires_at` | `0044_multipart_upload_sessions.sql` |
+| `multipart_upload_sessions_user_status_idx` | `multipart_upload_sessions` | `user_id, status` | `0044_multipart_upload_sessions.sql` |
+| `multipart_upload_sessions_cleanup_retry_idx` | `multipart_upload_sessions` | `status, cleanup_claimed_at, expires_at` | `0045_multipart_cleanup_tracking.sql` |
+| `api_credentials_active_tier_idx` | `api_credentials` | `api_key, rate_limit_tier` | `0047_api_credential_rate_limit_tier.sql` |
+| `merchants_tenant_user_idx` | `merchants` | `"tenant_id", "user_id"` | `0048_payment_rest_security.sql` |
+| `payment_sessions_tenant_session_idx` | `payment_sessions` | `"tenant_id", "session_id"` | `0048_payment_rest_security.sql` |
+| `payment_sessions_tenant_created_idx` | `payment_sessions` | `"tenant_id", "created_at"` | `0048_payment_rest_security.sql` |
+| `payment_sessions_tenant_idempotency_uidx` | `payment_sessions` | `"tenant_id", "idempotency_key"` | `0048_payment_rest_security.sql` |

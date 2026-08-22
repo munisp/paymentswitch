@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../_core/trpc';
-import { getDb } from '../db';
+import { requireDb } from '../db';
 import { domesticPayments, standingOrders, bulkDisbursements } from '../../drizzle/payments-schema';
 import { eq, and, desc } from 'drizzle-orm';
 
@@ -351,15 +351,15 @@ export const domesticPaymentsRouter = router({
   listPayments: protectedProcedure
     .input(z.object({ type: z.string().optional(), status: z.string().optional(), channel: z.string().optional() }).optional())
     .query(async ({ input }) => {
-      const db = await getDb();
-      if (db) {
+      const db = await requireDb();
+      {
         const conditions = [];
         if (input?.type) conditions.push(eq(domesticPayments.type, input.type));
         if (input?.status) conditions.push(eq(domesticPayments.status, input.status));
         const rows = await db.select().from(domesticPayments)
           .where(conditions.length ? and(...conditions) : undefined)
           .orderBy(desc(domesticPayments.createdAt));
-        if (rows.length > 0) {
+        {
           const completed = rows.filter(r => r.status === 'COMPLETED');
           return {
             payments: rows.map(r => ({
@@ -383,32 +383,14 @@ export const domesticPaymentsRouter = router({
           };
         }
       }
-      let payments = [...seedPayments];
-      if (input?.type) payments = payments.filter(p => p.type === input.type);
-      if (input?.status) payments = payments.filter(p => p.status === input.status);
-      if (input?.channel) payments = payments.filter(p => p.channel === input.channel);
-      const totalVolume = payments.filter(p => p.status === 'COMPLETED').reduce((s, p) => s + p.amount, 0);
-      return {
-        payments,
-        total: payments.length,
-        summary: {
-          totalPayments: seedPayments.length,
-          completed: seedPayments.filter(p => p.status === 'COMPLETED').length,
-          failed: seedPayments.filter(p => p.status === 'FAILED').length,
-          pending: seedPayments.filter(p => p.status === 'PENDING_APPROVAL').length,
-          totalVolumeNGN: totalVolume,
-          p2pCount: seedPayments.filter(p => p.type === 'P2P').length,
-          p2bCount: seedPayments.filter(p => ['P2B', 'QR_PAY'].includes(p.type)).length,
-          billCount: seedPayments.filter(p => p.type === 'BILL_PAYMENT').length,
-        },
-      };
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Database unavailable' });
     }),
 
   listBillProviders: protectedProcedure.query(async () => ({ providers: seedBillProviders })),
 
   listStandingOrders: protectedProcedure.query(async () => {
-    const db = await getDb();
-    if (db) {
+    const db = await requireDb();
+    {
       const rows = await db.select().from(standingOrders);
       if (rows.length > 0) {
         return {
@@ -428,8 +410,8 @@ export const domesticPaymentsRouter = router({
   }),
 
   listBulkDisbursements: protectedProcedure.query(async () => {
-    const db = await getDb();
-    if (db) {
+    const db = await requireDb();
+    {
       const rows = await db.select().from(bulkDisbursements);
       if (rows.length > 0) {
         return { disbursements: rows.map(r => ({
@@ -452,28 +434,11 @@ export const domesticPaymentsRouter = router({
       amount: z.number().positive(),
       narration: z.string(),
     }))
-    .mutation(async ({ input }) => {
-      const fee = input.type === 'P2P' ? (input.amount <= 5000 ? 10 : input.amount <= 50000 ? 25 : 50) : input.amount * 0.005;
-      const payment: DomesticPayment = {
-        id: `DPY-${Date.now()}`,
-        type: input.type,
-        status: 'COMPLETED',
-        senderAcct: input.senderAcct,
-        senderBank: input.senderBank,
-        senderName: 'User',
-        receiverAcct: input.receiverAcct,
-        receiverBank: input.receiverBank,
-        receiverName: 'Receiver',
-        amount: input.amount,
-        fee,
-        nipRef: `NIP-${Date.now()}`,
-        channel: 'api',
-        narration: input.narration,
-        initiatedAt: new Date(),
-        completedAt: new Date(),
-      };
-      seedPayments.push(payment);
-      return payment;
+    .mutation(async () => {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Domestic payment execution requires a configured payment rail; this legacy endpoint cannot move funds',
+      });
     }),
 
   createStandingOrder: protectedProcedure

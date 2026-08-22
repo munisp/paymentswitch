@@ -210,13 +210,13 @@ interface RedisClient {
 /**
  * Redis-based idempotency store for production use.
  * Accepts any Redis client implementing get/setex/del (e.g., ioredis, node-redis).
- * Falls back gracefully: if Redis is unavailable, the in-memory store is used.
+ * Redis is authoritative: connection or serialization errors are surfaced to
+ * callers so payment paths fail closed rather than degrade per-process.
  */
 export class RedisIdempotencyStore {
   private redisClient: RedisClient;
   private keyPrefix: string;
   private ttlSeconds: number;
-  private fallbackStore = new Map<string, IdempotencyRecord>();
 
   constructor(redisClient: RedisClient, options: { keyPrefix?: string; ttlSeconds?: number } = {}) {
     this.redisClient = redisClient;
@@ -232,8 +232,8 @@ export class RedisIdempotencyStore {
       parsed.createdAt = new Date(parsed.createdAt);
       parsed.expiresAt = new Date(parsed.expiresAt);
       return parsed;
-    } catch {
-      return null;
+    } catch (error) {
+      throw new Error(`Redis idempotency read failed: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }
 
@@ -244,16 +244,16 @@ export class RedisIdempotencyStore {
         this.ttlSeconds,
         JSON.stringify(record)
       );
-    } catch {
-      this.fallbackStore.set(key, record);
+    } catch (error) {
+      throw new Error(`Redis idempotency write failed: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }
 
   async delete(key: string): Promise<void> {
     try {
       await this.redisClient.del(this.keyPrefix + key);
-    } catch {
-      this.fallbackStore.delete(key);
+    } catch (error) {
+      throw new Error(`Redis idempotency delete failed: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }
 }

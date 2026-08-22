@@ -165,19 +165,15 @@ async function defaultSubmitWorkflow(
   propagationHeaders: Record<string, string>
 ): Promise<PaymentWorkflowResult> {
   const endpoint = process.env.PAYMENT_ORCHESTRATOR_URL?.trim();
-  const required =
-    process.env.NODE_ENV === "production" ||
-    process.env.PAYMENT_ORCHESTRATOR_REQUIRED === "true";
+  const required = process.env.PAYMENT_ORCHESTRATOR_REQUIRED !== "false";
   if (!endpoint) {
     if (required)
       throw new PaymentOrchestratorUnavailableError(
-        "PAYMENT_ORCHESTRATOR_URL is missing"
+        "PAYMENT_ORCHESTRATOR_URL is missing; payment execution is disabled"
       );
-    return {
-      workflowId: `local-disabled-${payment.sessionId}`,
-      transactionId: payment.sessionId,
-      status: "PENDING",
-    };
+    throw new PaymentOrchestratorUnavailableError(
+      "Payment orchestrator is not configured"
+    );
   }
   try {
     const response = await fetch(

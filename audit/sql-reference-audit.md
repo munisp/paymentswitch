@@ -4,7 +4,7 @@ The scanner compares table names referenced by raw SQL in executable source agai
 
 | Metric | Count |
 | --- | ---: |
-| Tables declared across canonical schemas | 108 |
+| Tables declared across canonical schemas | 113 |
 | Additional tables created by embedded service migrations | 230 |
 | Distinct raw-SQL table references | 313 |
 | References resolved to a declared table | 176 |
@@ -20,12 +20,11 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `all` | 1 | `payment-core/test-scripts/update_service_mains.py:3` |
 | `api` | 1 | `payment-core/integrations/openappsec/openappsec_integration.go:431` |
 | `application` | 1 | `server/onboarding/technicalOnboardingService.ts:426` |
-| `auto` | 1 | `server/routers/outboundRemittanceRouter.ts:1238` |
 | `bank_participants` | 1 | `middleware/redis/redis-enhanced.go:206` |
 | `batch` | 2 | `payment-core/go-services/pkg/remittance/multi_recipient.go:304`; `payment-core/go-services/pkg/remittance/multi_recipient.go:357` |
 | `biometric_auth_log` | 1 | `payment-core/services/biometric-auth/main.go:975` |
 | `biometric_templates` | 3 | `payment-core/services/biometric-auth/main.go:103`; `payment-core/services/biometric-auth/main.go:909`; `payment-core/services/biometric-auth/main.go:966` |
-| `bloomberg` | 1 | `client/src/pages/OutboundRemittance.tsx:2161` |
+| `bloomberg` | 1 | `client/src/pages/OutboundRemittance.tsx:5217` |
 | `cache` | 4 | `payment-core/go-services/internal/highperf/real_redis_client.go:479`; `payment-core/go-services/internal/highperf/real_redis_client.go:502`; `payment-core/go-services/internal/highperf/real_redis_client.go:508`; `payment-core/go-services/internal/mojaloop/liquidity_checks.go:339` |
 | `channel` | 1 | `server/api/routers/notificationChannels.ts:76` |
 | `consent` | 1 | `payment-core/go-services/internal/mojaloop/pisp.go:167` |
@@ -44,15 +43,16 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `docker` | 1 | `payment-core/test-scripts/categorize_and_integrate.py:169` |
 | `domain_events_stream` | 1 | `payment-core/data-integration/flink-jobs/src/main/java/com/paymentswitch/flink/DeltaLakeStreamingJob.java:158` |
 | `endpoint` | 2 | `payment-core/go-services/internal/mojaloop/participant_lifecycle.go:368`; `payment-core/go-services/internal/mojaloop/participant_lifecycle.go:392` |
+| `error` | 1 | `server/services/mobileMoneyService.ts:272` |
 | `execution` | 1 | `payment-core/go-services/pkg/remittance/recurring.go:452` |
 | `expired` | 1 | `payment-core/go-services/internal/mojaloop/outbox_publisher.go:463` |
-| `failed` | 6 | `payment-core/go-services/internal/mojaloop/mojaloop_tigerbeetle_adapter.go:297`; `payment-core/go-services/internal/mojaloop/mojaloop_tigerbeetle_adapter.go:375`; `payment-core/go-services/internal/national/disaster_recovery.go:585`; `payment-core/integrations/opencti/opencti_integration.go:535`; `payment-core/integrations/opencti/opencti_integration.go:570`; `payment-core/services/biometric-auth/main.go:1054` |
+| `failed` | 6 | `payment-core/go-services/internal/mojaloop/mojaloop_tigerbeetle_adapter.go:306`; `payment-core/go-services/internal/mojaloop/mojaloop_tigerbeetle_adapter.go:384`; `payment-core/go-services/internal/national/disaster_recovery.go:585`; `payment-core/integrations/opencti/opencti_integration.go:535`; `payment-core/integrations/opencti/opencti_integration.go:570`; `payment-core/services/biometric-auth/main.go:1054` |
 | `falkordb` | 3 | `payment-core/python-services/nibss_analytics/real_ai_ml_service.py:924`; `payment-core/rust-services/nibss-identity/src/graph_engine.rs:354`; `payment-core/rust-services/nibss-identity/src/graph_engine.rs:364` |
 | `feature_store` | 1 | `payment-core/data-integration/ml-scoring/advanced_ml_features.py:201` |
 | `features` | 1 | `payment-core/ml-platform/feature_store.py:160` |
 | `fee_schedules` | 1 | `middleware/redis/redis-enhanced.go:211` |
 | `field` | 1 | `payment-core/go-services/internal/mojaloop/upgrade_compatibility.go:453` |
-| `flex` | 1 | `client/src/components/AppShell.tsx:244` |
+| `flex` | 1 | `client/src/components/AppShell.tsx:405` |
 | `fraud` | 1 | `payment-core/data-integration/lakehouse-feedback/lakehouse_tigerbeetle_feedback.py:141` |
 | `ilp_protocol` | 1 | `payment-core/services/workflow-orchestrator/payment_workflow.py:244` |
 | `incident` | 1 | `payment-core/go-services/internal/national/noc_operations.go:445` |
@@ -73,6 +73,7 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `magic` | 1 | `payment-core/go-services/internal/security/pii_encryption.go:694` |
 | `mcash_merchant_transactions` | 1 | `payment-core/python-services/nibss_analytics/middleware_integration.py:195` |
 | `mcash_merchants` | 1 | `payment-core/python-services/nibss_analytics/middleware_integration.py:193` |
+| `merchant` | 1 | `tests/backend/paymentRepository.integration.test.ts:84` |
 | `metrics` | 3 | `payment-core/go-services/internal/operations/case_management.go:252`; `payment-core/go-services/internal/operations/case_management.go:321`; `payment-core/python-services/nibss_analytics/real_ai_ml_service.py:820` |
 | `model` | 1 | `payment-core/ml-platform/model_registry.py:290` |
 | `mt` | 1 | `admin-dashboard/src/components/provisioning/ProvisioningAdmin.tsx:579` |
@@ -103,8 +104,8 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `postgresql` | 1 | `payment-core/python-services/nibss_analytics/ai_ml_services.py:184` |
 | `preferences` | 2 | `client/src/pages/admin/NotificationPreferences.tsx:48`; `server/services/notificationPreferencesService.ts:90` |
 | `production` | 1 | `payment-core/ml-platform/model_registry.py:290` |
+| `public` | 3 | `payment-core/rust-services/outbound-ledger/src/identifier_postgres.rs:125`; `payment-core/rust-services/outbound-ledger/src/identifier_postgres.rs:131`; `payment-core/rust-services/outbound-ledger/src/identifier_postgres.rs:137` |
 | `quotes` | 4 | `payment-core/go-services/internal/database/postgres.go:417`; `payment-core/go-services/internal/database/postgres.go:454`; `payment-core/services/common/database.py:347`; `payment-core/services/common/database.py:377` |
-| `rail` | 1 | `server/routers/outboundRemittanceRouter.ts:443` |
 | `rate_limit_configs` | 1 | `middleware/redis/redis-enhanced.go:208` |
 | `recurring` | 1 | `payment-core/go-services/pkg/remittance/recurring.go:457` |
 | `redis` | 2 | `payment-core/go-services/internal/highperf/real_redis_client.go:205`; `payment-core/recommended-features/instant-settlement/instant_settlement_service.py:446` |
@@ -114,7 +115,6 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `reservation` | 2 | `payment-core/go-services/internal/mojaloop/liquidity_checks.go:211`; `payment-core/go-services/internal/mojaloop/liquidity_checks.go:245` |
 | `retry` | 1 | `server/api/routers/apiKeyEnhancements.ts:717` |
 | `returned` | 1 | `payment-core/go-services/internal/national/disaster_recovery.go:589` |
-| `review` | 1 | `server/onboarding/technicalOnboardingRouter.ts:460` |
 | `review_assignments` | 2 | `payment-core/go-services/internal/onboarding/temporal_workers.go:398`; `payment-core/go-services/internal/onboarding/temporal_workers.go:411` |
 | `routing` | 1 | `payment-core/go-services/internal/national/disaster_recovery.go:490` |
 | `rtgs` | 1 | `payment-core/go-services/internal/national/rtgs_settlement.go:512` |
@@ -129,11 +129,11 @@ The scanner compares table names referenced by raw SQL in executable source agai
 | `synthetic` | 1 | `payment-core/python-services/nibss_analytics/real_ai_ml_service.py:841` |
 | `system_health_checks` | 2 | `payment-core/go-services/internal/national/noc_operations.go:940`; `payment-core/go-services/internal/national/regulatory_reporting.go:540` |
 | `tags` | 2 | `client/src/components/SavedComparisonsTab.tsx:100`; `server/api/routers/testingCertification.ts:539` |
-| `technical` | 1 | `server/onboarding/technicalOnboardingRouter.ts:471` |
-| `text` | 2 | `client/src/pages/OutboundRemittance.tsx:1227`; `client/src/pages/OutboundRemittance.tsx:1326` |
+| `text` | 2 | `client/src/pages/OutboundRemittance.tsx:3071`; `client/src/pages/OutboundRemittance.tsx:3273` |
 | `the` | 9 | `client/dev-dist/workbox-1b3d9405.js:1712`; `client/dev-dist/workbox-1b3d9405.js:1811`; `client/dev-dist/workbox-1b3d9405.js:1833`; `client/dev-dist/workbox-1b3d9405.js:4219`; `payment-core/data-integration/lakehouse-feedback/lakehouse_tigerbeetle_feedback.py:28`; `payment-core/data-integration/postgres-lakehouse-pipeline/postgres_lakehouse_batch_sync.py:264`; `payment-core/python-services/outbound_compliance/sanctions_rescreening.py:141`; `payment-core/services/common/database.py:75` |
 | `tigerbeetle` | 1 | `payment-core/data-integration/lakehouse-feedback/lakehouse_tigerbeetle_feedback.py:18` |
-| `tinyint` | 1 | `payment-core/go-services/internal/mojaloop/postgres_conformance_test.go:395` |
+| `tigerbeetle_identifier_quarantine` | 1 | `payment-core/rust-services/outbound-ledger/src/identifier_postgres.rs:144` |
+| `tinyint` | 1 | `payment-core/go-services/internal/mojaloop/postgres_conformance_test.go:393` |
 | `to` | 2 | `orchestrator/services/python/analytics/main.py:139`; `payment-core/python-services/outbound_compliance/sanctions_rescreening.py:41` |
 | `transaction` | 7 | `payment-core/go-services/internal/database/postgres.go:178`; `payment-core/go-services/internal/mojaloop/pisp.go:366`; `payment-core/pos-services/workflows/pos_payment_workflow.py:110`; `payment-core/services/common/database.py:204`; `payment-core/services/workflow-orchestrator/payment_workflow_grpc.py:231`; `payment-core/services/workflow-orchestrator/payment_workflow_grpc.py:250`; `payment-core/services/workflow-orchestrator/payment_workflow_optimized.py:389` |
 | `transaction_history` | 6 | `payment-core/go-services/internal/database/postgres.go:136`; `payment-core/go-services/internal/database/postgres.go:167`; `payment-core/go-services/internal/database/postgres.go:203`; `payment-core/services/common/database.py:175`; `payment-core/services/common/database.py:206`; `payment-core/services/common/database.py:225` |

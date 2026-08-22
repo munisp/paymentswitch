@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../_core/trpc';
-import { getDb } from '../db';
+import { requireDb } from '../db';
 import { governmentPayments, taxPayments, pensionRemittances, socialDisbursements } from '../../drizzle/payments-schema';
 import { eq, and, desc, sql } from 'drizzle-orm';
 
@@ -123,8 +123,8 @@ export const governmentPaymentsRouter = router({
   listGovernmentPayments: protectedProcedure
     .input(z.object({ category: z.string().optional(), status: z.string().optional() }).optional())
     .query(async ({ input }) => {
-      const db = await getDb();
-      if (db) {
+      const db = await requireDb();
+      {
         const conditions = [];
         if (input?.category) conditions.push(eq(governmentPayments.type, input.category));
         if (input?.status) conditions.push(eq(governmentPayments.status, input.status));
@@ -170,8 +170,8 @@ export const governmentPaymentsRouter = router({
   listTaxPayments: protectedProcedure
     .input(z.object({ taxType: z.string().optional(), status: z.string().optional() }).optional())
     .query(async ({ input }) => {
-      const db = await getDb();
-      if (db) {
+      const db = await requireDb();
+      {
         const conditions = [];
         if (input?.taxType) conditions.push(eq(taxPayments.taxType, input.taxType));
         if (input?.status) conditions.push(eq(taxPayments.status, input.status));
@@ -204,8 +204,8 @@ export const governmentPaymentsRouter = router({
     }),
 
   listPensions: protectedProcedure.query(async () => {
-    const db = await getDb();
-    if (db) {
+    const db = await requireDb();
+    {
       const rows = await db.select().from(pensionRemittances);
       if (rows.length > 0) {
         return {
@@ -233,8 +233,8 @@ export const governmentPaymentsRouter = router({
   }),
 
   listSocialDisbursements: protectedProcedure.query(async () => {
-    const db = await getDb();
-    if (db) {
+    const db = await requireDb();
+    {
       const rows = await db.select().from(socialDisbursements);
       if (rows.length > 0) {
         return {
