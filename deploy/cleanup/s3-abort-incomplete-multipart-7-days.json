@@ -1,0 +1,14 @@
+{
+  "Rules": [
+    {
+      "ID": "paymentswitch-abort-incomplete-multipart-after-7-days",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "onboarding/"
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 7
+      }
+    }
+  ]
+}

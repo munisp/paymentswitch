@@ -1,0 +1,131 @@
+name: Multipart cleanup chaos and OpenTelemetry PR gate
+
+on:
+  pull_request:
+    paths:
+      - "server/telemetry.ts"
+      - "server/jobs/**"
+      - "server/storageMultipart.ts"
+      - "drizzle/**"
+      - "deploy/observability/**"
+      - "deploy/local-integration/otel/**"
+      - "docker-compose.chaos-otel.yml"
+      - "scripts/chaos/**"
+      - ".github/workflows/multipart-cleanup-chaos-otel-pr.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: multipart-cleanup-otel-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  localstack-chaos-otel:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      DATABASE_URL: postgresql://paymentswitch:paymentswitch@127.0.0.1:55432/paymentswitch
+      TEST_USER_ID: "1"
+      LOCALSTACK_ENDPOINT: http://127.0.0.1:4566
+      S3_ENDPOINT: http://127.0.0.1:4566
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: test
+      S3_SECRET_KEY: test
+      S3_BUCKET: paymentswitch-test
+      RUN_LOCALSTACK_MULTIPART_TEST: "true"
+      OTEL_ENABLED: "true"
+      OTEL_SERVICE_NAME: paymentswitch-multipart-cleanup-pr
+      OTEL_SERVICE_VERSION: ${{ github.sha }}
+      OTEL_ENVIRONMENT: ci
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://127.0.0.1:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_SAMPLER: always_on
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.4.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start local chaos stack
+        run: docker compose -f docker-compose.chaos-otel.yml up -d
+
+      - name: Wait for services
+        run: |
+          timeout 90 bash -c 'until curl -fsS "$LOCALSTACK_ENDPOINT/_localstack/health" >/dev/null; do sleep 2; done'
+          timeout 90 bash -c 'until pg_isready -h 127.0.0.1 -p 55432 -U paymentswitch -d paymentswitch >/dev/null 2>&1; do sleep 2; done'
+          timeout 90 bash -c 'until curl -fsS http://127.0.0.1:4318 >/dev/null 2>&1 || test $? -eq 52; do sleep 2; done' || true
+
+      - name: Create test bucket and Toxiproxy route
+        run: |
+          aws --endpoint-url "$LOCALSTACK_ENDPOINT" s3 mb "s3://$S3_BUCKET"
+          curl --fail-with-body -X POST http://127.0.0.1:8474/proxies \
+            -H 'content-type: application/json' \
+            -d '{"name":"paymentswitch-s3","listen":"0.0.0.0:4567","upstream":"host.docker.internal:4566","enabled":true}'
+
+      - name: Apply migrations
+        run: pnpm exec drizzle-kit migrate
+
+      - name: Run LocalStack integration test
+        run: pnpm exec vitest run server/jobs/multipartCleanup.localstack.integration.test.ts
+
+      - name: Run latency chaos
+        env:
+          ALLOW_CHAOS: "true"
+          CHAOS_MODE: latency
+          CHAOS_LATENCY_MS: "1500"
+          CHAOS_SECONDS: "10"
+          TOXIPROXY_URL: http://127.0.0.1:8474
+          TOXIPROXY_PROXY: paymentswitch-s3
+          S3_ENDPOINT: http://127.0.0.1:4567
+          CLEANUP_COMMAND: pnpm exec tsx server/jobs/multipartCleanupRunner.ts
+        run: ./scripts/chaos/multipart-cleanup-chaos.sh
+
+      - name: Run S3 outage chaos and verify failure path
+        env:
+          ALLOW_CHAOS: "true"
+          CHAOS_MODE: outage
+          CHAOS_SECONDS: "10"
+          TOXIPROXY_URL: http://127.0.0.1:8474
+          TOXIPROXY_PROXY: paymentswitch-s3
+          S3_ENDPOINT: http://127.0.0.1:4567
+          CLEANUP_COMMAND: pnpm exec tsx server/jobs/multipartCleanupRunner.ts
+        run: ./scripts/chaos/multipart-cleanup-chaos.sh
+
+      - name: Verify source and build
+        run: |
+          pnpm exec tsc --noEmit
+          pnpm run build
+          git diff --check
+
+      - name: Verify required trace names in collector output
+        run: |
+          mkdir -p audit/artifacts
+          docker compose -f docker-compose.chaos-otel.yml logs otel-collector | tee audit/artifacts/pr-otel-collector.log
+          grep -q 'cleanup.multipart.batch' audit/artifacts/pr-otel-collector.log
+          grep -q 'cleanup.multipart.session' audit/artifacts/pr-otel-collector.log
+          grep -q 'storage.s3.abort_multipart' audit/artifacts/pr-otel-collector.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multipart-cleanup-chaos-otel-${{ github.sha }}
+          path: |
+            audit/artifacts/**
+            pnpm-lock.yaml
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.chaos-otel.yml down -v --remove-orphans

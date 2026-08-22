@@ -1,0 +1,68 @@
+name: TODO coverage audit
+
+on:
+  pull_request:
+    paths:
+      - "docs/reports/todo.md"
+      - "scripts/assurance/check_todo_coverage.py"
+      - "server/**"
+      - "client/**"
+      - "payment-core/**"
+      - "deploy/**"
+      - "tests/**"
+      - "cypress/**"
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  todo-coverage:
+    name: Generate TODO implementation/test/evidence coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Generate coverage report
+        run: |
+          python3 scripts/assurance/check_todo_coverage.py \
+            --todo docs/reports/todo.md \
+            --repo-root . \
+            --json-out audit/artifacts/todo-coverage.json \
+            --markdown-out audit/todo-coverage-report.md
+
+      - name: Verify report integrity
+        run: |
+          test -s audit/artifacts/todo-coverage.json
+          test -s audit/todo-coverage-report.md
+          python3 - <<'PY'
+          import json
+          p = json.load(open("audit/artifacts/todo-coverage.json"))
+          assert p["unchecked_count"] == len(p["items"])
+          assert p["unchecked_count"] > 0
+          print(json.dumps({
+              "unchecked_count": p["unchecked_count"],
+              "classification_counts": p["classification_counts"],
+              "priority_counts": p["priority_counts"],
+          }, indent=2))
+          PY
+
+      - name: Upload TODO coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: todo-coverage-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            audit/artifacts/todo-coverage.json
+            audit/todo-coverage-report.md

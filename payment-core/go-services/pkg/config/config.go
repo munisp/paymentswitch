@@ -162,6 +162,18 @@ func Load() (*Config, error) {
 				Message: "must be at least 32 characters",
 			})
 		}
+		if len(cfg.EncryptionKey) < 32 {
+			errors = append(errors, ValidationError{
+				Field:   "ENCRYPTION_KEY",
+				Message: "must be at least 32 characters",
+			})
+		}
+		if len(cfg.WebhookSigningKey) < 32 {
+			errors = append(errors, ValidationError{
+				Field:   "WEBHOOK_SIGNING_KEY",
+				Message: "must be at least 32 characters",
+			})
+		}
 	}
 
 	// Feature flags
@@ -180,8 +192,15 @@ func Load() (*Config, error) {
 
 	// Validate integration dependencies when real integrations are enabled
 	if cfg.EnableRealIntegrations {
+				if cfg.RedisURL == "" {
+			errors = append(errors, ValidationError{
+			Field:   "REDIS_URL",
+			Message: "required in production when distributed security controls are enabled",
+		})
+		}
 		if cfg.KeycloakURL == "" {
 			errors = append(errors, ValidationError{
+
 				Field:   "KEYCLOAK_URL",
 				Message: "required when ENABLE_REAL_INTEGRATIONS is true",
 			})
@@ -190,6 +209,30 @@ func Load() (*Config, error) {
 			errors = append(errors, ValidationError{
 				Field:   "APISIX_ADMIN_URL",
 				Message: "required when ENABLE_REAL_INTEGRATIONS is true",
+			})
+		}
+		if cfg.APISIXAdminKey == "" {
+			errors = append(errors, ValidationError{
+				Field:   "APISIX_ADMIN_KEY",
+				Message: "required when ENABLE_REAL_INTEGRATIONS is true",
+			})
+		}
+		if cfg.KeycloakClientID == "" {
+			errors = append(errors, ValidationError{
+				Field:   "KEYCLOAK_CLIENT_ID",
+				Message: "required when ENABLE_REAL_INTEGRATIONS is true",
+			})
+		}
+		if len(cfg.TigerBeetleAddresses) < 3 {
+			errors = append(errors, ValidationError{
+				Field:   "TIGERBEETLE_ADDRESSES",
+				Message: "at least three distinct replica addresses are required for production",
+			})
+		}
+		if cfg.TigerBeetleClusterID == 0 {
+			errors = append(errors, ValidationError{
+				Field:   "TIGERBEETLE_CLUSTER_ID",
+				Message: "must be non-zero when ENABLE_REAL_INTEGRATIONS is true",
 			})
 		}
 	}

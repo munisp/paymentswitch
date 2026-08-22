@@ -8,18 +8,20 @@ type UseAuthOptions = {
   redirectPath?: string;
 };
 
-// Dev-only mock admin user for testing (only works in development mode)
-// Simplified: Always enable in DEV mode for easier testing
-const DEV_MOCK_ADMIN = import.meta.env.DEV ? {
-  id: 1,
-  name: "Dev Admin",
-  email: "admin@dev.local",
-  role: "admin" as const,
-  loginMethod: "dev-bypass",
-} : null;
+// Optional development bypass. It is never enabled implicitly.
+const DEV_MOCK_ADMIN =
+  import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEV_AUTH === "true"
+    ? {
+        id: 1,
+        name: "Dev Admin",
+        email: "admin@dev.local",
+        role: "admin" as const,
+        loginMethod: "dev-bypass",
+      }
+    : null;
 
 export function useAuth(options?: UseAuthOptions) {
-  const { redirectOnUnauthenticated = false, redirectPath = getLoginUrl() } =
+  const { redirectOnUnauthenticated = false, redirectPath = "/login" } =
     options ?? {};
   const utils = trpc.useUtils();
 
@@ -61,8 +63,12 @@ export function useAuth(options?: UseAuthOptions) {
     );
     return {
       user: userData ?? null,
-      loading: DEV_MOCK_ADMIN ? false : (meQuery.isLoading || logoutMutation.isPending),
-      error: DEV_MOCK_ADMIN ? null : (meQuery.error ?? logoutMutation.error ?? null),
+      loading: DEV_MOCK_ADMIN
+        ? false
+        : meQuery.isLoading || logoutMutation.isPending,
+      error: DEV_MOCK_ADMIN
+        ? null
+        : (meQuery.error ?? logoutMutation.error ?? null),
       isAuthenticated: Boolean(userData),
     };
   }, [
@@ -82,7 +88,7 @@ export function useAuth(options?: UseAuthOptions) {
     if (typeof window === "undefined") return;
     if (window.location.pathname === redirectPath) return;
 
-    window.location.href = redirectPath
+    window.location.href = redirectPath;
   }, [
     redirectOnUnauthenticated,
     redirectPath,

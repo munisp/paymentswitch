@@ -1,0 +1,77 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+  resource:
+    attributes:
+      - key: deployment.environment
+        action: upsert
+        value: ${env:OTEL_ENVIRONMENT}
+      - key: service.namespace
+        action: upsert
+        value: paymentswitch
+  attributes/redact:
+    actions:
+      - key: http.request.header.authorization
+        action: delete
+      - key: http.request.header.cookie
+        action: delete
+      - key: http.request.header.x-api-key
+        action: delete
+      - key: aws.access_key_id
+        action: delete
+      - key: url.full
+        action: delete
+  transform/redact:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          - delete_key(attributes, "http.request.header.authorization")
+          - delete_key(attributes, "http.request.header.cookie")
+          - delete_key(attributes, "http.request.header.x-api-key")
+          - delete_key(attributes, "aws.secret_access_key")
+          - delete_key(attributes, "aws.session_token")
+          - replace_pattern(name, "(?i)(presigned|signature|token|secret)", "[REDACTED]")
+          - replace_pattern(attributes["url.full"], "https?://[^\\s]+", "[REDACTED_URL]")
+          - replace_pattern(attributes["http.url"], "https?://[^\\s]+", "[REDACTED_URL]")
+    log_statements:
+      - context: log
+        statements:
+          - replace_pattern(body, "(?i)https?://[^\\s]+", "[REDACTED_URL]")
+          - replace_pattern(body, "(?i)(authorization|cookie|x-amz-signature|x-amz-credential|x-amz-security-token|password|secret|email|phone)=?[^\\s,;]+", "$1=[REDACTED]")
+
+exporters:
+  datadog:
+    api:
+      key: ${env:DD_API_KEY}
+      site: ${env:DD_SITE}
+    traces:
+      span_name_as_resource_name: true
+    hostname: ${env:DD_HOSTNAME}
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors:
+        [memory_limiter, resource, attributes/redact, transform/redact, batch]
+      exporters: [datadog]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, transform/redact, batch]
+      exporters: [datadog]

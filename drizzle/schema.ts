@@ -1,53 +1,305 @@
-import { serial, integer, pgEnum, pgTable, text, timestamp, varchar, decimal, boolean, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  serial,
+  integer,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  varchar,
+  decimal,
+  boolean,
+  jsonb,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 // PostgreSQL Enum Definitions
 // Note: In PostgreSQL, enums must be defined separately before use in tables
 
-export const roleEnum = pgEnum("role", ["user", "admin", "merchant", "participant", "cbn"]);
-export const outboundTransferStatusEnum = pgEnum("outbound_transfer_status", ["admitted", "workflow", "compliance", "pricing", "routing", "settlement", "audit", "completed", "failed", "manual_review", "blocked"]);
-export const participantStatusEnum = pgEnum("participant_status", ["pending", "onboarding", "sandbox", "active", "suspended"]);
-export const participantTierEnum = pgEnum("participant_tier", ["starter", "growth", "enterprise", "premium"]);
-export const twoFactorEnabledEnum = pgEnum("two_factor_enabled", ["true", "false"]);
-export const businessTypeEnum = pgEnum("business_type", ["ecommerce", "saas", "marketplace", "nonprofit", "other"]);
-export const merchantStatusEnum = pgEnum("merchant_status", ["active", "suspended", "pending"]);
-export const sessionStatusEnum = pgEnum("session_status", ["pending", "processing", "completed", "failed", "cancelled"]);
-export const paymentMethodEnum = pgEnum("payment_method", ["card", "bank_transfer", "qr_code", "wallet"]);
-export const transactionStatusEnum = pgEnum("transaction_status", ["pending", "authorized", "captured", "failed", "refunded", "partially_refunded"]);
-export const fraudStatusEnum = pgEnum("fraud_status", ["approved", "review", "declined"]);
-export const threeDSecureStatusEnum = pgEnum("three_d_secure_status", ["not_required", "attempted", "authenticated", "failed"]);
-export const refundStatusEnum = pgEnum("refund_status", ["pending", "processing", "completed", "failed"]);
-export const webhookStatusEnum = pgEnum("webhook_status", ["pending", "delivered", "failed"]);
+export const roleEnum = pgEnum("role", [
+  "user",
+  "admin",
+  "merchant",
+  "participant",
+  "cbn",
+]);
+export const outboundTransferStatusEnum = pgEnum("outbound_transfer_status", [
+  "admitted",
+  "workflow",
+  "compliance",
+  "pricing",
+  "routing",
+  "settlement",
+  "audit",
+  "completed",
+  "failed",
+  "manual_review",
+  "blocked",
+]);
+export const participantStatusEnum = pgEnum("participant_status", [
+  "pending",
+  "onboarding",
+  "sandbox",
+  "active",
+  "suspended",
+]);
+export const participantTierEnum = pgEnum("participant_tier", [
+  "starter",
+  "growth",
+  "enterprise",
+  "premium",
+]);
+export const twoFactorEnabledEnum = pgEnum("two_factor_enabled", [
+  "true",
+  "false",
+]);
+export const businessTypeEnum = pgEnum("business_type", [
+  "ecommerce",
+  "saas",
+  "marketplace",
+  "nonprofit",
+  "other",
+]);
+export const merchantStatusEnum = pgEnum("merchant_status", [
+  "active",
+  "suspended",
+  "pending",
+]);
+export const sessionStatusEnum = pgEnum("session_status", [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+export const paymentMethodEnum = pgEnum("payment_method", [
+  "card",
+  "bank_transfer",
+  "qr_code",
+  "wallet",
+]);
+export const transactionStatusEnum = pgEnum("transaction_status", [
+  "pending",
+  "authorized",
+  "captured",
+  "failed",
+  "refunded",
+  "partially_refunded",
+]);
+export const fraudStatusEnum = pgEnum("fraud_status", [
+  "approved",
+  "review",
+  "declined",
+]);
+export const threeDSecureStatusEnum = pgEnum("three_d_secure_status", [
+  "not_required",
+  "attempted",
+  "authenticated",
+  "failed",
+]);
+export const refundStatusEnum = pgEnum("refund_status", [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+]);
+export const webhookStatusEnum = pgEnum("webhook_status", [
+  "pending",
+  "delivered",
+  "failed",
+]);
 export const auditStatusEnum = pgEnum("audit_status", ["success", "failure"]);
-export const feedbackTypeEnum = pgEnum("feedback_type", ["incorrect_extraction", "low_confidence", "suggestion_wrong"]);
-export const patternTypeEnum = pgEnum("pattern_type", ["exact", "regex", "fuzzy"]);
-export const patternStatusEnum = pgEnum("pattern_status", ["active", "pending", "disabled"]);
-export const technicalStatusEnum = pgEnum("technical_status", ["draft", "submitted", "approved", "rejected"]);
-export const reviewStatusEnum = pgEnum("review_status", ["pending", "approved", "rejected", "corrections_requested"]);
-export const environmentTypeEnum = pgEnum("environment_type", ["sandbox", "staging", "production"]);
-export const environmentStatusEnum = pgEnum("environment_status", ["provisioning", "active", "suspended", "decommissioned"]);
-export const keyActionEnum = pgEnum("key_action", ["created", "rotated", "revoked", "expired"]);
-export const sdkTypeEnum = pgEnum("sdk_type", ["javascript", "python", "java", "go", "ruby", "php", "dotnet"]);
-export const testStatusEnum = pgEnum("test_status", ["pending", "running", "passed", "failed"]);
-export const certificationStatusEnum = pgEnum("certification_status", ["pending", "in_progress", "passed", "failed", "expired"]);
-export const complianceStatusEnum = pgEnum("compliance_status", ["compliant", "non_compliant", "pending_review"]);
-export const frequencyEnum = pgEnum("frequency", ["hourly", "daily", "weekly", "monthly", "custom"]);
-export const credentialStatusEnum = pgEnum("credential_status", ["active", "pending", "suspended", "revoked"]);
-export const checklistStatusEnum = pgEnum("checklist_status", ["pending", "in_progress", "completed", "blocked"]);
-export const monitoringStatusEnum = pgEnum("monitoring_status", ["healthy", "degraded", "down"]);
-export const incidentTypeEnum = pgEnum("incident_type", ["outage", "degradation", "security", "data_breach", "other"]);
-export const severityEnum = pgEnum("severity", ["critical", "high", "medium", "low", "warning", "info"]);
-export const incidentStatusEnum = pgEnum("incident_status", ["open", "investigating", "resolved", "closed"]);
-export const metricTypeEnum = pgEnum("metric_type", ["latency", "error_rate", "throughput", "availability"]);
-export const operatorEnum = pgEnum("operator", ["gt", "lt", "eq", "gte", "lte"]);
-export const alertStatusEnum = pgEnum("alert_status", ["active", "acknowledged", "resolved"]);
-export const notificationStatusEnum = pgEnum("notification_status", ["sent", "failed", "pending"]);
-export const applicationStatusEnum = pgEnum("application_status", ["draft", "pending", "submitted", "under_review", "approved", "rejected", "suspended"]);
-export const stageEnum = pgEnum("stage", ["kyc", "kyb", "technical", "compliance", "go_live"]);
-export const recoveryMethodEnum = pgEnum("recovery_method", ["email", "phone", "sms", "security_questions", "admin_reset", "admin"]);
-export const recoveryStatusEnum = pgEnum("recovery_status", ["pending", "verified", "completed", "expired", "failed", "approved", "rejected"]);
-export const channelTypeEnum = pgEnum("channel_type", ["email", "sms", "push", "in_app", "slack", "webhook"]);
-export const rateConditionEnum = pgEnum("rate_condition", ["above", "below", "exact"]);
-export const rateAlertStatusEnum = pgEnum("rate_alert_status", ["active", "triggered", "expired", "cancelled"]);
+export const feedbackTypeEnum = pgEnum("feedback_type", [
+  "incorrect_extraction",
+  "low_confidence",
+  "suggestion_wrong",
+]);
+export const patternTypeEnum = pgEnum("pattern_type", [
+  "exact",
+  "regex",
+  "fuzzy",
+]);
+export const patternStatusEnum = pgEnum("pattern_status", [
+  "active",
+  "pending",
+  "disabled",
+]);
+export const technicalStatusEnum = pgEnum("technical_status", [
+  "draft",
+  "submitted",
+  "approved",
+  "rejected",
+]);
+export const reviewStatusEnum = pgEnum("review_status", [
+  "pending",
+  "approved",
+  "rejected",
+  "corrections_requested",
+]);
+export const environmentTypeEnum = pgEnum("environment_type", [
+  "sandbox",
+  "staging",
+  "production",
+]);
+export const environmentStatusEnum = pgEnum("environment_status", [
+  "provisioning",
+  "active",
+  "suspended",
+  "decommissioned",
+]);
+export const keyActionEnum = pgEnum("key_action", [
+  "created",
+  "rotated",
+  "revoked",
+  "expired",
+]);
+export const sdkTypeEnum = pgEnum("sdk_type", [
+  "javascript",
+  "python",
+  "java",
+  "go",
+  "ruby",
+  "php",
+  "dotnet",
+]);
+export const testStatusEnum = pgEnum("test_status", [
+  "pending",
+  "running",
+  "passed",
+  "failed",
+]);
+export const certificationStatusEnum = pgEnum("certification_status", [
+  "pending",
+  "in_progress",
+  "passed",
+  "failed",
+  "expired",
+]);
+export const complianceStatusEnum = pgEnum("compliance_status", [
+  "compliant",
+  "non_compliant",
+  "pending_review",
+]);
+export const frequencyEnum = pgEnum("frequency", [
+  "hourly",
+  "daily",
+  "weekly",
+  "monthly",
+  "custom",
+]);
+export const credentialStatusEnum = pgEnum("credential_status", [
+  "active",
+  "pending",
+  "suspended",
+  "revoked",
+]);
+export const checklistStatusEnum = pgEnum("checklist_status", [
+  "pending",
+  "in_progress",
+  "completed",
+  "blocked",
+]);
+export const monitoringStatusEnum = pgEnum("monitoring_status", [
+  "healthy",
+  "degraded",
+  "down",
+]);
+export const incidentTypeEnum = pgEnum("incident_type", [
+  "outage",
+  "degradation",
+  "security",
+  "data_breach",
+  "other",
+]);
+export const severityEnum = pgEnum("severity", [
+  "critical",
+  "high",
+  "medium",
+  "low",
+  "warning",
+  "info",
+]);
+export const incidentStatusEnum = pgEnum("incident_status", [
+  "open",
+  "investigating",
+  "resolved",
+  "closed",
+]);
+export const metricTypeEnum = pgEnum("metric_type", [
+  "latency",
+  "error_rate",
+  "throughput",
+  "availability",
+]);
+export const operatorEnum = pgEnum("operator", [
+  "gt",
+  "lt",
+  "eq",
+  "gte",
+  "lte",
+]);
+export const alertStatusEnum = pgEnum("alert_status", [
+  "active",
+  "acknowledged",
+  "resolved",
+]);
+export const notificationStatusEnum = pgEnum("notification_status", [
+  "sent",
+  "failed",
+  "pending",
+]);
+export const applicationStatusEnum = pgEnum("application_status", [
+  "draft",
+  "pending",
+  "submitted",
+  "under_review",
+  "approved",
+  "rejected",
+  "suspended",
+]);
+export const stageEnum = pgEnum("stage", [
+  "kyc",
+  "kyb",
+  "technical",
+  "compliance",
+  "go_live",
+]);
+export const recoveryMethodEnum = pgEnum("recovery_method", [
+  "email",
+  "phone",
+  "sms",
+  "security_questions",
+  "admin_reset",
+  "admin",
+]);
+export const recoveryStatusEnum = pgEnum("recovery_status", [
+  "pending",
+  "verified",
+  "completed",
+  "expired",
+  "failed",
+  "approved",
+  "rejected",
+]);
+export const channelTypeEnum = pgEnum("channel_type", [
+  "email",
+  "sms",
+  "push",
+  "in_app",
+  "slack",
+  "webhook",
+]);
+export const rateConditionEnum = pgEnum("rate_condition", [
+  "above",
+  "below",
+  "exact",
+]);
+export const rateAlertStatusEnum = pgEnum("rate_alert_status", [
+  "active",
+  "triggered",
+  "expired",
+  "cancelled",
+]);
 
 /**
  * Core user table backing auth flow.
@@ -65,37 +317,76 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   lastSignedIn: timestamp("last_signed_in").defaultNow().notNull(),
   twoFactorSecret: varchar("two_factor_secret", { length: 255 }),
-  twoFactorEnabled: twoFactorEnabledEnum("two_factor_enabled").default("false").notNull(),
+  twoFactorEnabled: twoFactorEnabledEnum("two_factor_enabled")
+    .default("false")
+    .notNull(),
   twoFactorBackupCodes: text("two_factor_backup_codes"),
 });
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-/**
- * Merchants who integrate the payment checkout
- */
-export const merchants = pgTable("merchants", {
+/** Local-development and self-hosted credential identities. Passwords are stored only as scrypt hashes. */
+export const localCredentials = pgTable("local_credentials", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull(),
-  businessName: varchar("business_name", { length: 255 }).notNull(),
-  businessType: businessTypeEnum("business_type").notNull(),
-  website: varchar("website", { length: 512 }),
-  apiKey: varchar("api_key", { length: 128 }).notNull().unique(),
-  apiSecret: varchar("api_secret", { length: 128 }).notNull(),
-  webhookUrl: varchar("webhook_url", { length: 512 }),
-  webhookSecret: varchar("webhook_secret", { length: 128 }),
-  status: merchantStatusEnum("status").default("pending").notNull(),
-  brandingLogo: varchar("branding_logo", { length: 512 }),
-  brandingPrimaryColor: varchar("branding_primary_color", { length: 7 }).default("#2563eb"),
-  brandingSecondaryColor: varchar("branding_secondary_color", { length: 7 }).default("#1e40af"),
-  brandingBackgroundColor: varchar("branding_background_color", { length: 7 }).default("#ffffff"),
-  brandingTextColor: varchar("branding_text_color", { length: 7 }).default("#1f2937"),
-  brandingFontFamily: varchar("branding_font_family", { length: 128 }).default("Inter"),
-  brandingBorderRadius: varchar("branding_border_radius", { length: 16 }).default("8px"),
+  userId: integer("user_id")
+    .notNull()
+    .unique()
+    .references(() => users.id),
+  username: varchar("username", { length: 64 }).notNull().unique(),
+  normalizedEmail: varchar("normalized_email", { length: 320 })
+    .notNull()
+    .unique(),
+  passwordHash: text("password_hash").notNull(),
+  failedAttempts: integer("failed_attempts").default(0).notNull(),
+  lockedUntil: timestamp("locked_until"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+export type LocalCredential = typeof localCredentials.$inferSelect;
+export type InsertLocalCredential = typeof localCredentials.$inferInsert;
+
+/**
+ * Merchants who integrate the payment checkout
+ */
+export const merchants = pgTable(
+  "merchants",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
+    tenantId: varchar("tenant_id", { length: 128 }),
+    businessName: varchar("business_name", { length: 255 }).notNull(),
+    businessType: businessTypeEnum("business_type").notNull(),
+    website: varchar("website", { length: 512 }),
+    apiKey: varchar("api_key", { length: 128 }).notNull().unique(),
+    apiSecret: varchar("api_secret", { length: 128 }).notNull(),
+    webhookUrl: varchar("webhook_url", { length: 512 }),
+    webhookSecret: varchar("webhook_secret", { length: 128 }),
+    status: merchantStatusEnum("status").default("pending").notNull(),
+    brandingLogo: varchar("branding_logo", { length: 512 }),
+    brandingPrimaryColor: varchar("branding_primary_color", {
+      length: 7,
+    }).default("#2563eb"),
+    brandingSecondaryColor: varchar("branding_secondary_color", {
+      length: 7,
+    }).default("#1e40af"),
+    brandingBackgroundColor: varchar("branding_background_color", {
+      length: 7,
+    }).default("#ffffff"),
+    brandingTextColor: varchar("branding_text_color", { length: 7 }).default(
+      "#1f2937"
+    ),
+    brandingFontFamily: varchar("branding_font_family", {
+      length: 128,
+    }).default("Inter"),
+    brandingBorderRadius: varchar("branding_border_radius", {
+      length: 16,
+    }).default("8px"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  table => [index("merchants_tenant_user_idx").on(table.tenantId, table.userId)]
+);
 
 export type Merchant = typeof merchants.$inferSelect;
 export type InsertMerchant = typeof merchants.$inferInsert;
@@ -103,26 +394,49 @@ export type InsertMerchant = typeof merchants.$inferInsert;
 /**
  * Payment sessions initiated by merchants
  */
-export const paymentSessions = pgTable("payment_sessions", {
-  id: serial("id").primaryKey(),
-  sessionId: varchar("session_id", { length: 64 }).notNull().unique(),
-  merchantId: integer("merchant_id").notNull(),
-  amount: integer("amount").notNull(),
-  currency: varchar("currency", { length: 3 }).default("USD").notNull(),
-  description: text("description"),
-  customerEmail: varchar("customer_email", { length: 320 }),
-  customerName: varchar("customer_name", { length: 255 }),
-  customerPhone: varchar("customer_phone", { length: 32 }),
-  merchantReference: varchar("merchant_reference", { length: 255 }),
-  successUrl: varchar("success_url", { length: 512 }),
-  cancelUrl: varchar("cancel_url", { length: 512 }),
-  status: sessionStatusEnum("status").default("pending").notNull(),
-  paymentMethod: paymentMethodEnum("payment_method"),
-  metadata: text("metadata"),
-  expiresAt: timestamp("expires_at").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+export const paymentSessions = pgTable(
+  "payment_sessions",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: varchar("session_id", { length: 64 }).notNull().unique(),
+    merchantId: integer("merchant_id").notNull(),
+    tenantId: varchar("tenant_id", { length: 128 }),
+    idempotencyKey: varchar("idempotency_key", { length: 255 }),
+    requestHash: varchar("request_hash", { length: 64 }),
+    workflowId: varchar("workflow_id", { length: 128 }),
+    amount: integer("amount").notNull(),
+    currency: varchar("currency", { length: 3 }).default("USD").notNull(),
+    description: text("description"),
+    customerEmail: varchar("customer_email", { length: 320 }),
+    customerName: varchar("customer_name", { length: 255 }),
+    customerPhone: varchar("customer_phone", { length: 32 }),
+    merchantReference: varchar("merchant_reference", { length: 255 }),
+    successUrl: varchar("success_url", { length: 512 }),
+    cancelUrl: varchar("cancel_url", { length: 512 }),
+    status: sessionStatusEnum("status").default("pending").notNull(),
+    paymentMethod: paymentMethodEnum("payment_method"),
+    metadata: text("metadata"),
+    expiresAt: timestamp("expires_at").notNull(),
+    approvedAt: timestamp("approved_at"),
+    approvedBySubject: varchar("approved_by_subject", { length: 255 }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  table => [
+    index("payment_sessions_tenant_session_idx").on(
+      table.tenantId,
+      table.sessionId
+    ),
+    index("payment_sessions_tenant_created_idx").on(
+      table.tenantId,
+      table.createdAt
+    ),
+    uniqueIndex("payment_sessions_tenant_idempotency_uidx").on(
+      table.tenantId,
+      table.idempotencyKey
+    ),
+  ]
+);
 
 export type PaymentSession = typeof paymentSessions.$inferSelect;
 export type InsertPaymentSession = typeof paymentSessions.$inferInsert;
@@ -163,46 +477,76 @@ export type InsertTransaction = typeof transactions.$inferInsert;
  * becomes settled merely because it was created locally; external execution and
  * reconciliation outcomes are recorded as immutable settlement events.
  */
-export const settlementBatches = pgTable("settlement_batches", {
-  id: serial("id").primaryKey(),
-  settlementId: varchar("settlement_id", { length: 64 }).notNull().unique(),
-  participantId: integer("participant_id").references(() => switchParticipants.id),
-  bankCode: varchar("bank_code", { length: 32 }).notNull(),
-  bankName: varchar("bank_name", { length: 256 }).notNull(),
-  channel: varchar("channel", { length: 16 }).notNull(),
-  settlementWindow: varchar("settlement_window", { length: 8 }).notNull(),
-  status: varchar("status", { length: 32 }).default("pending").notNull(),
-  totalTransactions: integer("total_transactions").default(0).notNull(),
-  grossAmount: decimal("gross_amount", { precision: 20, scale: 2 }).default("0").notNull(),
-  fees: decimal("fees", { precision: 20, scale: 2 }).default("0").notNull(),
-  netAmount: decimal("net_amount", { precision: 20, scale: 2 }).default("0").notNull(),
-  settlementRef: varchar("settlement_ref", { length: 128 }).notNull().unique(),
-  windowOpenedAt: timestamp("window_opened_at").defaultNow().notNull(),
-  windowClosedAt: timestamp("window_closed_at"),
-  reconciledAt: timestamp("reconciled_at"),
-  reconciledBy: integer("reconciled_by").references(() => users.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => [
-  index("settlement_batches_status_window_idx").on(table.status, table.windowOpenedAt),
-  index("settlement_batches_participant_window_idx").on(table.participantId, table.windowOpenedAt),
-  index("settlement_batches_bank_window_idx").on(table.bankCode, table.windowOpenedAt),
-]);
+export const settlementBatches = pgTable(
+  "settlement_batches",
+  {
+    id: serial("id").primaryKey(),
+    settlementId: varchar("settlement_id", { length: 64 }).notNull().unique(),
+    participantId: integer("participant_id").references(
+      () => switchParticipants.id
+    ),
+    bankCode: varchar("bank_code", { length: 32 }).notNull(),
+    bankName: varchar("bank_name", { length: 256 }).notNull(),
+    channel: varchar("channel", { length: 16 }).notNull(),
+    settlementWindow: varchar("settlement_window", { length: 8 }).notNull(),
+    status: varchar("status", { length: 32 }).default("pending").notNull(),
+    totalTransactions: integer("total_transactions").default(0).notNull(),
+    grossAmount: decimal("gross_amount", { precision: 20, scale: 2 })
+      .default("0")
+      .notNull(),
+    fees: decimal("fees", { precision: 20, scale: 2 }).default("0").notNull(),
+    netAmount: decimal("net_amount", { precision: 20, scale: 2 })
+      .default("0")
+      .notNull(),
+    settlementRef: varchar("settlement_ref", { length: 128 })
+      .notNull()
+      .unique(),
+    windowOpenedAt: timestamp("window_opened_at").defaultNow().notNull(),
+    windowClosedAt: timestamp("window_closed_at"),
+    reconciledAt: timestamp("reconciled_at"),
+    reconciledBy: integer("reconciled_by").references(() => users.id),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  table => [
+    index("settlement_batches_status_window_idx").on(
+      table.status,
+      table.windowOpenedAt
+    ),
+    index("settlement_batches_participant_window_idx").on(
+      table.participantId,
+      table.windowOpenedAt
+    ),
+    index("settlement_batches_bank_window_idx").on(
+      table.bankCode,
+      table.windowOpenedAt
+    ),
+  ]
+);
 
 export type SettlementBatch = typeof settlementBatches.$inferSelect;
 export type InsertSettlementBatch = typeof settlementBatches.$inferInsert;
 
 /** Immutable lifecycle evidence for each settlement batch. */
-export const settlementEvents = pgTable("settlement_events", {
-  id: serial("id").primaryKey(),
-  settlementBatchId: integer("settlement_batch_id").notNull().references(() => settlementBatches.id),
-  eventType: varchar("event_type", { length: 64 }).notNull(),
-  eventPayload: jsonb("event_payload"),
-  actorUserId: integer("actor_user_id").references(() => users.id),
-  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
-}, (table) => [
-  index("settlement_events_batch_time_idx").on(table.settlementBatchId, table.occurredAt),
-]);
+export const settlementEvents = pgTable(
+  "settlement_events",
+  {
+    id: serial("id").primaryKey(),
+    settlementBatchId: integer("settlement_batch_id")
+      .notNull()
+      .references(() => settlementBatches.id),
+    eventType: varchar("event_type", { length: 64 }).notNull(),
+    eventPayload: jsonb("event_payload"),
+    actorUserId: integer("actor_user_id").references(() => users.id),
+    occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+  },
+  table => [
+    index("settlement_events_batch_time_idx").on(
+      table.settlementBatchId,
+      table.occurredAt
+    ),
+  ]
+);
 
 export type SettlementEvent = typeof settlementEvents.$inferSelect;
 export type InsertSettlementEvent = typeof settlementEvents.$inferInsert;
@@ -357,7 +701,8 @@ export const ocrCorrectionPatterns = pgTable("ocr_correction_patterns", {
 });
 
 export type OcrCorrectionPattern = typeof ocrCorrectionPatterns.$inferSelect;
-export type InsertOcrCorrectionPattern = typeof ocrCorrectionPatterns.$inferInsert;
+export type InsertOcrCorrectionPattern =
+  typeof ocrCorrectionPatterns.$inferInsert;
 
 /**
  * Technical Onboarding Tables
@@ -387,8 +732,10 @@ export const technicalConfigurations = pgTable("technical_configurations", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-export type TechnicalConfiguration = typeof technicalConfigurations.$inferSelect;
-export type InsertTechnicalConfiguration = typeof technicalConfigurations.$inferInsert;
+export type TechnicalConfiguration =
+  typeof technicalConfigurations.$inferSelect;
+export type InsertTechnicalConfiguration =
+  typeof technicalConfigurations.$inferInsert;
 
 /**
  * Security Credentials
@@ -430,8 +777,10 @@ export const integrationEnvironments = pgTable("integration_environments", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-export type IntegrationEnvironment = typeof integrationEnvironments.$inferSelect;
-export type InsertIntegrationEnvironment = typeof integrationEnvironments.$inferInsert;
+export type IntegrationEnvironment =
+  typeof integrationEnvironments.$inferSelect;
+export type InsertIntegrationEnvironment =
+  typeof integrationEnvironments.$inferInsert;
 
 /**
  * API credentials for integration environments
@@ -442,6 +791,9 @@ export const apiCredentials = pgTable("api_credentials", {
   apiKey: varchar("api_key", { length: 128 }).notNull().unique(),
   apiSecret: varchar("api_secret", { length: 128 }).notNull(),
   keyVersion: integer("key_version").default(1).notNull(),
+  rateLimitTier: varchar("rate_limit_tier", { length: 32 })
+    .default("free")
+    .notNull(),
   isActive: boolean("is_active").default(true).notNull(),
   expiresAt: timestamp("expires_at"),
   lastUsedAt: timestamp("last_used_at"),
@@ -459,19 +811,28 @@ export type InsertApiCredential = typeof apiCredentials.$inferInsert;
 /**
  * Integration test executions initiated during participant onboarding.
  */
-export const integrationTests = pgTable("integration_tests", {
-  id: serial("id").primaryKey(),
-  applicationId: integer("application_id").notNull().references(() => participantApplications.id, { onDelete: "cascade" }),
-  testType: varchar("test_type", { length: 64 }).notNull(),
-  testName: varchar("test_name", { length: 255 }).notNull(),
-  status: testStatusEnum("status").default("pending").notNull(),
-  resultData: jsonb("result_data"),
-  executedAt: timestamp("executed_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-}, table => [
-  index("idx_integration_tests_application_created").on(table.applicationId, table.createdAt),
-  index("idx_integration_tests_status").on(table.status),
-]);
+export const integrationTests = pgTable(
+  "integration_tests",
+  {
+    id: serial("id").primaryKey(),
+    applicationId: integer("application_id")
+      .notNull()
+      .references(() => participantApplications.id, { onDelete: "cascade" }),
+    testType: varchar("test_type", { length: 64 }).notNull(),
+    testName: varchar("test_name", { length: 255 }).notNull(),
+    status: testStatusEnum("status").default("pending").notNull(),
+    resultData: jsonb("result_data"),
+    executedAt: timestamp("executed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  table => [
+    index("idx_integration_tests_application_created").on(
+      table.applicationId,
+      table.createdAt
+    ),
+    index("idx_integration_tests_status").on(table.status),
+  ]
+);
 
 export type IntegrationTest = typeof integrationTests.$inferSelect;
 export type InsertIntegrationTest = typeof integrationTests.$inferInsert;
@@ -479,15 +840,24 @@ export type InsertIntegrationTest = typeof integrationTests.$inferInsert;
 /**
  * SDK download audit trail for participant applications.
  */
-export const sdkDownloads = pgTable("sdk_downloads", {
-  id: serial("id").primaryKey(),
-  applicationId: integer("application_id").notNull().references(() => participantApplications.id, { onDelete: "cascade" }),
-  sdkType: sdkTypeEnum("sdk_type").notNull(),
-  version: varchar("version", { length: 64 }).notNull(),
-  downloadedAt: timestamp("downloaded_at").defaultNow().notNull(),
-}, table => [
-  index("idx_sdk_downloads_application_downloaded").on(table.applicationId, table.downloadedAt),
-]);
+export const sdkDownloads = pgTable(
+  "sdk_downloads",
+  {
+    id: serial("id").primaryKey(),
+    applicationId: integer("application_id")
+      .notNull()
+      .references(() => participantApplications.id, { onDelete: "cascade" }),
+    sdkType: sdkTypeEnum("sdk_type").notNull(),
+    version: varchar("version", { length: 64 }).notNull(),
+    downloadedAt: timestamp("downloaded_at").defaultNow().notNull(),
+  },
+  table => [
+    index("idx_sdk_downloads_application_downloaded").on(
+      table.applicationId,
+      table.downloadedAt
+    ),
+  ]
+);
 
 export type SdkDownload = typeof sdkDownloads.$inferSelect;
 export type InsertSdkDownload = typeof sdkDownloads.$inferInsert;
@@ -495,19 +865,29 @@ export type InsertSdkDownload = typeof sdkDownloads.$inferInsert;
 /**
  * In-application notifications addressed to portal users.
  */
-export const adminNotifications = pgTable("admin_notifications", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  type: varchar("type", { length: 128 }).notNull(),
-  title: varchar("title", { length: 255 }).notNull(),
-  message: text("message").notNull(),
-  link: varchar("link", { length: 512 }),
-  isRead: boolean("is_read").default(false).notNull(),
-  readAt: timestamp("read_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-}, table => [
-  index("idx_admin_notifications_user_unread_created").on(table.userId, table.isRead, table.createdAt),
-]);
+export const adminNotifications = pgTable(
+  "admin_notifications",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: varchar("type", { length: 128 }).notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    message: text("message").notNull(),
+    link: varchar("link", { length: 512 }),
+    isRead: boolean("is_read").default(false).notNull(),
+    readAt: timestamp("read_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  table => [
+    index("idx_admin_notifications_user_unread_created").on(
+      table.userId,
+      table.isRead,
+      table.createdAt
+    ),
+  ]
+);
 
 export type AdminNotification = typeof adminNotifications.$inferSelect;
 export type InsertAdminNotification = typeof adminNotifications.$inferInsert;
@@ -515,35 +895,54 @@ export type InsertAdminNotification = typeof adminNotifications.$inferInsert;
 /**
  * Per-event delivery preferences, separate from account-security preferences.
  */
-export const notificationTypePreferences = pgTable("notification_type_preferences", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  notificationType: varchar("notification_type", { length: 128 }).notNull(),
-  emailEnabled: boolean("email_enabled").default(true).notNull(),
-  inAppEnabled: boolean("in_app_enabled").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, table => [
-  uniqueIndex("uq_notification_type_preferences_user_type").on(table.userId, table.notificationType),
-]);
+export const notificationTypePreferences = pgTable(
+  "notification_type_preferences",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    notificationType: varchar("notification_type", { length: 128 }).notNull(),
+    emailEnabled: boolean("email_enabled").default(true).notNull(),
+    inAppEnabled: boolean("in_app_enabled").default(true).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("uq_notification_type_preferences_user_type").on(
+      table.userId,
+      table.notificationType
+    ),
+  ]
+);
 
-export type NotificationTypePreference = typeof notificationTypePreferences.$inferSelect;
-export type InsertNotificationTypePreference = typeof notificationTypePreferences.$inferInsert;
+export type NotificationTypePreference =
+  typeof notificationTypePreferences.$inferSelect;
+export type InsertNotificationTypePreference =
+  typeof notificationTypePreferences.$inferInsert;
 
 /**
  * Historical rates persisted after successful provider responses.
  */
-export const exchangeRateHistory = pgTable("exchange_rate_history", {
-  id: serial("id").primaryKey(),
-  fromCurrency: varchar("from_currency", { length: 10 }).notNull(),
-  toCurrency: varchar("to_currency", { length: 10 }).notNull(),
-  rate: decimal("rate", { precision: 28, scale: 12 }).notNull(),
-  provider: varchar("provider", { length: 64 }).notNull(),
-  observedAt: timestamp("observed_at").defaultNow().notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-}, table => [
-  index("idx_exchange_rate_history_pair_observed").on(table.fromCurrency, table.toCurrency, table.observedAt),
-]);
+export const exchangeRateHistory = pgTable(
+  "exchange_rate_history",
+  {
+    id: serial("id").primaryKey(),
+    fromCurrency: varchar("from_currency", { length: 10 }).notNull(),
+    toCurrency: varchar("to_currency", { length: 10 }).notNull(),
+    rate: decimal("rate", { precision: 28, scale: 12 }).notNull(),
+    provider: varchar("provider", { length: 64 }).notNull(),
+    observedAt: timestamp("observed_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  table => [
+    index("idx_exchange_rate_history_pair_observed").on(
+      table.fromCurrency,
+      table.toCurrency,
+      table.observedAt
+    ),
+  ]
+);
 
 export type ExchangeRateHistory = typeof exchangeRateHistory.$inferSelect;
 export type InsertExchangeRateHistory = typeof exchangeRateHistory.$inferInsert;
@@ -551,18 +950,32 @@ export type InsertExchangeRateHistory = typeof exchangeRateHistory.$inferInsert;
 /**
  * Durable namespaced JSON store used by services that do not warrant a dedicated table.
  */
-export const persistentStore = pgTable("persistent_store", {
-  id: serial("id").primaryKey(),
-  namespace: varchar("namespace", { length: 100 }).notNull(),
-  key: varchar("key", { length: 500 }).notNull(),
-  data: jsonb("data").notNull().default({}),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }),
-}, table => [
-  uniqueIndex("uq_persistent_store_namespace_key").on(table.namespace, table.key),
-  index("idx_persistent_store_namespace_expiry").on(table.namespace, table.expiresAt),
-]);
+export const persistentStore = pgTable(
+  "persistent_store",
+  {
+    id: serial("id").primaryKey(),
+    namespace: varchar("namespace", { length: 100 }).notNull(),
+    key: varchar("key", { length: 500 }).notNull(),
+    data: jsonb("data").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+  },
+  table => [
+    uniqueIndex("uq_persistent_store_namespace_key").on(
+      table.namespace,
+      table.key
+    ),
+    index("idx_persistent_store_namespace_expiry").on(
+      table.namespace,
+      table.expiresAt
+    ),
+  ]
+);
 
 export type PersistentStoreRecord = typeof persistentStore.$inferSelect;
 export type InsertPersistentStoreRecord = typeof persistentStore.$inferInsert;
@@ -577,8 +990,12 @@ export const participantApplications = pgTable("participant_applications", {
   organizationType: varchar("organization_type", { length: 100 }).notNull(),
   registrationNumber: varchar("registration_number", { length: 100 }),
   taxId: varchar("tax_id", { length: 100 }),
-  primaryContactName: varchar("primary_contact_name", { length: 255 }).notNull(),
-  primaryContactEmail: varchar("primary_contact_email", { length: 320 }).notNull(),
+  primaryContactName: varchar("primary_contact_name", {
+    length: 255,
+  }).notNull(),
+  primaryContactEmail: varchar("primary_contact_email", {
+    length: 320,
+  }).notNull(),
   primaryContactPhone: varchar("primary_contact_phone", { length: 32 }),
   contactName: varchar("contact_name", { length: 255 }),
   contactEmail: varchar("contact_email", { length: 320 }),
@@ -588,6 +1005,9 @@ export const participantApplications = pgTable("participant_applications", {
   state: varchar("state", { length: 100 }),
   country: varchar("country", { length: 100 }),
   postalCode: varchar("postal_code", { length: 20 }),
+  /** Exact validated onboarding submission, retained for audit and downstream stage handoff. */
+  submissionPayload: jsonb("submission_payload").notNull().default({}),
+  documentManifest: jsonb("document_manifest").notNull().default([]),
   status: applicationStatusEnum("status").default("draft").notNull(),
   currentStage: stageEnum("current_stage").default("kyc").notNull(),
   submittedAt: timestamp("submitted_at"),
@@ -600,10 +1020,60 @@ export const participantApplications = pgTable("participant_applications", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-export type ParticipantApplication = typeof participantApplications.$inferSelect;
-export type InsertParticipantApplication = typeof participantApplications.$inferInsert;
+export type ParticipantApplication =
+  typeof participantApplications.$inferSelect;
+export type InsertParticipantApplication =
+  typeof participantApplications.$inferInsert;
+
+/** Durable resumable onboarding draft owned by one authenticated user. */
+export const onboardingDrafts = pgTable("onboarding_drafts", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
+    .notNull()
+    .unique()
+    .references(() => users.id),
+  applicationId: integer("application_id")
+    .unique()
+    .references(() => participantApplications.id),
+  currentStep: integer("current_step").notNull().default(1),
+  formData: jsonb("form_data").notNull().default({}),
+  documentManifest: jsonb("document_manifest").notNull().default([]),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+export type OnboardingDraft = typeof onboardingDrafts.$inferSelect;
+export type InsertOnboardingDraft = typeof onboardingDrafts.$inferInsert;
+
+export const multipartUploadSessions = pgTable("multipart_upload_sessions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  uploadId: varchar("upload_id", { length: 512 }).notNull().unique(),
+  objectKey: varchar("object_key", { length: 1024 }).notNull().unique(),
+  traceparent: varchar("traceparent", { length: 255 }),
+  documentLabel: varchar("document_label", { length: 255 }).notNull(),
+  originalFileName: varchar("original_file_name", { length: 255 }).notNull(),
+  contentType: varchar("content_type", { length: 128 }).notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  status: varchar("status", { length: 32 }).notNull().default("active"),
+  expiresAt: timestamp("expires_at").notNull(),
+  cleanupAttempts: integer("cleanup_attempts").notNull().default(0),
+  lastCleanupError: text("last_cleanup_error"),
+  cleanupClaimedAt: timestamp("cleanup_claimed_at"),
+  cleanupSucceededAt: timestamp("cleanup_succeeded_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+  abortedAt: timestamp("aborted_at"),
+});
+export type MultipartUploadSession =
+  typeof multipartUploadSessions.$inferSelect;
+export type InsertMultipartUploadSession =
+  typeof multipartUploadSessions.$inferInsert;
 
 /**
+
  * Account recovery requests
  */
 export const accountRecoveryRequests = pgTable("account_recovery_requests", {
@@ -625,8 +1095,10 @@ export const accountRecoveryRequests = pgTable("account_recovery_requests", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export type AccountRecoveryRequest = typeof accountRecoveryRequests.$inferSelect;
-export type InsertAccountRecoveryRequest = typeof accountRecoveryRequests.$inferInsert;
+export type AccountRecoveryRequest =
+  typeof accountRecoveryRequests.$inferSelect;
+export type InsertAccountRecoveryRequest =
+  typeof accountRecoveryRequests.$inferInsert;
 
 /**
  * Trusted devices for users
@@ -658,15 +1130,23 @@ export const notificationPreferences = pgTable("notification_preferences", {
   smsNotifications: boolean("sms_notifications").default(false).notNull(),
   loginAlerts: boolean("login_alerts").default(true).notNull(),
   newDeviceAlerts: boolean("new_device_alerts").default(true).notNull(),
-  passwordChangeAlerts: boolean("password_change_alerts").default(true).notNull(),
-  twoFactorChangeAlerts: boolean("two_factor_change_alerts").default(true).notNull(),
-  suspiciousActivityAlerts: boolean("suspicious_activity_alerts").default(true).notNull(),
+  passwordChangeAlerts: boolean("password_change_alerts")
+    .default(true)
+    .notNull(),
+  twoFactorChangeAlerts: boolean("two_factor_change_alerts")
+    .default(true)
+    .notNull(),
+  suspiciousActivityAlerts: boolean("suspicious_activity_alerts")
+    .default(true)
+    .notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-export type NotificationPreference = typeof notificationPreferences.$inferSelect;
-export type InsertNotificationPreference = typeof notificationPreferences.$inferInsert;
+export type NotificationPreference =
+  typeof notificationPreferences.$inferSelect;
+export type InsertNotificationPreference =
+  typeof notificationPreferences.$inferInsert;
 
 /**
  * Login history for users
@@ -727,7 +1207,9 @@ export const productionMonitoring = pgTable("production_monitoring", {
   id: serial("id").primaryKey(),
   applicationId: integer("application_id").notNull(),
   credentialId: integer("credential_id"),
-  healthStatus: monitoringStatusEnum("health_status").default("healthy").notNull(),
+  healthStatus: monitoringStatusEnum("health_status")
+    .default("healthy")
+    .notNull(),
   lastHealthCheck: timestamp("last_health_check"),
   avgLatencyMs: integer("avg_latency_ms"),
   errorRate: decimal("error_rate", { precision: 5, scale: 2 }),
@@ -744,7 +1226,8 @@ export const productionMonitoring = pgTable("production_monitoring", {
 });
 
 export type ProductionMonitoring = typeof productionMonitoring.$inferSelect;
-export type InsertProductionMonitoring = typeof productionMonitoring.$inferInsert;
+export type InsertProductionMonitoring =
+  typeof productionMonitoring.$inferInsert;
 
 /**
  * Incident reports
@@ -796,7 +1279,8 @@ export const monitoringAlertRules = pgTable("monitoring_alert_rules", {
 });
 
 export type MonitoringAlertRule = typeof monitoringAlertRules.$inferSelect;
-export type InsertMonitoringAlertRule = typeof monitoringAlertRules.$inferInsert;
+export type InsertMonitoringAlertRule =
+  typeof monitoringAlertRules.$inferInsert;
 
 /**
  * Monitoring alerts
@@ -833,15 +1317,21 @@ export const goLiveChecklist = pgTable("go_live_checklist", {
   integrationTestsPassed: boolean("integration_tests_passed").default(false),
   performanceTestsPassed: boolean("performance_tests_passed").default(false),
   documentationComplete: boolean("documentation_complete").default(false),
-  supportContactsConfigured: boolean("support_contacts_configured").default(false),
+  supportContactsConfigured: boolean("support_contacts_configured").default(
+    false
+  ),
   monitoringConfigured: boolean("monitoring_configured").default(false),
   alertsConfigured: boolean("alerts_configured").default(false),
   rollbackPlanDocumented: boolean("rollback_plan_documented").default(false),
   certificationPassed: boolean("certification_passed").default(false),
   documentationReviewed: boolean("documentation_reviewed").default(false),
-  disasterRecoveryPlanSubmitted: boolean("disaster_recovery_plan_submitted").default(false),
+  disasterRecoveryPlanSubmitted: boolean(
+    "disaster_recovery_plan_submitted"
+  ).default(false),
   supportContactsProvided: boolean("support_contacts_provided").default(false),
-  productionEndpointsConfigured: boolean("production_endpoints_configured").default(false),
+  productionEndpointsConfigured: boolean(
+    "production_endpoints_configured"
+  ).default(false),
   technicalSignOff: integer("technical_sign_off"),
   technicalSignOffAt: timestamp("technical_sign_off_at"),
   businessSignOff: integer("business_sign_off"),
@@ -872,8 +1362,12 @@ export const apiKeyWebhooks = pgTable("api_key_webhooks", {
   maxRetries: integer("max_retries").default(5).notNull(),
   retryBackoffMs: integer("retry_backoff_ms").default(60000).notNull(),
   consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
-  consecutiveFailureThreshold: integer("consecutive_failure_threshold").default(10).notNull(),
-  finalFailureNotificationUrl: varchar("final_failure_notification_url", { length: 512 }),
+  consecutiveFailureThreshold: integer("consecutive_failure_threshold")
+    .default(10)
+    .notNull(),
+  finalFailureNotificationUrl: varchar("final_failure_notification_url", {
+    length: 512,
+  }),
   finalFailureTemplate: text("final_failure_template"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -1021,7 +1515,8 @@ export const apiPermissionTemplates = pgTable("api_permission_templates", {
 });
 
 export type ApiPermissionTemplate = typeof apiPermissionTemplates.$inferSelect;
-export type InsertApiPermissionTemplate = typeof apiPermissionTemplates.$inferInsert;
+export type InsertApiPermissionTemplate =
+  typeof apiPermissionTemplates.$inferInsert;
 
 /**
  * Certification Results - Test certification results
@@ -1044,7 +1539,8 @@ export const certificationResults = pgTable("certification_results", {
 });
 
 export type CertificationResult = typeof certificationResults.$inferSelect;
-export type InsertCertificationResult = typeof certificationResults.$inferInsert;
+export type InsertCertificationResult =
+  typeof certificationResults.$inferInsert;
 
 /**
  * Notification Channels - Configured notification channels
@@ -1070,7 +1566,8 @@ export const notificationChannels = pgTable("notification_channels", {
 });
 
 export type NotificationChannel = typeof notificationChannels.$inferSelect;
-export type InsertNotificationChannel = typeof notificationChannels.$inferInsert;
+export type InsertNotificationChannel =
+  typeof notificationChannels.$inferInsert;
 
 /**
  * Notification Deliveries - Tracks notification delivery attempts
@@ -1088,7 +1585,8 @@ export const notificationDeliveries = pgTable("notification_deliveries", {
 });
 
 export type NotificationDelivery = typeof notificationDeliveries.$inferSelect;
-export type InsertNotificationDelivery = typeof notificationDeliveries.$inferInsert;
+export type InsertNotificationDelivery =
+  typeof notificationDeliveries.$inferInsert;
 
 /**
  * Production Credentials - Production environment credentials
@@ -1100,7 +1598,9 @@ export const productionCredentials = pgTable("production_credentials", {
   apiSecret: varchar("api_secret", { length: 128 }).notNull(),
   productionApiKey: varchar("production_api_key", { length: 128 }),
   productionApiSecret: varchar("production_api_secret", { length: 128 }),
-  productionWebhookSecret: varchar("production_webhook_secret", { length: 128 }),
+  productionWebhookSecret: varchar("production_webhook_secret", {
+    length: 128,
+  }),
   dailyTransactionLimit: integer("daily_transaction_limit"),
   monthlyTransactionLimit: integer("monthly_transaction_limit"),
   status: credentialStatusEnum("status").default("active").notNull(),
@@ -1111,7 +1611,8 @@ export const productionCredentials = pgTable("production_credentials", {
 });
 
 export type ProductionCredential = typeof productionCredentials.$inferSelect;
-export type InsertProductionCredential = typeof productionCredentials.$inferInsert;
+export type InsertProductionCredential =
+  typeof productionCredentials.$inferInsert;
 
 /**
  * Saved Comparisons - User saved rate comparisons
@@ -1144,25 +1645,30 @@ export type InsertSavedComparison = typeof savedComparisons.$inferInsert;
 /**
  * Technical Onboarding Reviews - Review records for technical configurations
  */
-export const technicalOnboardingReviews = pgTable("technical_onboarding_reviews", {
-  id: serial("id").primaryKey(),
-  configurationId: integer("configuration_id").notNull(),
-  applicationId: integer("application_id"),
-  reviewerId: integer("reviewer_id").notNull(),
-  status: reviewStatusEnum("status").default("pending").notNull(),
-  comments: text("comments"),
-  reviewNotes: text("review_notes"),
-  correctionsRequired: text("corrections_required"),
-  endpointConnectivityTest: boolean("endpoint_connectivity_test"),
-  securityHeadersTest: boolean("security_headers_test"),
-  authenticationFlowTest: boolean("authentication_flow_test"),
-  tlsCertificateValid: boolean("tls_certificate_valid"),
-  reviewedAt: timestamp("reviewed_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+export const technicalOnboardingReviews = pgTable(
+  "technical_onboarding_reviews",
+  {
+    id: serial("id").primaryKey(),
+    configurationId: integer("configuration_id").notNull(),
+    applicationId: integer("application_id"),
+    reviewerId: integer("reviewer_id").notNull(),
+    status: reviewStatusEnum("status").default("pending").notNull(),
+    comments: text("comments"),
+    reviewNotes: text("review_notes"),
+    correctionsRequired: text("corrections_required"),
+    endpointConnectivityTest: boolean("endpoint_connectivity_test"),
+    securityHeadersTest: boolean("security_headers_test"),
+    authenticationFlowTest: boolean("authentication_flow_test"),
+    tlsCertificateValid: boolean("tls_certificate_valid"),
+    reviewedAt: timestamp("reviewed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  }
+);
 
-export type TechnicalOnboardingReview = typeof technicalOnboardingReviews.$inferSelect;
-export type InsertTechnicalOnboardingReview = typeof technicalOnboardingReviews.$inferInsert;
+export type TechnicalOnboardingReview =
+  typeof technicalOnboardingReviews.$inferSelect;
+export type InsertTechnicalOnboardingReview =
+  typeof technicalOnboardingReviews.$inferInsert;
 
 /**
  * Test Executions - Individual test execution records
@@ -1217,14 +1723,17 @@ export const ocrCorrectionSettings = pgTable("ocr_correction_settings", {
   settingKey: varchar("setting_key", { length: 100 }),
   settingValue: text("setting_value"),
   autoCorrectEnabled: boolean("auto_correct_enabled").default(true).notNull(),
-  minConfidenceThreshold: integer("min_confidence_threshold").default(80).notNull(),
+  minConfidenceThreshold: integer("min_confidence_threshold")
+    .default(80)
+    .notNull(),
   requireReview: boolean("require_review").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export type OcrCorrectionSetting = typeof ocrCorrectionSettings.$inferSelect;
-export type InsertOcrCorrectionSetting = typeof ocrCorrectionSettings.$inferInsert;
+export type InsertOcrCorrectionSetting =
+  typeof ocrCorrectionSettings.$inferInsert;
 
 /**
  * Test Schedules - Scheduled test configurations
@@ -1284,7 +1793,8 @@ export const networkConfigurations = pgTable("network_configurations", {
 });
 
 export type NetworkConfiguration = typeof networkConfigurations.$inferSelect;
-export type InsertNetworkConfiguration = typeof networkConfigurations.$inferInsert;
+export type InsertNetworkConfiguration =
+  typeof networkConfigurations.$inferInsert;
 
 /**
  * Compliance Documents - Uploaded compliance documents
@@ -1298,7 +1808,9 @@ export const complianceDocuments = pgTable("compliance_documents", {
   documentName: varchar("document_name", { length: 256 }).notNull(),
   expiryDate: timestamp("expiry_date"),
   dataStorageLocation: varchar("data_storage_location", { length: 128 }),
-  crossBorderTransfer: boolean("cross_border_transfer").default(false).notNull(),
+  crossBorderTransfer: boolean("cross_border_transfer")
+    .default(false)
+    .notNull(),
   gdprCompliant: boolean("gdpr_compliant").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -1393,24 +1905,85 @@ export const accountRecoveryAuditLog = pgTable("account_recovery_audit_log", {
   performedAt: timestamp("performed_at").defaultNow().notNull(),
 });
 
-export type AccountRecoveryAuditLog = typeof accountRecoveryAuditLog.$inferSelect;
-export type InsertAccountRecoveryAuditLog = typeof accountRecoveryAuditLog.$inferInsert;
+export type AccountRecoveryAuditLog =
+  typeof accountRecoveryAuditLog.$inferSelect;
+export type InsertAccountRecoveryAuditLog =
+  typeof accountRecoveryAuditLog.$inferInsert;
 
 // ============================================================
 // MISSING FEATURES - New Tables for Production-Ready Platform
 // ============================================================
 
 // --- Enums for new features ---
-export const disputeStatusEnum = pgEnum("dispute_status", ["open", "under_review", "evidence_requested", "resolved_merchant", "resolved_customer", "escalated", "closed"]);
-export const recurringFrequencyEnum = pgEnum("recurring_frequency", ["daily", "weekly", "biweekly", "monthly", "quarterly"]);
-export const recurringStatusEnum = pgEnum("recurring_status", ["active", "paused", "cancelled", "completed", "failed"]);
-export const ticketStatusEnum = pgEnum("ticket_status", ["open", "in_progress", "waiting_customer", "waiting_agent", "resolved", "closed"]);
-export const ticketPriorityEnum = pgEnum("ticket_priority", ["low", "medium", "high", "urgent"]);
-export const maintenanceModeEnum = pgEnum("maintenance_mode", ["off", "scheduled", "active"]);
-export const feeTierEnum = pgEnum("fee_tier", ["standard", "premium", "enterprise", "promotional"]);
-export const reportTypeEnum = pgEnum("report_type", ["sar", "ctr", "aml_summary", "quarterly_compliance", "annual_report"]);
-export const limitTypeEnum = pgEnum("limit_type", ["daily", "weekly", "monthly", "per_transaction"]);
-export const pbacActionEnum = pgEnum("pbac_action", ["create", "read", "update", "delete", "approve", "execute"]);
+export const disputeStatusEnum = pgEnum("dispute_status", [
+  "open",
+  "under_review",
+  "evidence_requested",
+  "resolved_merchant",
+  "resolved_customer",
+  "escalated",
+  "closed",
+]);
+export const recurringFrequencyEnum = pgEnum("recurring_frequency", [
+  "daily",
+  "weekly",
+  "biweekly",
+  "monthly",
+  "quarterly",
+]);
+export const recurringStatusEnum = pgEnum("recurring_status", [
+  "active",
+  "paused",
+  "cancelled",
+  "completed",
+  "failed",
+]);
+export const ticketStatusEnum = pgEnum("ticket_status", [
+  "open",
+  "in_progress",
+  "waiting_customer",
+  "waiting_agent",
+  "resolved",
+  "closed",
+]);
+export const ticketPriorityEnum = pgEnum("ticket_priority", [
+  "low",
+  "medium",
+  "high",
+  "urgent",
+]);
+export const maintenanceModeEnum = pgEnum("maintenance_mode", [
+  "off",
+  "scheduled",
+  "active",
+]);
+export const feeTierEnum = pgEnum("fee_tier", [
+  "standard",
+  "premium",
+  "enterprise",
+  "promotional",
+]);
+export const reportTypeEnum = pgEnum("report_type", [
+  "sar",
+  "ctr",
+  "aml_summary",
+  "quarterly_compliance",
+  "annual_report",
+]);
+export const limitTypeEnum = pgEnum("limit_type", [
+  "daily",
+  "weekly",
+  "monthly",
+  "per_transaction",
+]);
+export const pbacActionEnum = pgEnum("pbac_action", [
+  "create",
+  "read",
+  "update",
+  "delete",
+  "approve",
+  "execute",
+]);
 
 /**
  * Transaction Disputes - Formal dispute resolution process
@@ -1464,7 +2037,9 @@ export const recurringRemittances = pgTable("recurring_remittances", {
   recipientAccount: varchar("recipient_account", { length: 128 }).notNull(),
   recipientBank: varchar("recipient_bank", { length: 128 }),
   amount: decimal("amount", { precision: 18, scale: 2 }).notNull(),
-  fromCurrency: varchar("from_currency", { length: 8 }).default("USD").notNull(),
+  fromCurrency: varchar("from_currency", { length: 8 })
+    .default("USD")
+    .notNull(),
   toCurrency: varchar("to_currency", { length: 8 }).default("NGN").notNull(),
   frequency: recurringFrequencyEnum("frequency").notNull(),
   status: recurringStatusEnum("status").default("active").notNull(),
@@ -1480,7 +2055,8 @@ export const recurringRemittances = pgTable("recurring_remittances", {
 });
 
 export type RecurringRemittance = typeof recurringRemittances.$inferSelect;
-export type InsertRecurringRemittance = typeof recurringRemittances.$inferInsert;
+export type InsertRecurringRemittance =
+  typeof recurringRemittances.$inferInsert;
 
 /**
  * Multi-Recipient Transfers - Batch transfers to multiple recipients
@@ -1516,8 +2092,10 @@ export const batchTransferRecipients = pgTable("batch_transfer_recipients", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export type BatchTransferRecipient = typeof batchTransferRecipients.$inferSelect;
-export type InsertBatchTransferRecipient = typeof batchTransferRecipients.$inferInsert;
+export type BatchTransferRecipient =
+  typeof batchTransferRecipients.$inferSelect;
+export type InsertBatchTransferRecipient =
+  typeof batchTransferRecipients.$inferInsert;
 
 /**
  * Compliance Reports - Automated compliance reports for regulators
@@ -1530,7 +2108,9 @@ export const complianceReports = pgTable("compliance_reports", {
   periodEnd: timestamp("period_end").notNull(),
   totalTransactions: integer("total_transactions").default(0).notNull(),
   flaggedTransactions: integer("flagged_transactions").default(0).notNull(),
-  totalAmount: decimal("total_amount", { precision: 18, scale: 2 }).default("0").notNull(),
+  totalAmount: decimal("total_amount", { precision: 18, scale: 2 })
+    .default("0")
+    .notNull(),
   status: varchar("status", { length: 32 }).default("draft").notNull(),
   generatedBy: integer("generated_by"),
   approvedBy: integer("approved_by"),
@@ -1591,7 +2171,9 @@ export const transactionLimits = pgTable("transaction_limits", {
   tier: varchar("tier", { length: 32 }).default("standard").notNull(),
   limitType: limitTypeEnum("limit_type").notNull(),
   maxAmount: decimal("max_amount", { precision: 18, scale: 2 }).notNull(),
-  currentUsage: decimal("current_usage", { precision: 18, scale: 2 }).default("0").notNull(),
+  currentUsage: decimal("current_usage", { precision: 18, scale: 2 })
+    .default("0")
+    .notNull(),
   currency: varchar("currency", { length: 8 }).default("NGN").notNull(),
   resetAt: timestamp("reset_at"),
   isOverridden: boolean("is_overridden").default(false).notNull(),
@@ -1611,7 +2193,10 @@ export const limitIncreaseRequests = pgTable("limit_increase_requests", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
   currentLimit: decimal("current_limit", { precision: 18, scale: 2 }).notNull(),
-  requestedLimit: decimal("requested_limit", { precision: 18, scale: 2 }).notNull(),
+  requestedLimit: decimal("requested_limit", {
+    precision: 18,
+    scale: 2,
+  }).notNull(),
   limitType: limitTypeEnum("limit_type").notNull(),
   justification: text("justification").notNull(),
   status: varchar("status", { length: 32 }).default("pending").notNull(),
@@ -1622,7 +2207,8 @@ export const limitIncreaseRequests = pgTable("limit_increase_requests", {
 });
 
 export type LimitIncreaseRequest = typeof limitIncreaseRequests.$inferSelect;
-export type InsertLimitIncreaseRequest = typeof limitIncreaseRequests.$inferInsert;
+export type InsertLimitIncreaseRequest =
+  typeof limitIncreaseRequests.$inferInsert;
 
 /**
  * Fee Configurations - Admin-configurable fee structures
@@ -1633,9 +2219,15 @@ export const feeConfigurations = pgTable("fee_configurations", {
   tier: feeTierEnum("tier").default("standard").notNull(),
   transactionType: varchar("transaction_type", { length: 64 }).notNull(),
   feeType: varchar("fee_type", { length: 32 }).notNull(),
-  flatFee: decimal("flat_fee", { precision: 18, scale: 2 }).default("0").notNull(),
-  percentageFee: decimal("percentage_fee", { precision: 5, scale: 4 }).default("0").notNull(),
-  minFee: decimal("min_fee", { precision: 18, scale: 2 }).default("0").notNull(),
+  flatFee: decimal("flat_fee", { precision: 18, scale: 2 })
+    .default("0")
+    .notNull(),
+  percentageFee: decimal("percentage_fee", { precision: 5, scale: 4 })
+    .default("0")
+    .notNull(),
+  minFee: decimal("min_fee", { precision: 18, scale: 2 })
+    .default("0")
+    .notNull(),
   maxFee: decimal("max_fee", { precision: 18, scale: 2 }),
   currency: varchar("currency", { length: 8 }).default("NGN").notNull(),
   isActive: boolean("is_active").default(true).notNull(),
@@ -1672,15 +2264,23 @@ export const userPreferences = pgTable("user_preferences", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
   language: varchar("language", { length: 8 }).default("en").notNull(),
-  currencyDisplay: varchar("currency_display", { length: 8 }).default("NGN").notNull(),
+  currencyDisplay: varchar("currency_display", { length: 8 })
+    .default("NGN")
+    .notNull(),
   theme: varchar("theme", { length: 16 }).default("light").notNull(),
   notifyEmail: boolean("notify_email").default(true).notNull(),
   notifySms: boolean("notify_sms").default(false).notNull(),
   notifyPush: boolean("notify_push").default(true).notNull(),
   notifyInApp: boolean("notify_in_app").default(true).notNull(),
-  emailDigestFrequency: varchar("email_digest_frequency", { length: 16 }).default("daily").notNull(),
-  timezone: varchar("timezone", { length: 64 }).default("Africa/Lagos").notNull(),
-  dateFormat: varchar("date_format", { length: 32 }).default("DD/MM/YYYY").notNull(),
+  emailDigestFrequency: varchar("email_digest_frequency", { length: 16 })
+    .default("daily")
+    .notNull(),
+  timezone: varchar("timezone", { length: 64 })
+    .default("Africa/Lagos")
+    .notNull(),
+  dateFormat: varchar("date_format", { length: 32 })
+    .default("DD/MM/YYYY")
+    .notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -1713,8 +2313,12 @@ export const referrals = pgTable("referrals", {
   referredUserId: integer("referred_user_id"),
   referralCode: varchar("referral_code", { length: 32 }).notNull().unique(),
   status: varchar("status", { length: 32 }).default("pending").notNull(),
-  rewardAmount: decimal("reward_amount", { precision: 18, scale: 2 }).default("0").notNull(),
-  rewardCurrency: varchar("reward_currency", { length: 8 }).default("NGN").notNull(),
+  rewardAmount: decimal("reward_amount", { precision: 18, scale: 2 })
+    .default("0")
+    .notNull(),
+  rewardCurrency: varchar("reward_currency", { length: 8 })
+    .default("NGN")
+    .notNull(),
   rewardPaidAt: timestamp("reward_paid_at"),
   referredEmail: varchar("referred_email", { length: 256 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -1776,7 +2380,9 @@ export const webhookConfigurations = pgTable("webhook_configurations", {
   events: text("events").notNull(),
   maxRetries: integer("max_retries").default(5).notNull(),
   retryIntervalSeconds: integer("retry_interval_seconds").default(60).notNull(),
-  backoffMultiplier: decimal("backoff_multiplier", { precision: 3, scale: 1 }).default("2.0").notNull(),
+  backoffMultiplier: decimal("backoff_multiplier", { precision: 3, scale: 1 })
+    .default("2.0")
+    .notNull(),
   timeoutSeconds: integer("timeout_seconds").default(30).notNull(),
   isActive: boolean("is_active").default(true).notNull(),
   lastDeliveredAt: timestamp("last_delivered_at"),
@@ -1786,7 +2392,8 @@ export const webhookConfigurations = pgTable("webhook_configurations", {
 });
 
 export type WebhookConfiguration = typeof webhookConfigurations.$inferSelect;
-export type InsertWebhookConfiguration = typeof webhookConfigurations.$inferInsert;
+export type InsertWebhookConfiguration =
+  typeof webhookConfigurations.$inferInsert;
 
 /**
  * Audit Log Entries - Comprehensive audit trail
@@ -2011,12 +2618,21 @@ export const prefundAccounts = pgTable("prefund_accounts", {
   id: serial("id").primaryKey(),
   participantId: integer("participant_id").notNull(),
   accountRef: varchar("account_ref", { length: 128 }).notNull().unique(),
-  balance: decimal("balance", { precision: 20, scale: 2 }).default("0").notNull(),
+  balance: decimal("balance", { precision: 20, scale: 2 })
+    .default("0")
+    .notNull(),
   dailyLimit: decimal("daily_limit", { precision: 20, scale: 2 }).notNull(),
-  todayDeductions: decimal("today_deductions", { precision: 20, scale: 2 }).default("0").notNull(),
-  lowBalanceThreshold: decimal("low_balance_threshold", { precision: 20, scale: 2 }),
+  todayDeductions: decimal("today_deductions", { precision: 20, scale: 2 })
+    .default("0")
+    .notNull(),
+  lowBalanceThreshold: decimal("low_balance_threshold", {
+    precision: 20,
+    scale: 2,
+  }),
   settlementBank: varchar("settlement_bank", { length: 128 }),
-  accountFamily: varchar("account_family", { length: 64 }).default("fintech_prefund_ngn").notNull(),
+  accountFamily: varchar("account_family", { length: 64 })
+    .default("fintech_prefund_ngn")
+    .notNull(),
   lastTopUpAt: timestamp("last_top_up_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -2043,7 +2659,8 @@ export const complianceScreenings = pgTable("compliance_screenings", {
 });
 
 export type ComplianceScreening = typeof complianceScreenings.$inferSelect;
-export type InsertComplianceScreening = typeof complianceScreenings.$inferInsert;
+export type InsertComplianceScreening =
+  typeof complianceScreenings.$inferInsert;
 
 /**
  * Participant Billing - Monthly invoices and fee records
@@ -2052,10 +2669,19 @@ export const participantBilling = pgTable("participant_billing", {
   id: serial("id").primaryKey(),
   participantId: integer("participant_id").notNull(),
   billingPeriod: varchar("billing_period", { length: 16 }).notNull(),
-  subscriptionFee: decimal("subscription_fee", { precision: 16, scale: 2 }).notNull(),
-  transactionFees: decimal("transaction_fees", { precision: 16, scale: 2 }).default("0").notNull(),
-  corridorFees: decimal("corridor_fees", { precision: 16, scale: 2 }).default("0").notNull(),
-  fxRevenueShare: decimal("fx_revenue_share", { precision: 16, scale: 2 }).default("0").notNull(),
+  subscriptionFee: decimal("subscription_fee", {
+    precision: 16,
+    scale: 2,
+  }).notNull(),
+  transactionFees: decimal("transaction_fees", { precision: 16, scale: 2 })
+    .default("0")
+    .notNull(),
+  corridorFees: decimal("corridor_fees", { precision: 16, scale: 2 })
+    .default("0")
+    .notNull(),
+  fxRevenueShare: decimal("fx_revenue_share", { precision: 16, scale: 2 })
+    .default("0")
+    .notNull(),
   totalAmount: decimal("total_amount", { precision: 16, scale: 2 }).notNull(),
   status: varchar("status", { length: 32 }).default("pending").notNull(),
   invoiceRef: varchar("invoice_ref", { length: 64 }),
@@ -2070,18 +2696,80 @@ export type InsertParticipantBilling = typeof participantBilling.$inferInsert;
 // OUTBOUND REMITTANCE MODULE - Additional Tables
 // ============================================================
 
-export const disputeTypeEnum = pgEnum("dispute_type", ["failed_delivery", "wrong_amount", "duplicate_charge", "unauthorized", "other"]);
-export const outboundDisputeStatusEnum = pgEnum("outbound_dispute_status", ["open", "under_review", "resolved", "rejected", "escalated"]);
-export const disputePriorityEnum = pgEnum("dispute_priority", ["low", "medium", "high", "critical"]);
-export const fundingMethodEnum = pgEnum("funding_method", ["RTGS", "NIP", "Wire"]);
-export const fundingStatusEnum = pgEnum("funding_status", ["pending_approval", "approved", "completed", "rejected"]);
-export const tierUpgradeStatusEnum = pgEnum("tier_upgrade_status", ["pending_review", "approved", "rejected"]);
-export const approvalStatusEnum = pgEnum("approval_status_enum", ["pending", "approved", "rejected"]);
-export const enforcementTypeEnum = pgEnum("enforcement_type", ["suspension", "corridor_restriction", "limit_override", "compliance_directive", "license_revocation", "warning", "show_cause"]);
-export const enforcementStatusEnum = pgEnum("enforcement_status", ["active", "resolved", "expired", "pending_review"]);
-export const triggerOperatorEnum = pgEnum("trigger_operator", ["gt", "lt", "gte", "lte"]);
-export const triggerActionEnum = pgEnum("trigger_action", ["suspend", "restrict_corridors", "reduce_limit", "warning"]);
-export const webhookEventStatusEnum = pgEnum("webhook_event_status", ["pending", "delivered", "failed", "retrying"]);
+export const disputeTypeEnum = pgEnum("dispute_type", [
+  "failed_delivery",
+  "wrong_amount",
+  "duplicate_charge",
+  "unauthorized",
+  "other",
+]);
+export const outboundDisputeStatusEnum = pgEnum("outbound_dispute_status", [
+  "open",
+  "under_review",
+  "resolved",
+  "rejected",
+  "escalated",
+]);
+export const disputePriorityEnum = pgEnum("dispute_priority", [
+  "low",
+  "medium",
+  "high",
+  "critical",
+]);
+export const fundingMethodEnum = pgEnum("funding_method", [
+  "RTGS",
+  "NIP",
+  "Wire",
+]);
+export const fundingStatusEnum = pgEnum("funding_status", [
+  "pending_approval",
+  "approved",
+  "completed",
+  "rejected",
+]);
+export const tierUpgradeStatusEnum = pgEnum("tier_upgrade_status", [
+  "pending_review",
+  "approved",
+  "rejected",
+]);
+export const approvalStatusEnum = pgEnum("approval_status_enum", [
+  "pending",
+  "approved",
+  "rejected",
+]);
+export const enforcementTypeEnum = pgEnum("enforcement_type", [
+  "suspension",
+  "corridor_restriction",
+  "limit_override",
+  "compliance_directive",
+  "license_revocation",
+  "warning",
+  "show_cause",
+]);
+export const enforcementStatusEnum = pgEnum("enforcement_status", [
+  "active",
+  "resolved",
+  "expired",
+  "pending_review",
+]);
+export const triggerOperatorEnum = pgEnum("trigger_operator", [
+  "gt",
+  "lt",
+  "gte",
+  "lte",
+]);
+export const triggerActionEnum = pgEnum("trigger_action", [
+  "suspend",
+  "restrict_corridors",
+  "reduce_limit",
+  "warning",
+]);
+export const webhookEventStatusEnum = pgEnum("webhook_event_status", [
+  "pending",
+  "delivered",
+  "failed",
+  "retrying",
+]);
 
 /**
  * Outbound Disputes - Transfer dispute tracking
@@ -2135,7 +2823,10 @@ export const tierUpgrades = pgTable("tier_upgrades", {
   currentTier: varchar("current_tier", { length: 32 }).notNull(),
   requestedTier: varchar("requested_tier", { length: 32 }).notNull(),
   justification: text("justification").notNull(),
-  monthlyVolume: decimal("monthly_volume", { precision: 20, scale: 2 }).notNull(),
+  monthlyVolume: decimal("monthly_volume", {
+    precision: 20,
+    scale: 2,
+  }).notNull(),
   status: tierUpgradeStatusEnum("status").default("pending_review").notNull(),
   reviewedBy: integer("reviewed_by"),
   reviewedAt: timestamp("reviewed_at"),
@@ -2233,7 +2924,8 @@ export const outboundWebhookEvents = pgTable("outbound_webhook_events", {
 });
 
 export type OutboundWebhookEvent = typeof outboundWebhookEvents.$inferSelect;
-export type InsertOutboundWebhookEvent = typeof outboundWebhookEvents.$inferInsert;
+export type InsertOutboundWebhookEvent =
+  typeof outboundWebhookEvents.$inferInsert;
 
 /**
  * Transfer Lifecycle Events - Audit trail for transfer state transitions
@@ -2251,5 +2943,7 @@ export const transferLifecycleEvents = pgTable("transfer_lifecycle_events", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export type TransferLifecycleEvent = typeof transferLifecycleEvents.$inferSelect;
-export type InsertTransferLifecycleEvent = typeof transferLifecycleEvents.$inferInsert;
+export type TransferLifecycleEvent =
+  typeof transferLifecycleEvents.$inferSelect;
+export type InsertTransferLifecycleEvent =
+  typeof transferLifecycleEvents.$inferInsert;

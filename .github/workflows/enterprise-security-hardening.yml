@@ -1,0 +1,46 @@
+name: enterprise-security-hardening
+
+on:
+  pull_request:
+    paths:
+      - "deploy/edge/**"
+      - "deploy/identity/**"
+      - "deploy/redis/**"
+      - "security/opa/**"
+      - "scripts/assurance/check_enterprise_security_hardening.py"
+      - ".github/workflows/enterprise-security-hardening.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-hardening-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate enterprise hardening artifacts
+        run: |
+          python scripts/assurance/check_enterprise_security_hardening.py \
+            --repo-root . \
+            --output audit/artifacts/enterprise-security-hardening.json
+      - name: Validate YAML and shell syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          for path in list(Path('deploy').rglob('*.yaml')) + list(Path('deploy').rglob('*.yml')):
+              list(yaml.safe_load_all(path.read_text()))
+          PY
+          bash -n scripts/chaos/two-factor-redis-failover.sh
+          git diff --check
+      - name: Upload hardening report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enterprise-security-hardening-report
+          path: audit/artifacts/enterprise-security-hardening.json

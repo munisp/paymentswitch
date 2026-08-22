@@ -9,6 +9,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -51,26 +53,30 @@ type KafkaIntegrationConfig struct {
 
 // DefaultIntegrationConfig returns default configuration from environment
 func DefaultIntegrationConfig() *IntegrationConfig {
+	brokers := strings.Split(getEnv("KAFKA_BROKERS", ""), ",")
+	if len(brokers) == 1 && brokers[0] == "" {
+		brokers = nil
+	}
 	return &IntegrationConfig{
 		Keycloak: KeycloakIntegrationConfig{
-			BaseURL:      getEnv("KEYCLOAK_URL", "http://keycloak.payment-switch.svc.cluster.local:8080"),
+			BaseURL:      getEnv("KEYCLOAK_URL", ""),
 			Realm:        getEnv("KEYCLOAK_REALM", "payment-switch"),
-			AdminUser:    getEnv("KEYCLOAK_ADMIN_USER", "admin"),
-			AdminPass:    getEnv("KEYCLOAK_ADMIN_PASS", "admin"),
-			ClientID:     getEnv("KEYCLOAK_CLIENT_ID", "onboarding-service"),
+			AdminUser:    getEnv("KEYCLOAK_ADMIN_USER", ""),
+			AdminPass:    getEnv("KEYCLOAK_ADMIN_PASS", ""),
+			ClientID:     getEnv("KEYCLOAK_CLIENT_ID", ""),
 			ClientSecret: getEnv("KEYCLOAK_CLIENT_SECRET", ""),
 		},
 		APISIX: APISIXIntegrationConfig{
-			AdminURL: getEnv("APISIX_ADMIN_URL", "http://apisix-admin.payment-switch.svc.cluster.local:9180"),
-			AdminKey: getEnv("APISIX_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1"),
+			AdminURL: getEnv("APISIX_ADMIN_URL", ""),
+			AdminKey: getEnv("APISIX_ADMIN_KEY", ""),
 		},
 		TigerBeetle: TigerBeetleIntegrationConfig{
-			Host:      getEnv("TIGERBEETLE_HOST", "tigerbeetle.payment-switch.svc.cluster.local"),
-			Port:      3000,
-			ClusterID: 0,
+			Host:      getEnv("TIGERBEETLE_HOST", ""),
+			Port:      getEnvInt("TIGERBEETLE_PORT", 0),
+			ClusterID: getEnvUint64("TIGERBEETLE_CLUSTER_ID", 0),
 		},
 		Kafka: KafkaIntegrationConfig{
-			Brokers: []string{getEnv("KAFKA_BROKERS", "kafka.payment-switch.svc.cluster.local:9092")},
+			Brokers: brokers,
 			Topic:   getEnv("KAFKA_ONBOARDING_TOPIC", "onboarding.events"),
 		},
 	}
@@ -81,6 +87,22 @@ func getEnv(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+func getEnvInt(key string, defaultVal int) int {
+	value, err := strconv.Atoi(getEnv(key, ""))
+	if err != nil {
+		return defaultVal
+	}
+	return value
+}
+
+func getEnvUint64(key string, defaultVal uint64) uint64 {
+	value, err := strconv.ParseUint(getEnv(key, ""), 10, 64)
+	if err != nil {
+		return defaultVal
+	}
+	return value
 }
 
 // IntegrationManager manages all integrations

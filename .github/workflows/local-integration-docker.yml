@@ -1,0 +1,114 @@
+name: Local Integration Docker
+
+on:
+  pull_request:
+    paths:
+      - 'docker-compose.local-integration.yml'
+      - 'deploy/local-integration/**'
+      - 'scripts/check_local_integration_stack.py'
+      - 'scripts/test_local_temporal_tigerbeetle.py'
+      - 'scripts/run_local_integration.sh'
+      - 'scripts/local_temporal_ledger_workflow.py'
+      - 'scripts/run_local_temporal_ledger_workflow.py'
+  push:
+    branches: [main]
+    paths:
+      - 'docker-compose.local-integration.yml'
+      - 'deploy/local-integration/**'
+      - 'scripts/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-integration:
+    name: Compose integration tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      docker:
+        image: docker:27.5.1-dind
+        options: --privileged --health-cmd="docker info" --health-interval=5s --health-timeout=3s --health-retries=30
+        ports:
+          - 55432:55432
+          - 18080:18080
+          - 17233:17233
+          - 18088:18088
+          - 13000:13000
+          - 18000:18000
+          - 19090:19090
+          - 13001:13001
+          - 19115:19115
+        env:
+          DOCKER_TLS_CERTDIR: ""
+
+    container:
+      image: docker:27.5.1-cli
+      env:
+        DOCKER_HOST: tcp://docker:2375
+        DOCKER_TLS_CERTDIR: ""
+        COMPOSE_PROJECT_NAME: paymentswitch-ci
+        PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install test tooling
+        run: |
+          apk add --no-cache bash python3 py3-pip curl jq docker-cli-compose
+          python3 -m pip install --break-system-packages --no-cache-dir requests psycopg2-binary temporalio tigerbeetle PyYAML
+
+      - name: Prepare non-production environment
+        run: |
+          cp .env.local-integration.example .env.local-integration
+          sed -i \
+            -e 's/POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci-postgres-password/' \
+            -e 's/KEYCLOAK_DB_PASSWORD=.*/KEYCLOAK_DB_PASSWORD=ci-keycloak-db-password/' \
+            -e 's/KEYCLOAK_ADMIN_PASSWORD=.*/KEYCLOAK_ADMIN_PASSWORD=ci-keycloak-admin-password/' \
+            -e 's/TEMPORAL_DB_PASSWORD=.*/TEMPORAL_DB_PASSWORD=ci-temporal-db-password/' \
+            -e 's/GRAFANA_ADMIN_PASSWORD=.*/GRAFANA_ADMIN_PASSWORD=ci-grafana-password/' \
+            .env.local-integration
+          chmod 600 .env.local-integration
+
+      - name: Validate Compose configuration
+        run: docker compose --env-file .env.local-integration -f docker-compose.local-integration.yml config --quiet
+
+      - name: Start stack
+        run: docker compose --env-file .env.local-integration -f docker-compose.local-integration.yml up -d
+
+      - name: Wait for service health
+        run: |
+          for attempt in $(seq 1 60); do
+            if python3 scripts/check_local_integration_stack.py --attempts 1 --output audit/artifacts/ci-local-health-latest.json; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose --env-file .env.local-integration -f docker-compose.local-integration.yml ps
+          exit 1
+
+      - name: Run Temporal and TigerBeetle verification
+        run: python3 scripts/test_local_temporal_tigerbeetle.py --output audit/artifacts/ci-local-temporal-tigerbeetle.json
+
+      - name: Run multi-step ledger workflow
+        run: python3 scripts/run_local_temporal_ledger_workflow.py --output audit/artifacts/ci-local-multi-step-workflow.json
+
+      - name: Upload integration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-integration-evidence
+          if-no-files-found: warn
+          path: |
+            audit/artifacts/ci-local-*.json
+            audit/artifacts/ci-local-*.log
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: docker compose --env-file .env.local-integration -f docker-compose.local-integration.yml logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose --env-file .env.local-integration -f docker-compose.local-integration.yml down -v

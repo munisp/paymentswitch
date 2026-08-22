@@ -85,7 +85,8 @@ func main() {
 
 	// RBAC auth middleware — skips health endpoints
 	rbac := middleware.NewRBACMiddleware(&middleware.RBACConfig{
-		JWTSecret:          getEnv("JWT_SECRET", "payment-switch-secret"),
+					JWTSecret:          getEnv("JWT_SECRET", ""),
+
 		JWTIssuer:          getEnv("JWT_ISSUER", "payment-switch"),
 		SkipPaths:          []string{"/health", "/smoke-test"},
 		EnableAuditLogging: true,

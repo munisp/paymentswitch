@@ -1,0 +1,102 @@
+name: two-factor-redis-sentinel-chaos
+
+on:
+  pull_request:
+    paths:
+      - "server/security/redisSentinelManager.ts"
+      - "server/services/twoFactorService.ts"
+      - "server/routers/twoFactorRouter.ts"
+      - "server/security/twoFactorReservation.integration.test.ts"
+      - "scripts/chaos/two-factor-redis-failover.sh"
+      - ".github/workflows/two-factor-redis-sentinel-chaos.yml"
+  workflow_dispatch:
+
+jobs:
+  sentinel-chaos:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      NODE_ENV: test
+      TWO_FACTOR_REDIS_REQUIRED: "true"
+      REDIS_SENTINEL_URLS: redis://127.0.0.1:26379,redis://127.0.0.1:26380,redis://127.0.0.1:26381
+      REDIS_SENTINEL_MASTER: mymaster
+      REDIS_TLS: "false"
+      REDIS_CIRCUIT_FAILURE_THRESHOLD: "2"
+      REDIS_CIRCUIT_COOLDOWN_MS: "3000"
+      REDIS_CONNECT_TIMEOUT_MS: "1000"
+      RUN_2FA_RESERVATION_INTEGRATION: "true"
+      TWO_FACTOR_TEST_USER_ID: "920001"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start Redis master, replica, and Sentinel quorum
+        run: |
+          docker network create paymentswitch-redis-chaos
+          docker run -d --name redis-master --network paymentswitch-redis-chaos -p 6379:6379 redis:7.4-alpine redis-server --port 6379 --appendonly yes --protected-mode no
+          docker run -d --name redis-replica --network paymentswitch-redis-chaos -p 6380:6379 redis:7.4-alpine sh -c 'sleep 3; exec redis-server --port 6379 --replicaof redis-master 6379 --protected-mode no'
+          for port in 26379 26380 26381; do
+            docker run -d --name sentinel-$port --network paymentswitch-redis-chaos -p $port:26379 redis:7.4-alpine sh -c "printf '%s\\n' 'port 26379' 'sentinel monitor mymaster redis-master 6379 2' 'sentinel down-after-milliseconds mymaster 1000' 'sentinel failover-timeout mymaster 5000' 'sentinel parallel-syncs mymaster 1' 'sentinel announce-ip 127.0.0.1' 'sentinel announce-port $port' > /tmp/sentinel.conf && exec redis-server /tmp/sentinel.conf --sentinel"
+          done
+          echo "127.0.0.1 redis-master" | sudo tee -a /etc/hosts
+          for i in {1..30}; do
+            redis-cli -p 26379 SENTINEL get-master-addr-by-name mymaster && break
+            sleep 1
+          done
+
+      - name: Run atomic high-parallelism reservation test
+        run: pnpm exec vitest run server/security/twoFactorReservation.integration.test.ts --reporter=verbose
+
+      - name: Verify baseline Sentinel manager connectivity
+        run: |
+          redis-cli -p 26379 PING
+          redis-cli -p 26379 SENTINEL master mymaster
+
+      - name: Force Sentinel failover during active 2FA reservations
+        env:
+          ALLOW_CHAOS: "true"
+          ENVIRONMENT: staging
+          REDIS_FAILOVER_COMMAND: "redis-cli -p 26379 SENTINEL failover mymaster"
+          VERIFY_BEFORE_COMMAND: "pnpm exec vitest run server/security/twoFactorReservation.integration.test.ts --reporter=verbose"
+          VERIFY_DURING_COMMAND: "redis-cli -p 26379 SENTINEL get-master-addr-by-name mymaster && pnpm exec vitest run server/security/twoFactorReservation.integration.test.ts --reporter=verbose"
+          VERIFY_AFTER_COMMAND: "for i in {1..30}; do redis-cli -p 26379 SENTINEL get-master-addr-by-name mymaster && break; sleep 1; done; pnpm exec vitest run server/security/twoFactorReservation.integration.test.ts --reporter=verbose"
+        run: ./scripts/chaos/two-factor-redis-failover.sh
+
+      - name: Dump Redis and Sentinel diagnostics
+        if: always()
+        run: |
+          for c in redis-master redis-replica sentinel-26379 sentinel-26380 sentinel-26381; do
+            docker logs "$c" > "${c}.log" 2>&1 || true
+          done
+          redis-cli -p 26379 SENTINEL master mymaster > sentinel-master.txt || true
+
+      - name: Upload chaos diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: two-factor-redis-sentinel-chaos-diagnostics
+          path: |
+            redis-master.log
+            redis-replica.log
+            sentinel-26379.log
+            sentinel-26380.log
+            sentinel-26381.log
+            sentinel-master.txt
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f redis-master redis-replica sentinel-26379 sentinel-26380 sentinel-26381 || true
+          docker network rm paymentswitch-redis-chaos || true

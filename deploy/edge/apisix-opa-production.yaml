@@ -1,0 +1,154 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apisix-opa-authz-plugin
+  namespace: paymentswitch
+  labels:
+    app.kubernetes.io/name: apisix
+    app.kubernetes.io/component: authorization
+    security.paymentswitch.io/managed: "true"
+data:
+  plugin.yaml: |
+    name: forward-auth
+    version: paymentswitch-opa-authz-v1
+    uri: http://127.0.0.1:9444/authorize
+    request_method: GET
+    timeout_ms: 2000
+    fail_closed: true
+    deny_status: 403
+    dependency_failure_status: 503
+    request_headers:
+      - X-Userinfo
+      - X-Tenant-ID
+      - Idempotency-Key
+      - Traceparent
+      - Tracestate
+      - X-Request-ID
+    upstream_headers:
+      - X-Authorization-Decision-ID
+      - Traceparent
+      - Tracestate
+      - X-Request-ID
+    client_headers:
+      - X-Authorization-Decision-ID
+      - Traceparent
+      - X-Request-ID
+    identity:
+      source: verified_openid_connect_x_userinfo
+      reject_client_identity_headers: true
+      subject_claim: sub
+      tenant_claim: tenant_id
+      roles_claim: realm_access.roles
+      mfa_claim: acr_or_amr
+    opa:
+      endpoint: https://opa-authz.paymentswitch.svc.cluster.local:8443/v1/data/paymentswitch/authz/allow
+      verify_tls: true
+      require_client_certificate: true
+      ca_secret: opa-authz-server-tls
+      client_certificate_secret: apisix-opa-client
+    audit:
+      include_decision_id: true
+      redact_headers:
+        - authorization
+        - cookie
+        - x-api-key
+        - x-amz-signature
+        - x-amz-credential
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: apisix-production-route-policy
+  namespace: paymentswitch
+data:
+  routes.yaml: |
+    routes:
+      - id: payments-api
+        uri: /api/v1/payments*
+        methods: [GET, POST, PUT, DELETE]
+        authorization:
+          action_by_method:
+            GET: read
+            POST: write
+            PUT: write
+            DELETE: revoke
+          resource_type: payment
+          opa_required: true
+          permify_required: true
+          fail_closed: true
+      - id: payments-privileged-api
+        uri: /api/v1/admin/payments*
+        methods: [GET, POST, PUT, DELETE]
+        authorization:
+          action_by_method:
+            GET: read
+            POST: approve_payment
+            PUT: release_hold
+            DELETE: revoke
+          resource_type: payment
+          require_mfa: true
+          opa_required: true
+          permify_required: true
+          fail_closed: true
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: apisix-to-opa-authz
+  namespace: paymentswitch
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: apisix
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: paymentswitch
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opa-authz
+      ports:
+        - protocol: TCP
+          port: 8443
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opa-authz
+  namespace: paymentswitch
+  labels:
+    app.kubernetes.io/name: opa-authz
+    app.kubernetes.io/component: authorization
+spec:
+  ports:
+    - name: https
+      port: 8443
+      targetPort: 8443
+  selector:
+    app.kubernetes.io/name: opa-authz
+---
+# APISIX declarative route fragment. Load through the approved APISIX
+# configuration pipeline; do not expose the admin API publicly.
+# The `opa-authz-sidecar` image must be pinned by digest. APISIX first verifies
+# OIDC, then forward-auth calls the loopback-only sidecar. The sidecar calls OPA
+# over mTLS and returns 200 only when OPA returns result=true.
+#
+# plugins:
+#   openid-connect:
+#     bearer_only: true
+#     ssl_verify: true
+#     discovery: https://keycloak.example.com/realms/paymentswitch/.well-known/openid-configuration
+#     client_id: paymentswitch-api
+#   forward-auth:
+#     uri: http://127.0.0.1:9444/authorize
+#     request_method: GET
+#     request_headers: [X-Userinfo, X-Tenant-ID, Idempotency-Key, Traceparent, Tracestate, X-Request-ID]
+#     upstream_headers: [X-Authorization-Decision-ID, Traceparent, Tracestate, X-Request-ID]
+#     client_headers: [X-Authorization-Decision-ID, Traceparent, X-Request-ID]
+#   limit-req:
+#     rate: 100
+#     burst: 200
+#     rejected_code: 429
+#     key: remote_addr

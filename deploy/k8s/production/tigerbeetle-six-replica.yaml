@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tigerbeetle
+  namespace: payment-switch
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/component: ledger
+    app.kubernetes.io/part-of: payment-switch
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: tigerbeetle
+  ports:
+    - name: client
+      port: 3000
+      targetPort: client
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tigerbeetle
+  namespace: payment-switch
+spec:
+  minAvailable: 4
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tigerbeetle
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tigerbeetle
+  namespace: payment-switch
+  labels:
+    app.kubernetes.io/name: tigerbeetle
+    app.kubernetes.io/component: ledger
+    app.kubernetes.io/part-of: payment-switch
+spec:
+  serviceName: tigerbeetle
+  replicas: 6
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tigerbeetle
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tigerbeetle
+        app.kubernetes.io/component: ledger
+    spec:
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: tigerbeetle
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: tigerbeetle
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: tigerbeetle
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: tigerbeetle
+          image: ghcr.io/tigerbeetle/tigerbeetle:0.16.30
+          imagePullPolicy: IfNotPresent
+          command: ["tigerbeetle"]
+          args:
+            - start
+            - --addresses=$(TB_ADDRESSES)
+            - /var/lib/tigerbeetle/$(TB_CLUSTER_ID)_$(TB_REPLICA_INDEX).tigerbeetle
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: true
+          env:
+            - name: TB_CLUSTER_ID
+              value: "1"
+            - name: TB_REPLICA_COUNT
+              value: "6"
+            - name: TB_REPLICA_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+            - name: TB_ADDRESSES
+              value: "tigerbeetle-0.tigerbeetle.payment-switch.svc.cluster.local:3000,tigerbeetle-1.tigerbeetle.payment-switch.svc.cluster.local:3000,tigerbeetle-2.tigerbeetle.payment-switch.svc.cluster.local:3000,tigerbeetle-3.tigerbeetle.payment-switch.svc.cluster.local:3000,tigerbeetle-4.tigerbeetle.payment-switch.svc.cluster.local:3000,tigerbeetle-5.tigerbeetle.payment-switch.svc.cluster.local:3000"
+          ports:
+            - name: client
+              containerPort: 3000
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: client
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          livenessProbe:
+            tcpSocket:
+              port: client
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/tigerbeetle
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 250Gi
+        storageClassName: fast-ssd

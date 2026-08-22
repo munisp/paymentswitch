@@ -6,7 +6,10 @@
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../_core/trpc";
 import { getDb } from "../db";
-import { ocrCorrectionPatterns, ocrCorrectionSettings } from "../../drizzle/schema";
+import {
+  ocrCorrectionPatterns,
+  ocrCorrectionSettings,
+} from "../../drizzle/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import {
   generateCorrectionPatterns,
@@ -22,9 +25,11 @@ export const correctionRouter = router({
    * Apply corrections to OCR results
    */
   applyCorrections: protectedProcedure
-    .input(z.object({
-      fields: z.record(z.string(), z.string()),
-    }))
+    .input(
+      z.object({
+        fields: z.record(z.string(), z.string()),
+      })
+    )
     .mutation(async ({ input }) => {
       const result = await applyCorrections(input.fields);
       return result;
@@ -34,10 +39,12 @@ export const correctionRouter = router({
    * Record whether a correction was accepted or rejected by the user
    */
   recordFeedback: protectedProcedure
-    .input(z.object({
-      patternId: z.number(),
-      wasAccepted: z.boolean(),
-    }))
+    .input(
+      z.object({
+        patternId: z.number(),
+        wasAccepted: z.boolean(),
+      })
+    )
     .mutation(async ({ input }) => {
       await recordCorrectionFeedback(input.patternId, input.wasAccepted);
       return { success: true };
@@ -47,9 +54,11 @@ export const correctionRouter = router({
    * Trigger pattern generation from feedback (admin only)
    */
   generatePatterns: adminProcedure
-    .input(z.object({
-      minOccurrences: z.number().min(1).max(100).default(3),
-    }))
+    .input(
+      z.object({
+        minOccurrences: z.number().min(1).max(100).default(3),
+      })
+    )
     .mutation(async ({ input }) => {
       const count = await generateCorrectionPatterns(input.minOccurrences);
       return {
@@ -62,10 +71,12 @@ export const correctionRouter = router({
    * Get all correction patterns (admin only)
    */
   listPatterns: adminProcedure
-    .input(z.object({
-      status: z.enum(["active", "pending", "disabled"]).optional(),
-      fieldName: z.string().optional(),
-    }))
+    .input(
+      z.object({
+        status: z.enum(["active", "pending", "disabled"]).optional(),
+        fieldName: z.string().optional(),
+      })
+    )
     .query(async ({ input }) => {
       const db = await getDb();
       if (!db) {
@@ -114,12 +125,14 @@ export const correctionRouter = router({
    * Create manual correction pattern (admin only)
    */
   createPattern: adminProcedure
-    .input(z.object({
-      fieldName: z.string(),
-      incorrectPattern: z.string(),
-      correctPattern: z.string(),
-      patternType: z.enum(["exact", "regex", "fuzzy"]).default("exact"),
-    }))
+    .input(
+      z.object({
+        fieldName: z.string(),
+        incorrectPattern: z.string(),
+        correctPattern: z.string(),
+        patternType: z.enum(["exact", "regex", "fuzzy"]).default("exact"),
+      })
+    )
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) {
@@ -144,10 +157,12 @@ export const correctionRouter = router({
    * Update pattern status (admin only)
    */
   updatePatternStatus: adminProcedure
-    .input(z.object({
-      id: z.number(),
-      status: z.enum(["active", "pending", "disabled"]),
-    }))
+    .input(
+      z.object({
+        id: z.number(),
+        status: z.enum(["active", "pending", "disabled"]),
+      })
+    )
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) {
@@ -166,9 +181,11 @@ export const correctionRouter = router({
    * Delete correction pattern (admin only)
    */
   deletePattern: adminProcedure
-    .input(z.object({
-      id: z.number(),
-    }))
+    .input(
+      z.object({
+        id: z.number(),
+      })
+    )
     .mutation(async ({ input }) => {
       const db = await getDb();
       if (!db) {
@@ -198,15 +215,19 @@ export const correctionRouter = router({
         sql`${ocrCorrectionSettings.settingKey} IN ('global_min_confidence', 'suggestion_threshold', 'auto_apply_enabled')`
       );
 
-    const settingsMap = settings.reduce((acc, setting) => {
-      if (setting.settingKey) acc[setting.settingKey] = setting.settingValue ?? '';
-      return acc;
-    }, {} as Record<string, string>);
+    const settingsMap = settings.reduce(
+      (acc, setting) => {
+        if (setting.settingKey)
+          acc[setting.settingKey] = setting.settingValue ?? "";
+        return acc;
+      },
+      {} as Record<string, string>
+    );
 
     return {
-      globalMinConfidence: parseInt(settingsMap.global_min_confidence || '80'),
-      suggestionThreshold: parseInt(settingsMap.suggestion_threshold || '50'),
-      autoApplyEnabled: settingsMap.auto_apply_enabled === 'true',
+      globalMinConfidence: parseInt(settingsMap.global_min_confidence || "80"),
+      suggestionThreshold: parseInt(settingsMap.suggestion_threshold || "50"),
+      autoApplyEnabled: settingsMap.auto_apply_enabled === "true",
     };
   }),
 
@@ -214,11 +235,13 @@ export const correctionRouter = router({
    * Update correction settings (admin only)
    */
   updateSettings: adminProcedure
-    .input(z.object({
-      globalMinConfidence: z.number().min(0).max(100).optional(),
-      suggestionThreshold: z.number().min(0).max(100).optional(),
-      autoApplyEnabled: z.boolean().optional(),
-    }))
+    .input(
+      z.object({
+        globalMinConfidence: z.number().min(0).max(100).optional(),
+        suggestionThreshold: z.number().min(0).max(100).optional(),
+        autoApplyEnabled: z.boolean().optional(),
+      })
+    )
     .mutation(async ({ input, ctx }) => {
       const db = await getDb();
       if (!db) {
@@ -229,21 +252,21 @@ export const correctionRouter = router({
 
       if (input.globalMinConfidence !== undefined) {
         updates.push({
-          settingKey: 'global_min_confidence',
+          settingKey: "global_min_confidence",
           settingValue: input.globalMinConfidence.toString(),
         });
       }
 
       if (input.suggestionThreshold !== undefined) {
         updates.push({
-          settingKey: 'suggestion_threshold',
+          settingKey: "suggestion_threshold",
           settingValue: input.suggestionThreshold.toString(),
         });
       }
 
       if (input.autoApplyEnabled !== undefined) {
         updates.push({
-          settingKey: 'auto_apply_enabled',
+          settingKey: "auto_apply_enabled",
           settingValue: input.autoApplyEnabled.toString(),
         });
       }
@@ -252,7 +275,7 @@ export const correctionRouter = router({
         const existing = await db
           .select()
           .from(ocrCorrectionSettings)
-          .where(eq(ocrCorrectionSettings.settingKey, update.settingKey ?? ''))
+          .where(eq(ocrCorrectionSettings.settingKey, update.settingKey ?? ""))
           .limit(1);
         if (existing.length > 0) {
           await db
@@ -264,12 +287,79 @@ export const correctionRouter = router({
             .where(eq(ocrCorrectionSettings.id, existing[0].id));
         } else {
           await db.insert(ocrCorrectionSettings).values({
-            fieldName: update.settingKey ?? 'unknown',
+            fieldName: update.settingKey ?? "unknown",
             ...update,
           });
         }
       }
 
       return { success: true };
+    }),
+
+  /**
+   * Get field-specific correction threshold overrides (admin only).
+   */
+  getFieldOverrides: adminProcedure
+    .input(
+      z
+        .object({
+          fieldNames: z.array(z.string().min(1).max(100)).max(500).optional(),
+        })
+        .optional()
+    )
+    .query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database not available");
+
+      const rows = await db
+        .select()
+        .from(ocrCorrectionSettings)
+        .orderBy(desc(ocrCorrectionSettings.updatedAt));
+
+      const requested = input?.fieldNames ? new Set(input.fieldNames) : null;
+      return rows.filter(row => !requested || requested.has(row.fieldName));
+    }),
+
+  /**
+   * Create or update one field-specific correction threshold override (admin only).
+   */
+  setFieldOverride: adminProcedure
+    .input(
+      z.object({
+        fieldName: z.string().trim().min(1).max(100),
+        minConfidenceThreshold: z.number().int().min(0).max(100),
+        autoCorrectEnabled: z.boolean().optional(),
+        requireReview: z.boolean().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new Error("Database not available");
+
+      const [row] = await db
+        .insert(ocrCorrectionSettings)
+        .values({
+          fieldName: input.fieldName,
+          minConfidenceThreshold: input.minConfidenceThreshold,
+          autoCorrectEnabled: input.autoCorrectEnabled ?? true,
+          requireReview: input.requireReview ?? false,
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: ocrCorrectionSettings.fieldName,
+          set: {
+            minConfidenceThreshold: input.minConfidenceThreshold,
+            ...(input.autoCorrectEnabled === undefined
+              ? {}
+              : { autoCorrectEnabled: input.autoCorrectEnabled }),
+            ...(input.requireReview === undefined
+              ? {}
+              : { requireReview: input.requireReview }),
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
+
+      return row;
     }),
 });

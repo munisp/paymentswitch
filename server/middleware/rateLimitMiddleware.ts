@@ -1,9 +1,12 @@
-import rateLimit from 'express-rate-limit';
-import { Request, Response } from 'express';
+import rateLimit from "express-rate-limit";
+import { Request, Response } from "express";
+import { eq } from "drizzle-orm";
+import { getDb } from "../db";
+import { apiCredentials } from "../../drizzle/schema";
 
 /**
  * Rate Limiting Middleware
- * 
+ *
  * Protects API endpoints from abuse by limiting the number of requests
  * per IP address or API key within a time window.
  */
@@ -16,16 +19,16 @@ export const generalRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per windowMs
   message: {
-    error: 'Too many requests from this IP, please try again later.',
-    retryAfter: '15 minutes',
+    error: "Too many requests from this IP, please try again later.",
+    retryAfter: "15 minutes",
   },
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   validate: false,
   // Skip rate limiting for certain IPs (e.g., internal services)
   skip: (req: Request) => {
-    const allowedIPs = process.env.RATE_LIMIT_WHITELIST?.split(',') || [];
-    return allowedIPs.includes(req.ip || '');
+    const allowedIPs = process.env.RATE_LIMIT_WHITELIST?.split(",") || [];
+    return allowedIPs.includes(req.ip || "");
   },
 });
 
@@ -37,8 +40,9 @@ export const strictRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // Limit each IP to 10 requests per windowMs
   message: {
-    error: 'Too many requests to this sensitive endpoint, please try again later.',
-    retryAfter: '15 minutes',
+    error:
+      "Too many requests to this sensitive endpoint, please try again later.",
+    retryAfter: "15 minutes",
   },
   standardHeaders: true,
   legacyHeaders: false,
@@ -52,8 +56,8 @@ export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5, // Limit each IP to 5 requests per windowMs
   message: {
-    error: 'Too many authentication attempts, please try again later.',
-    retryAfter: '15 minutes',
+    error: "Too many authentication attempts, please try again later.",
+    retryAfter: "15 minutes",
   },
   standardHeaders: true,
   legacyHeaders: false,
@@ -68,8 +72,8 @@ export const exportRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 20, // Limit each IP to 20 exports per hour
   message: {
-    error: 'Too many export requests, please try again later.',
-    retryAfter: '1 hour',
+    error: "Too many export requests, please try again later.",
+    retryAfter: "1 hour",
   },
   standardHeaders: true,
   legacyHeaders: false,
@@ -83,8 +87,8 @@ export const webhookRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 1000, // Limit to 1000 webhooks per minute
   message: {
-    error: 'Webhook rate limit exceeded, please slow down.',
-    retryAfter: '1 minute',
+    error: "Webhook rate limit exceeded, please slow down.",
+    retryAfter: "1 minute",
   },
   standardHeaders: true,
   legacyHeaders: false,
@@ -98,8 +102,8 @@ export const cryptoPaymentRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 50, // Limit each IP to 50 requests per windowMs
   message: {
-    error: 'Too many payment requests, please try again later.',
-    retryAfter: '15 minutes',
+    error: "Too many payment requests, please try again later.",
+    retryAfter: "15 minutes",
   },
   standardHeaders: true,
   legacyHeaders: false,
@@ -113,8 +117,8 @@ export const exchangeRateRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 300, // Limit each IP to 300 requests per windowMs
   message: {
-    error: 'Too many rate queries, please try again later.',
-    retryAfter: '15 minutes',
+    error: "Too many rate queries, please try again later.",
+    retryAfter: "15 minutes",
   },
   standardHeaders: true,
   legacyHeaders: false,
@@ -138,37 +142,51 @@ export function createApiKeyRateLimiter(options: ApiKeyRateLimitOptions) {
   return rateLimit({
     windowMs: options.windowMs,
     max: async (req: Request) => {
-      // Get API key from header
-      const apiKey = req.headers['x-api-key'] as string;
-      
-      if (!apiKey) {
+      const apiKey = req.headers["x-api-key"] as string | undefined;
+      if (!apiKey) return options.maxRequests.free;
+
+      const db = await getDb();
+      if (!db) {
+        if (process.env.NODE_ENV === "production") {
+          throw new Error("API-key rate limiting requires a database");
+        }
         return options.maxRequests.free;
       }
 
-      // In production, fetch tier from database
-      // For now, return based on key prefix
-      if (apiKey.startsWith('ent_')) {
-        return options.maxRequests.enterprise;
-      } else if (apiKey.startsWith('prm_')) {
-        return options.maxRequests.premium;
-      } else if (apiKey.startsWith('bsc_')) {
-        return options.maxRequests.basic;
+      const [credential] = await db
+        .select({
+          tier: apiCredentials.rateLimitTier,
+          active: apiCredentials.isActive,
+          expiresAt: apiCredentials.expiresAt,
+        })
+        .from(apiCredentials)
+        .where(eq(apiCredentials.apiKey, apiKey))
+        .limit(1);
+
+      if (
+        !credential?.active ||
+        (credential.expiresAt && credential.expiresAt <= new Date())
+      ) {
+        throw new Error("API key is inactive, expired, or unknown");
       }
-      
-      return options.maxRequests.free;
+
+      const tier =
+        credential.tier as keyof ApiKeyRateLimitOptions["maxRequests"];
+      return options.maxRequests[tier] ?? options.maxRequests.free;
     },
     keyGenerator: (req: Request) => {
       // Use API key as the rate limit key instead of IP
-      const apiKey = req.headers['x-api-key'] as string;
+      const apiKey = req.headers["x-api-key"] as string;
       if (apiKey) return apiKey;
-      const ip = req.ip || 'unknown';
+      const ip = req.ip || "unknown";
       // Normalize IPv6-mapped IPv4 addresses
-      return ip.startsWith('::ffff:') ? ip.slice(7) : ip;
+      return ip.startsWith("::ffff:") ? ip.slice(7) : ip;
     },
     validate: false,
     message: {
-      error: 'API key rate limit exceeded. Upgrade your plan for higher limits.',
-      retryAfter: 'varies by plan',
+      error:
+        "API key rate limit exceeded. Upgrade your plan for higher limits.",
+      retryAfter: "varies by plan",
     },
     standardHeaders: true,
     legacyHeaders: false,
@@ -182,9 +200,9 @@ export function createApiKeyRateLimiter(options: ApiKeyRateLimitOptions) {
 export const tieredApiRateLimiter = createApiKeyRateLimiter({
   windowMs: 60 * 60 * 1000, // 1 hour
   maxRequests: {
-    free: 100,       // 100 requests per hour
-    basic: 1000,     // 1,000 requests per hour
-    premium: 10000,  // 10,000 requests per hour
+    free: 100, // 100 requests per hour
+    basic: 1000, // 1,000 requests per hour
+    premium: 10000, // 10,000 requests per hour
     enterprise: 100000, // 100,000 requests per hour
   },
 });
@@ -192,15 +210,20 @@ export const tieredApiRateLimiter = createApiKeyRateLimiter({
 /**
  * Rate limit error handler
  */
-export function rateLimitErrorHandler(err: any, req: Request, res: Response, next: any) {
+export function rateLimitErrorHandler(
+  err: any,
+  req: Request,
+  res: Response,
+  next: any
+) {
   if (err.status === 429) {
     res.status(429).json({
-      error: 'Rate limit exceeded',
+      error: "Rate limit exceeded",
       message: err.message,
-      retryAfter: res.getHeader('Retry-After'),
-      limit: res.getHeader('RateLimit-Limit'),
-      remaining: res.getHeader('RateLimit-Remaining'),
-      reset: res.getHeader('RateLimit-Reset'),
+      retryAfter: res.getHeader("Retry-After"),
+      limit: res.getHeader("RateLimit-Limit"),
+      remaining: res.getHeader("RateLimit-Remaining"),
+      reset: res.getHeader("RateLimit-Reset"),
     });
   } else {
     next(err);
@@ -216,10 +239,12 @@ export function getRateLimitStatus(req: Request): {
   remaining: number;
   reset: Date;
 } {
-  const limit = parseInt(req.res?.getHeader('RateLimit-Limit') as string) || 0;
-  const remaining = parseInt(req.res?.getHeader('RateLimit-Remaining') as string) || 0;
-  const resetTimestamp = parseInt(req.res?.getHeader('RateLimit-Reset') as string) || 0;
-  
+  const limit = parseInt(req.res?.getHeader("RateLimit-Limit") as string) || 0;
+  const remaining =
+    parseInt(req.res?.getHeader("RateLimit-Remaining") as string) || 0;
+  const resetTimestamp =
+    parseInt(req.res?.getHeader("RateLimit-Reset") as string) || 0;
+
   return {
     limit,
     remaining,

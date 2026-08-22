@@ -1,0 +1,36 @@
+apiVersion: openappsec.io/v1beta1
+kind: AppSecPolicy
+metadata:
+  name: paymentswitch-production
+  namespace: paymentswitch
+spec:
+  mode: prevent
+  failOpen: false
+  learningMode: false
+  logLevel: info
+  protections:
+    - name: paymentswitch-api
+      paths:
+        - /api/*
+      methods: [GET, POST, PUT, PATCH, DELETE]
+      maxBodyBytes: 5242880
+      requestRatePerMinute: 6000
+      blockMalformedHeaders: true
+      blockPathTraversal: true
+      blockSqlInjection: true
+      blockXss: true
+      blockCommandInjection: true
+      redactLogs:
+        - authorization
+        - cookie
+        - password
+        - secret
+        - token
+        - email
+        - phone
+        - x-amz-signature
+  exclusions: []
+  audit:
+    enabled: true
+    includeRequestBody: false
+    retentionDays: 90

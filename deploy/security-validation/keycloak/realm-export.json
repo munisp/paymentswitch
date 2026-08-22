@@ -1,0 +1,28 @@
+{
+  "realm": "paymentswitch",
+  "enabled": true,
+  "registrationAllowed": false,
+  "verifyEmail": false,
+  "bruteForceProtected": true,
+  "defaultSignatureAlgorithm": "RS256",
+  "clients": [
+    {
+      "clientId": "paymentswitch-api",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": true,
+      "protocol": "openid-connect",
+      "attributes": {"access.token.claim": "true"},
+      "protocolMappers": [
+        {"name":"audience","protocol":"openid-connect","protocolMapper":"oidc-audience-mapper","config":{"included.client.audience":"paymentswitch-api","access.token.claim":"true","id.token.claim":"false"}},
+        {"name":"tenant_id","protocol":"openid-connect","protocolMapper":"oidc-usermodel-attribute-mapper","config":{"user.attribute":"tenant_id","claim.name":"tenant_id","jsonType.label":"String","access.token.claim":"true","id.token.claim":"true"}}
+      ]
+    }
+  ],
+  "roles": {"realm": [{"name":"merchant"},{"name":"operations"},{"name":"security"},{"name":"admin"}]},
+  "users": [
+    {"username":"tenant-a-user","enabled":true,"email":"tenant-a-user@example.test","emailVerified":true,"attributes":{"tenant_id":["tenant-a-test"]},"credentials":[{"type":"password","value":"LocalOnly-ChangeMe-123!","temporary":true}],"realmRoles":["merchant"]},
+    {"username":"tenant-b-user","enabled":true,"email":"tenant-b-user@example.test","emailVerified":true,"attributes":{"tenant_id":["tenant-b-test"]},"credentials":[{"type":"password","value":"LocalOnly-ChangeMe-456!","temporary":true}],"realmRoles":["merchant"]}
+  ]
+}

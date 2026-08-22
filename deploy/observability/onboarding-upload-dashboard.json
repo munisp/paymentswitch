@@ -1,0 +1,21 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {"type":"stat","title":"Abandoned multipart uploads","gridPos":{"h":5,"w":6,"x":0,"y":0},"targets":[{"expr":"paymentswitch_multipart_uploads_abandoned","legendFormat":"abandoned"}],"fieldConfig":{"defaults":{"thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"red","value":1}]}}}},
+    {"type":"stat","title":"Active multipart uploads","gridPos":{"h":5,"w":6,"x":6,"y":0},"targets":[{"expr":"paymentswitch_multipart_uploads_active","legendFormat":"active"}]},
+    {"type":"stat","title":"Draft conflicts / 10m","gridPos":{"h":5,"w":6,"x":12,"y":0},"targets":[{"expr":"increase(paymentswitch_onboarding_draft_conflicts_total[10m])","legendFormat":"conflicts"}],"fieldConfig":{"defaults":{"thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"yellow","value":1},{"color":"red","value":5}]}}}},
+    {"type":"gauge","title":"Multipart completion ratio","gridPos":{"h":5,"w":6,"x":18,"y":0},"targets":[{"expr":"sum(rate(paymentswitch_multipart_uploads_completed_total[15m])) / clamp_min(sum(rate(paymentswitch_multipart_uploads_started_total[15m])), 0.001)","legendFormat":"completion"}],"fieldConfig":{"defaults":{"unit":"percentunit","min":0,"max":1,"thresholds":{"mode":"absolute","steps":[{"color":"red","value":0},{"color":"yellow","value":0.9},{"color":"green","value":0.98}]}}}},
+    {"type":"timeseries","title":"Multipart lifecycle rate","gridPos":{"h":8,"w":12,"x":0,"y":5},"targets":[{"expr":"rate(paymentswitch_multipart_uploads_started_total[5m])","legendFormat":"started"},{"expr":"rate(paymentswitch_multipart_uploads_completed_total[5m])","legendFormat":"completed"},{"expr":"rate(paymentswitch_multipart_uploads_aborted_total[5m])","legendFormat":"aborted"}]},
+    {"type":"timeseries","title":"Draft save and conflict rate","gridPos":{"h":8,"w":12,"x":12,"y":5},"targets":[{"expr":"rate(paymentswitch_onboarding_draft_saves_total[5m])","legendFormat":"saves"},{"expr":"rate(paymentswitch_onboarding_draft_conflicts_total[5m])","legendFormat":"conflicts"}]},
+    {"type":"table","title":"Multipart expiry backlog","gridPos":{"h":7,"w":24,"x":0,"y":13},"targets":[{"expr":"paymentswitch_multipart_uploads_abandoned","legendFormat":"expired sessions"}],"fieldConfig":{"defaults":{"unit":"short"}}}
+  ],
+  "schemaVersion": 39,
+  "tags": ["paymentswitch","onboarding","uploads"],
+  "templating": {"list": []},
+  "time": {"from":"now-6h","to":"now"},
+  "title": "Paymentswitch Onboarding Uploads and Draft Conflicts",
+  "uid": "paymentswitch-onboarding-uploads",
+  "version": 1
+}

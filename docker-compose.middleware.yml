@@ -144,7 +144,7 @@ services:
     ports:
       - "6432:6432"
     environment:
-      DATABASE_URL: postgres://ndsep_user:ndsep_secure_2026@postgres:5432/ndsep_db
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER must be set}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}
       POOL_MODE: transaction
       MAX_CLIENT_CONN: 2000
       DEFAULT_POOL_SIZE: 50
@@ -170,9 +170,9 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: ndsep_user
-      POSTGRES_PASSWORD: ndsep_secure_2026
-      POSTGRES_DB: ndsep_db
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
       # (#15) Logical replication
       POSTGRES_INITDB_ARGS: "--data-checksums"
     command: >
@@ -219,7 +219,7 @@ services:
       discovery.type: single-node
       DISABLE_SECURITY_PLUGIN: "false"
       OPENSEARCH_JAVA_OPTS: "-Xms1g -Xmx1g"
-      OPENSEARCH_INITIAL_ADMIN_PASSWORD: "PaymentSwitch@2026!"
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_INITIAL_ADMIN_PASSWORD:?OPENSEARCH_INITIAL_ADMIN_PASSWORD must be set}
       # (#44) ILM settings
       plugins.index_state_management.enabled: "true"
       plugins.index_state_management.history.enabled: "true"
@@ -237,7 +237,7 @@ services:
     volumes:
       - opensearch_data:/usr/share/opensearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -sk https://localhost:9200/_cluster/health -u admin:PaymentSwitch@2026! | grep -q 'green\\|yellow' || curl -s http://localhost:9200/_cluster/health | grep -q 'green\\|yellow'"]
+      test: ["CMD-SHELL", "curl -sk https://localhost:9200/_cluster/health -u admin:$${OPENSEARCH_INITIAL_ADMIN_PASSWORD} | grep -q 'green\\|yellow' || curl -s http://localhost:9200/_cluster/health | grep -q 'green\\|yellow'"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -250,7 +250,7 @@ services:
     environment:
       OPENSEARCH_HOSTS: '["https://opensearch:9200"]'
       OPENSEARCH_USERNAME: admin
-      OPENSEARCH_PASSWORD: "PaymentSwitch@2026!"
+      OPENSEARCH_PASSWORD: ${OPENSEARCH_INITIAL_ADMIN_PASSWORD:?OPENSEARCH_INITIAL_ADMIN_PASSWORD must be set}
     depends_on:
       opensearch:
         condition: service_healthy
@@ -264,8 +264,8 @@ services:
     environment:
       DB: postgresql
       DB_PORT: 5432
-      POSTGRES_USER: ndsep_user
-      POSTGRES_PWD: ndsep_secure_2026
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_SEEDS: postgres
       DYNAMIC_CONFIG_FILE_PATH: /etc/temporal/dynamic_config.yaml
       ENABLE_ES: true
@@ -296,10 +296,10 @@ services:
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/ndsep_db
-      KC_DB_USERNAME: ndsep_user
-      KC_DB_PASSWORD: ndsep_secure_2026
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB_USERNAME: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:?KEYCLOAK_ADMIN must be set}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD must be set}
       # (#38) Brute force detection
       KC_FEATURES: "token-exchange,admin-fine-grained-authz,step-up-authentication"
     command: start-dev
@@ -411,7 +411,7 @@ services:
     volumes:
       - tigerbeetle_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "echo 'health check' | nc -w 1 localhost 3000 || exit 0"]
+      test: ["CMD-SHELL", "nc -z -w 1 localhost 3000 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -426,7 +426,7 @@ services:
     command: serve
     environment:
       PERMIFY_DATABASE_ENGINE: postgres
-      PERMIFY_DATABASE_URI: "postgres://ndsep_user:ndsep_secure_2026@postgres:5432/ndsep_db"
+      PERMIFY_DATABASE_URI: "postgresql://${POSTGRES_USER:?POSTGRES_USER must be set}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}"
       PERMIFY_LOG_LEVEL: info
       PERMIFY_AUTHN_ENABLED: "true"
     depends_on:
@@ -462,7 +462,7 @@ services:
     ports:
       - "4001:3001"
     environment:
-      CLED_DATABASE_URI: "postgres://ndsep_user:ndsep_secure_2026@postgres:5432/ndsep_db"
+      CLED_DATABASE_URI: "postgresql://${POSTGRES_USER:?POSTGRES_USER must be set}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}"
       CLED_KAFKA__PRODUCER__BROKER_LIST: kafka:29092
     depends_on:
       postgres:
@@ -476,7 +476,7 @@ services:
     ports:
       - "4002:4002"
     environment:
-      ALS_DATABASE_URI: "postgres://ndsep_user:ndsep_secure_2026@postgres:5432/ndsep_db"
+      ALS_DATABASE_URI: "postgresql://${POSTGRES_USER:?POSTGRES_USER must be set}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -499,8 +499,8 @@ services:
       - "9001:9001"
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set}
     volumes:
       - minio_data:/data
     healthcheck:
@@ -518,11 +518,11 @@ services:
       - "8090:8000"
     environment:
       REDIS_URL: redis://redis:6379/0
-      LAKEHOUSE_READ_MODEL_URL: postgresql://ndsep_user:ndsep_secure_2026@postgres:5432/ndsep_db
+      LAKEHOUSE_READ_MODEL_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER must be set}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}
       DELTA_BASE_PATH: s3a://lakehouse/delta
       S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: minioadmin
-      S3_SECRET_KEY: minioadmin
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set}
     depends_on:
       redis:
         condition: service_healthy
@@ -576,7 +576,7 @@ services:
       - "7474:7474"
       - "7687:7687"
     environment:
-      NEO4J_AUTH: neo4j/payment_switch_2026
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?NEO4J_PASSWORD must be set}
       NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
       NEO4J_dbms_memory_heap_initial__size: "512m"
       NEO4J_dbms_memory_heap_max__size: "2G"
@@ -605,8 +605,8 @@ services:
       FALKORDB_PORT: 6379
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USER: neo4j
-      NEO4J_PASSWORD: payment_switch_2026
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/payment_switch
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:?NEO4J_PASSWORD must be set}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER must be set}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}
       REDIS_URL: redis://redis:6379/0
       OPENSEARCH_URL: https://opensearch:9200
       KAFKA_BROKERS: kafka:29092

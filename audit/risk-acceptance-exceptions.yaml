@@ -1,0 +1,34 @@
+version: 1
+policy: temporary-risk-acceptance
+status: pending-approval
+owner: security-owner
+proposed_on: '2026-08-16'
+expires_on: '2026-09-15'
+max_duration_days: 30
+exceptions:
+  - id: RA-LODASH-ES-2026-08
+    package: lodash-es
+    advisory: GHSA-r5fr-rjxr-66jc
+    severity: high
+    patched_floor: '4.18.0'
+    compensating_controls:
+      - no-untrusted-template-compilation
+      - dependency-lockfile-frozen
+      - scheduled-pnpm-audit
+      - rollback-artifact-retained
+  - id: RA-PATH-TO-REGEXP-2026-08
+    package: path-to-regexp
+    advisory: GHSA-37ch-88jc-xwx2
+    severity: high
+    patched_floor: '0.1.13'
+    compensating_controls:
+      - static-route-patterns
+      - gateway-rate-limits
+      - request-size-limits
+      - circuit-breaker-enabled
+      - scheduled-pnpm-audit
+approval:
+  security_owner: null
+  product_owner: null
+  engineering_owner: null
+  approved_on: null

@@ -1,0 +1,65 @@
+# Apply this overlay through the approved APISIX declarative configuration pipeline.
+# Secrets are injected by External Secrets; no admin token is stored here.
+services:
+  - name: paymentswitch-api
+    upstream:
+      type: roundrobin
+      nodes:
+        paymentswitch-api.paymentswitch.svc.cluster.local:3000: 1
+    plugins:
+      request-id: {}
+      limit-req:
+        rate: 100
+        burst: 200
+        rejected_code: 429
+        key: remote_addr
+      limit-conn:
+        conn: 100
+        burst: 50
+        default_conn_delay: 0.1
+      openid-connect:
+        bearer_only: true
+        ssl_verify: true
+        discovery: https://keycloak.example.com/realms/paymentswitch/.well-known/openid-configuration
+        client_id: paymentswitch-api
+        client_secret: $ENV://KEYCLOAK_APISIX_CLIENT_SECRET
+        set_userinfo_header: true
+        set_id_token_header: false
+        set_access_token_header: false
+        required_scopes:
+          - paymentswitch
+      forward-auth:
+        uri: http://127.0.0.1:9444/authorize
+        request_method: GET
+        request_headers:
+          - X-Userinfo
+          - X-Tenant-ID
+          - Idempotency-Key
+          - Traceparent
+          - Tracestate
+          - X-Request-ID
+        upstream_headers:
+          - X-Authorization-Decision-ID
+          - Traceparent
+          - Tracestate
+          - X-Request-ID
+        client_headers:
+          - X-Authorization-Decision-ID
+          - Traceparent
+          - X-Request-ID
+      openappsec:
+        mode: prevent
+        fail_closed: true
+      proxy-rewrite:
+        headers:
+          remove:
+            - X-Dev-Role
+            - X-Forwarded-User
+            - X-Forwarded-Roles
+            - X-User-ID
+            - X-User-Tenant
+            - X-User-Roles
+            - X-MFA
+# Never expose the APISIX admin listener through Caddy, a LoadBalancer,
+# NodePort, or a public ingress. Restrict it to the deployment namespace and
+# security-operations network through NetworkPolicy and mTLS.

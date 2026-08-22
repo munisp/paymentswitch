@@ -1,0 +1,165 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Expired backlog",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "paymentswitch_multipart_uploads_abandoned",
+          "legendFormat": "expired"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Cleanup abort throughput / min",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(paymentswitch_multipart_uploads_aborted_total[5m])) * 60",
+          "legendFormat": "aborts/min"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Cleanup failures / 15m",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "increase(paymentswitch_multipart_cleanup_failures_total[15m])",
+          "legendFormat": "failures"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Active uploads",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "expr": "paymentswitch_multipart_uploads_active",
+          "legendFormat": "active"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Session lifecycle throughput",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "targets": [
+        {
+          "expr": "sum(rate(paymentswitch_multipart_uploads_started_total[5m]))",
+          "legendFormat": "started/s"
+        },
+        {
+          "expr": "sum(rate(paymentswitch_multipart_uploads_completed_total[5m]))",
+          "legendFormat": "completed/s"
+        },
+        {
+          "expr": "sum(rate(paymentswitch_multipart_uploads_aborted_total[5m]))",
+          "legendFormat": "aborted/s"
+        },
+        {
+          "expr": "sum(rate(paymentswitch_multipart_cleanup_failures_total[5m]))",
+          "legendFormat": "cleanup failures/s"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Cleanup worker throughput",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "targets": [
+        {
+          "expr": "sum(rate(paymentswitch_multipart_cleanup_claimed_total[5m]))",
+          "legendFormat": "claimed/s"
+        },
+        {
+          "expr": "sum(rate(paymentswitch_multipart_cleanup_aborted_total[5m]))",
+          "legendFormat": "aborted/s"
+        },
+        {
+          "expr": "sum(rate(paymentswitch_multipart_cleanup_retries_total[5m]))",
+          "legendFormat": "retries/s"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Upload age and backlog",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "targets": [
+        {
+          "expr": "paymentswitch_multipart_uploads_abandoned",
+          "legendFormat": "expired backlog"
+        },
+        {
+          "expr": "paymentswitch_multipart_uploads_active",
+          "legendFormat": "active"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Draft conflict rate",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "targets": [
+        {
+          "expr": "sum(rate(paymentswitch_onboarding_draft_conflicts_total[5m]))",
+          "legendFormat": "conflicts/s"
+        },
+        {
+          "expr": "sum(rate(paymentswitch_onboarding_draft_saves_total[5m]))",
+          "legendFormat": "saves/s"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Cleanup error rate by reason",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 21 },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(paymentswitch_multipart_cleanup_failures_total[15m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["paymentswitch", "multipart", "cleanup", "onboarding"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "Paymentswitch Multipart Session Lifecycle and Cleanup Throughput",
+  "uid": "paymentswitch-multipart-lifecycle",
+  "version": 1
+}

@@ -50,10 +50,11 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 		Environment: getEnvOrDefault("ENVIRONMENT", "development"),
 	}
 
-	// Load TigerBeetle config
-	config.TigerBeetle = TigerBeetleConfig{
-		Addresses:    strings.Split(getEnvOrDefault("TIGERBEETLE_ADDRESSES", "tigerbeetle:3000"), ","),
-		ClusterID:    getEnvAsUint64("TIGERBEETLE_CLUSTER_ID", 0),
+		// Load TigerBeetle config. Development keeps a lightweight default; staging and
+		// production are validated below and must provide explicit cluster identity.
+		config.TigerBeetle = TigerBeetleConfig{
+			Addresses:    strings.Split(getEnvOrDefault("TIGERBEETLE_ADDRESSES", "tigerbeetle:3000"), ","),
+			ClusterID:    getEnvAsUint64("TIGERBEETLE_CLUSTER_ID", 0),
 		ReadTimeout:  getEnvAsDuration("TIGERBEETLE_READ_TIMEOUT", 30*time.Second),
 		WriteTimeout: getEnvAsDuration("TIGERBEETLE_WRITE_TIMEOUT", 30*time.Second),
 		RetryCount:   getEnvAsInt("TIGERBEETLE_RETRY_COUNT", 3),
@@ -122,13 +123,32 @@ func (c *ProductionConfig) Validate() error {
 	}
 
 	// Production-specific validations
-	if c.Environment == "production" {
-		// TigerBeetle validation
-		if c.Features.EnableTigerBeetle && !c.Features.SimulatedMode {
-			if len(c.TigerBeetle.Addresses) == 0 {
-				errors = append(errors, "TIGERBEETLE_ADDRESSES is required in production")
+		if c.Environment == "production" || c.Environment == "staging" {
+			// TigerBeetle validation. Defaults are intentionally not acceptable for
+			// deployed environments: a wrong endpoint can make a service look ready
+			// while all ledger writes fail at runtime.
+			if c.Features.EnableTigerBeetle && !c.Features.SimulatedMode {
+				if strings.TrimSpace(os.Getenv("TIGERBEETLE_ADDRESSES")) == "" {
+					errors = append(errors, "TIGERBEETLE_ADDRESSES must be explicitly configured in staging/production")
+				}
+				if strings.TrimSpace(os.Getenv("TIGERBEETLE_CLUSTER_ID")) == "" {
+					errors = append(errors, "TIGERBEETLE_CLUSTER_ID must be explicitly configured in staging/production")
+				}
+				if len(c.TigerBeetle.Addresses) == 0 {
+					errors = append(errors, "TIGERBEETLE_ADDRESSES must contain at least one address")
+				}
+				for _, address := range c.TigerBeetle.Addresses {
+					parts := strings.Split(strings.TrimSpace(address), ":")
+					if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
+						errors = append(errors, fmt.Sprintf("invalid TigerBeetle address %q; expected host:port", address))
+						continue
+					}
+					port, parseErr := strconv.Atoi(parts[1])
+					if parseErr != nil || port < 1 || port > 65535 {
+						errors = append(errors, fmt.Sprintf("invalid TigerBeetle port in address %q", address))
+					}
+				}
 			}
-		}
 
 		// Keycloak validation
 		if c.Features.EnableKeycloak && !c.Features.SimulatedMode {
