@@ -23,6 +23,7 @@ pub mod identifier;
 pub mod identifier_postgres;
 pub mod persistence;
 pub mod postings;
+pub mod rtgs_outbound;
 pub mod settlement;
 
 pub use accounts::{AccountFamily, AccountId, ParticipantAccounts};
@@ -31,6 +32,7 @@ pub use fx_pricing::{CorridorConfig, CorridorFxEngine, CorridorQuote};
 pub use identifier::{account_v2_id, transfer_v2_id, CollisionQuarantineHandler, Identifier128, IdentifierError, IdentifierHttpError, IdentifierKind, IdentifierRecord, IdentifierStore, ReservationOutcome, IDENTIFIER_VERSION_V2};
 pub use identifier_postgres::{IdentifierEntity, PostgresIdentifierStore};
 pub use postings::{PostingEngine, PostingResult, TransferBatch, TransferCommand};
+pub use rtgs_outbound::{RTGSConfig, RTGSEngine as RealTimeGrossSettlementEngine, RTGSError, RTGSStatus, RTGSTransfer, SettlementPriority};
 pub use settlement::{
     NettingSavings, ParticipantPosition, SettlementPostingBatch, SettlementPostingEngine,
 };

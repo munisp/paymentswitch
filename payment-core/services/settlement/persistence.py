@@ -56,9 +56,15 @@ async def _ensure_schema(pool: Pool):
                 total_transactions INT NOT NULL DEFAULT 0,
                 total_amount    NUMERIC(20,4) NOT NULL DEFAULT 0,
                 settlement_model TEXT NOT NULL DEFAULT 'DEFERRED',
+                settlement_reference TEXT,
+                finality_certificate JSONB,
+                settled_at TIMESTAMPTZ,
                 created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
+            ALTER TABLE settlement_windows ADD COLUMN IF NOT EXISTS settlement_reference TEXT;
+            ALTER TABLE settlement_windows ADD COLUMN IF NOT EXISTS finality_certificate JSONB;
+            ALTER TABLE settlement_windows ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
             CREATE INDEX IF NOT EXISTS idx_sw_status ON settlement_windows(status);
 
             CREATE TABLE IF NOT EXISTS participant_positions (
@@ -126,6 +132,25 @@ async def update_window_status(window_id: str, status: str, end_time: Optional[d
                 """UPDATE settlement_windows SET status=$2, updated_at=NOW() WHERE window_id=$1""",
                 window_id, status,
             )
+
+
+async def finalize_window(window_id: str, total_amount: Decimal, settlement_reference: str, finality_certificate: Dict):
+    """Atomically mark a processing window settled only with durable rail finality evidence."""
+    if not settlement_reference or not finality_certificate:
+        raise ValueError("settlement reference and finality certificate are required")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE settlement_windows
+               SET status='SETTLED', total_amount=$2, settlement_reference=$3,
+                   finality_certificate=$4, settled_at=NOW(), updated_at=NOW()
+               WHERE window_id=$1 AND status='PROCESSING'
+               RETURNING *""",
+            window_id, total_amount, settlement_reference, finality_certificate,
+        )
+        if row is None:
+            raise RuntimeError("settlement window is not in PROCESSING state")
+        return dict(row)
 
 
 # --- Participant Positions ---

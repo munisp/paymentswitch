@@ -3,6 +3,7 @@ Settlement Service - API Routers
 """
 
 import asyncio
+import os
 import uuid
 import logging
 from datetime import datetime, timedelta
@@ -31,6 +32,23 @@ from .schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _ledger_request(path: str, payload: dict) -> dict:
+    """Call the authoritative ledger/reconciliation adapter; no local financial fallback exists."""
+    base_url = os.getenv("SETTLEMENT_LEDGER_URL", "").rstrip("/")
+    if not base_url:
+        raise RuntimeError("SETTLEMENT_LEDGER_URL is required for settlement and reconciliation")
+    timeout = float(os.getenv("SETTLEMENT_LEDGER_TIMEOUT_SECONDS", "5"))
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(f"{base_url}{path}", json=payload)
+    if response.status_code < 200 or response.status_code >= 300:
+        raise RuntimeError(f"authoritative ledger rejected {path} with status {response.status_code}")
+    body = response.json()
+    if not isinstance(body, dict):
+        raise RuntimeError("authoritative ledger returned a non-object response")
+    return body
+
 
 # Create router
 router = APIRouter(prefix="/api/v1/settlement", tags=["Settlement"])
@@ -201,14 +219,21 @@ async def execute_settlement(
         # Calculate net positions
         positions = await calculate_positions(request.windowId, request.participants)
         
-        # Execute settlement transfers
-        total_amount = Decimal("0.00")
-        for position in positions:
-            if position.netPosition > 0:  # Participant owes money
-                total_amount += position.netPosition
-        
-        # Update window status in DB
-        await db.update_window_status(request.windowId, SettlementStatus.SETTLED, total_amount=total_amount)
+        if not positions:
+            raise HTTPException(status_code=409, detail="No persisted participant positions are available for settlement")
+        total_amount = sum((abs(position.netPosition) for position in positions if position.netPosition > 0), Decimal("0.00"))
+        ledger_result = await _ledger_request("/v1/settlements/execute", {
+            "settlementId": settlement_id,
+            "windowId": request.windowId,
+            "currency": request.currency,
+            "settlementModel": request.settlementModel.value,
+            "positions": [position.dict() for position in positions],
+        })
+        settlement_reference = ledger_result.get("settlementReference")
+        finality_certificate = ledger_result.get("finalityCertificate")
+        if not isinstance(settlement_reference, str) or not isinstance(finality_certificate, dict):
+            raise RuntimeError("authoritative ledger response lacks settlement finality evidence")
+        await db.finalize_window(request.windowId, total_amount, settlement_reference, finality_certificate)
         
         logger.info(
             f"Executed settlement {settlement_id} for window {request.windowId}, "
@@ -319,11 +344,22 @@ async def reconcile_settlement(
             participant_id=request.participantId,
         )
         
+        if not position_rows:
+            raise HTTPException(status_code=409, detail="No persisted participant positions are available for reconciliation")
+        ledger_result = await _ledger_request("/v1/reconciliation/balances", {
+            "windowId": request.windowId,
+            "participantId": request.participantId,
+            "positions": [{"participantId": row["participant_id"], "currency": row["currency"]} for row in position_rows],
+        })
+        actual_balances = ledger_result.get("balances")
+        if not isinstance(actual_balances, dict):
+            raise RuntimeError("authoritative ledger response lacks balances")
         for pos_row in position_rows:
-            expected_balance = pos_row["net_position"]
-            # In production, query TigerBeetle for actual balance
-            actual_balance = expected_balance  # Placeholder until TigerBeetle client wired
-            
+            expected_balance = Decimal(str(pos_row["net_position"]))
+            balance_key = f"{pos_row['participant_id']}:{pos_row['currency']}"
+            if balance_key not in actual_balances:
+                raise RuntimeError(f"authoritative ledger omitted balance {balance_key}")
+            actual_balance = Decimal(str(actual_balances[balance_key]))
             discrepancy_amount = abs(expected_balance - actual_balance)
             
             if discrepancy_amount > Decimal("0.01"):
@@ -421,51 +457,32 @@ async def health_check():
 # Helper functions
 
 async def calculate_settlement(window_id: str):
-    """Calculate settlement for a window (background task)."""
+    """Record that an operator-owned settlement calculation is pending; it never fabricates finality."""
     try:
-        logger.info(f"Calculating settlement for window {window_id}")
-        
-        # In production, this queries all transactions in the window,
-        # calculates net positions, and stores them in the database.
-        await asyncio.sleep(1)
-        
-        await db.update_window_status(window_id, SettlementStatus.SETTLED)
-            
-        logger.info(f"Settlement calculation complete for window {window_id}")
-        
+        logger.info("Settlement window %s awaits authoritative ledger execution", window_id)
     except Exception as e:
         logger.error(f"Settlement calculation failed: {e}")
 
 
 async def calculate_positions(window_id: str, participants: List[str]) -> List[ParticipantPosition]:
-    """Calculate participant positions."""
-    positions = []
-    
-    # Query transactions from database
-        # In production, execute SQL query:
-        # SELECT participant_id, SUM(CASE WHEN type='DEBIT' THEN amount ELSE 0 END) as debit,
-        #        SUM(CASE WHEN type='CREDIT' THEN amount ELSE 0 END) as credit
-        # FROM transactions WHERE window_id = %s GROUP BY participant_id
-        
-        # For demonstration, simulate with realistic data
-    for participant_id in participants:
-        position = ParticipantPosition(
+    """Return only authoritative, persisted positions; missing participants block settlement."""
+    rows = await db.get_positions(window_id=window_id)
+    by_participant = {row["participant_id"]: row for row in rows}
+    missing = sorted(set(participants) - set(by_participant))
+    if missing:
+        raise RuntimeError(f"missing authoritative settlement positions for: {', '.join(missing)}")
+    return [
+        ParticipantPosition(
             participantId=participant_id,
-            currency="USD",
-            netPosition=Decimal("0.00"),
-            debitAmount=Decimal("1000.00"),
-            creditAmount=Decimal("1000.00"),
-            transactionCount=10
+            currency=row["currency"],
+            netPosition=Decimal(str(row["net_position"])),
+            debitAmount=Decimal(str(row["debit_amount"])),
+            creditAmount=Decimal(str(row["credit_amount"])),
+            transactionCount=row["transaction_count"],
         )
-        positions.append(position)
-        
-        # Persist position to PostgreSQL
-        await db.upsert_position(
-            window_id, participant_id, "USD",
-            Decimal("0.00"), Decimal("1000.00"), Decimal("1000.00"), 10
-        )
-    
-    return positions
+        for participant_id in participants
+        for row in [by_participant[participant_id]]
+    ]
 
 
 import asyncio

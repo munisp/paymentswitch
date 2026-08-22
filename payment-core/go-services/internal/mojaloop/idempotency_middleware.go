@@ -54,18 +54,10 @@ func (m *IdempotencyMiddleware) Wrap(operation string, next http.HandlerFunc) ht
 		}
 
 		// Get idempotency key from header
-		idempotencyKey := r.Header.Get(IdempotencyHeader)
+		idempotencyKey := strings.TrimSpace(r.Header.Get(IdempotencyHeader))
 		if idempotencyKey == "" {
-			// Generate one from request body hash if not provided
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, "Failed to read request body", http.StatusBadRequest)
-				return
-			}
-			r.Body = io.NopCloser(bytes.NewReader(body))
-
-			hash := sha256.Sum256(body)
-			idempotencyKey = hex.EncodeToString(hash[:16])
+			http.Error(w, "Idempotency-Key is required for money-moving requests", http.StatusBadRequest)
+			return
 		}
 
 		// Compute request hash for duplicate detection
@@ -79,13 +71,22 @@ func (m *IdempotencyMiddleware) Wrap(operation string, next http.HandlerFunc) ht
 		result, err := m.store.CheckIdempotencyKey(ctx, idempotencyKey)
 		if err != nil {
 			log.Printf("Idempotency check failed: %v", err)
-			// Continue without idempotency on store errors
-			next(w, r)
+			http.Error(w, "Idempotency store unavailable", http.StatusServiceUnavailable)
 			return
 		}
 
 		if result.Found {
+			if result.ReconciliationRequired {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				json.NewEncoder(w).Encode(map[string]string{
+					"error": "Payment outcome is pending mandatory reconciliation",
+					"code":  "IDEMPOTENCY_RECONCILIATION_REQUIRED",
+				})
+				return
+			}
 			if result.InProgress {
+
 				// Request is still being processed
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusConflict)
@@ -110,8 +111,13 @@ func (m *IdempotencyMiddleware) Wrap(operation string, next http.HandlerFunc) ht
 			// Return cached response
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Idempotency-Replayed", "true")
-			w.WriteHeader(http.StatusOK)
+			statusCode := result.ResponseStatus
+			if statusCode == 0 {
+				statusCode = http.StatusOK
+			}
+			w.WriteHeader(statusCode)
 			w.Write(result.Response)
+
 			return
 		}
 
@@ -129,6 +135,8 @@ func (m *IdempotencyMiddleware) Wrap(operation string, next http.HandlerFunc) ht
 				return
 			}
 			log.Printf("Failed to save idempotency key: %v", err)
+			http.Error(w, "Idempotency reservation unavailable", http.StatusServiceUnavailable)
+			return
 		}
 
 		// Record the response
@@ -142,14 +150,24 @@ func (m *IdempotencyMiddleware) Wrap(operation string, next http.HandlerFunc) ht
 
 		// Save the response if successful
 		if recorder.statusCode >= 200 && recorder.statusCode < 300 {
-			err = m.store.CompleteIdempotencyKey(ctx, idempotencyKey, recorder.body.Bytes())
+			err = m.store.CompleteIdempotencyKey(ctx, idempotencyKey, recorder.body.Bytes(), recorder.statusCode)
 			if err != nil {
 				log.Printf("Failed to complete idempotency key: %v", err)
 			}
+		} else if recorder.statusCode >= 400 && recorder.statusCode < 500 {
+			// A deterministic business rejection is replayed with the original response.
+			err = m.store.RejectIdempotencyKey(ctx, idempotencyKey, recorder.body.Bytes(), recorder.statusCode)
+			if err != nil {
+				log.Printf("Failed to record idempotency rejection: %v", err)
+			}
 		} else {
-			// Remove failed idempotency key so it can be retried
-			m.store.FailIdempotencyKey(ctx, idempotencyKey)
+			// A 5xx may have occurred after an external debit; never free the key for a replay.
+			err = m.store.MarkIdempotencyReconciliationRequired(ctx, idempotencyKey, recorder.body.Bytes(), recorder.statusCode)
+			if err != nil {
+				log.Printf("Failed to quarantine ambiguous idempotency key: %v", err)
+			}
 		}
+
 	}
 }
 

@@ -136,7 +136,8 @@ func (s *TransferStore) initSchema() error {
 		operation VARCHAR(32) NOT NULL,
 		request_hash VARCHAR(64) NOT NULL,
 		response JSONB,
-		status VARCHAR(20) NOT NULL,
+		response_status INTEGER,
+		status VARCHAR(32) NOT NULL CHECK (status IN ('in_progress', 'completed', 'rejected', 'reconciliation_required')),
 		created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 		expires_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() + INTERVAL '24 hours'
 	);
@@ -376,24 +377,27 @@ func (s *TransferStore) GetParticipant(ctx context.Context, fspID string) (uint6
 
 // IdempotencyResult represents the result of an idempotency check
 type IdempotencyResult struct {
-	Found       bool
-	InProgress  bool
-	Response    []byte
-	RequestHash string
+	Found                  bool
+	InProgress             bool
+	ReconciliationRequired bool
+	Response               []byte
+	ResponseStatus         int
+	RequestHash            string
 }
 
 // CheckIdempotencyKey checks if an operation has already been performed
 func (s *TransferStore) CheckIdempotencyKey(ctx context.Context, key string) (*IdempotencyResult, error) {
 	query := `
-		SELECT request_hash, response, status
+		SELECT request_hash, response, status, COALESCE(response_status, 0)
 		FROM idempotency_keys
 		WHERE idempotency_key = $1 AND expires_at > NOW()
 	`
 
 	var requestHash, status string
 	var response []byte
+	var responseStatus int
 
-	err := s.db.QueryRowContext(ctx, query, key).Scan(&requestHash, &response, &status)
+	err := s.db.QueryRowContext(ctx, query, key).Scan(&requestHash, &response, &status, &responseStatus)
 	if err == sql.ErrNoRows {
 		return &IdempotencyResult{Found: false}, nil
 	}
@@ -402,10 +406,12 @@ func (s *TransferStore) CheckIdempotencyKey(ctx context.Context, key string) (*I
 	}
 
 	return &IdempotencyResult{
-		Found:       true,
-		InProgress:  status == "in_progress",
-		Response:    response,
-		RequestHash: requestHash,
+		Found:                  true,
+		InProgress:             status == "in_progress",
+		ReconciliationRequired: status == "reconciliation_required",
+		Response:               response,
+		ResponseStatus:         responseStatus,
+		RequestHash:            requestHash,
 	}, nil
 }
 
@@ -430,23 +436,68 @@ func (s *TransferStore) SaveIdempotencyKey(ctx context.Context, key, operation, 
 	return nil
 }
 
-// CompleteIdempotencyKey marks an idempotency key as completed with response
-func (s *TransferStore) CompleteIdempotencyKey(ctx context.Context, key string, response []byte) error {
+// CompleteIdempotencyKey records a durable successful response for exact replay.
+func (s *TransferStore) CompleteIdempotencyKey(ctx context.Context, key string, response []byte, responseStatus int) error {
 	query := `
 		UPDATE idempotency_keys
-		SET status = 'completed', response = $2
-		WHERE idempotency_key = $1
+		SET status = 'completed', response = $2, response_status = $3
+		WHERE idempotency_key = $1 AND status = 'in_progress'
 	`
-
-	_, err := s.db.ExecContext(ctx, query, key, response)
-	return err
+	result, err := s.db.ExecContext(ctx, query, key, response, responseStatus)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("idempotency key is not in progress")
+	}
+	return nil
 }
 
-// FailIdempotencyKey marks an idempotency key as failed
-func (s *TransferStore) FailIdempotencyKey(ctx context.Context, key string) error {
-	query := `DELETE FROM idempotency_keys WHERE idempotency_key = $1`
-	_, err := s.db.ExecContext(ctx, query, key)
-	return err
+// RejectIdempotencyKey persists deterministic client/business rejections for exact replay.
+func (s *TransferStore) RejectIdempotencyKey(ctx context.Context, key string, response []byte, responseStatus int) error {
+	query := `
+		UPDATE idempotency_keys
+		SET status = 'rejected', response = $2, response_status = $3
+		WHERE idempotency_key = $1 AND status = 'in_progress'
+	`
+	result, err := s.db.ExecContext(ctx, query, key, response, responseStatus)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("idempotency key is not in progress")
+	}
+	return nil
+}
+
+// MarkIdempotencyReconciliationRequired retains ambiguous server outcomes.
+// It deliberately never deletes the reservation, preventing a second debit on retry.
+func (s *TransferStore) MarkIdempotencyReconciliationRequired(ctx context.Context, key string, response []byte, responseStatus int) error {
+	query := `
+		UPDATE idempotency_keys
+		SET status = 'reconciliation_required', response = $2, response_status = $3
+		WHERE idempotency_key = $1 AND status = 'in_progress'
+	`
+	result, err := s.db.ExecContext(ctx, query, key, response, responseStatus)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("idempotency key is not in progress")
+	}
+	return nil
 }
 
 // SaveOutboxEvent saves an event to the outbox for reliable publishing
