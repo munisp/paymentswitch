@@ -86,7 +86,9 @@ jobs:
     name: Live cross-store partition recovery
     needs: verify-payment-contracts
     if: vars.RUN_LIVE_CROSS_STORE_RECOVERY == 'true'
-    runs-on: ubuntu-latest
+    # This runner must be inside the isolated staging network to resolve private
+    # PostgreSQL and apisix-internal.payment-switch.svc.cluster.local over mTLS.
+    runs-on: [self-hosted, linux, x64, payment-switch-staging]
     environment: staging
     timeout-minutes: 20
     steps:
@@ -151,5 +153,7 @@ jobs:
             daily-payment-assurance.json
             drizzle/0051_multilanguage_idempotency_settlement_contract.sql
             drizzle/0052_cross_store_reconciliation_saga.sql
+            drizzle/0053_reconciliation_resolution_idempotency_transition.sql
+            deploy/k8s/production/go-ledger-reconciliation-projection.yaml
           if-no-files-found: warn
           retention-days: 90
