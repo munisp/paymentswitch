@@ -40,9 +40,7 @@ impl AccountId {
     /// Uses bit-packing for O(1) lookup without hashing.
     #[inline(always)]
     pub fn new(participant_id: u64, family: AccountFamily, corridor_id: u8) -> Self {
-        let id = (participant_id as u128) << 16
-            | (family as u128) << 8
-            | corridor_id as u128;
+        let id = (participant_id as u128) << 16 | (family as u128) << 8 | corridor_id as u128;
         Self(id)
     }
 
@@ -106,7 +104,11 @@ impl ParticipantAccounts {
 
     /// Get corridor-specific account for transit.
     pub fn corridor_transit(&self, corridor_id: u8) -> AccountId {
-        AccountId::new(self.participant_id, AccountFamily::OutboundTransitPayable, corridor_id)
+        AccountId::new(
+            self.participant_id,
+            AccountFamily::OutboundTransitPayable,
+            corridor_id,
+        )
     }
 }
 
@@ -126,7 +128,10 @@ mod tests {
     fn test_participant_accounts() {
         let accounts = ParticipantAccounts::new(1001, "PayApp Nigeria", 2);
         assert_eq!(accounts.prefund_ngn.participant_id(), 1001);
-        assert_eq!(accounts.prefund_ngn.family(), AccountFamily::PrefundNGN as u8);
+        assert_eq!(
+            accounts.prefund_ngn.family(),
+            AccountFamily::PrefundNGN as u8
+        );
         assert_eq!(accounts.tier_id, 2);
     }
 
@@ -135,7 +140,10 @@ mod tests {
         let accounts = ParticipantAccounts::new(2002, "FinBeta", 3);
         let gh_transit = accounts.corridor_transit(1); // corridor 1 = NG-GH
         assert_eq!(gh_transit.participant_id(), 2002);
-        assert_eq!(gh_transit.family(), AccountFamily::OutboundTransitPayable as u8);
+        assert_eq!(
+            gh_transit.family(),
+            AccountFamily::OutboundTransitPayable as u8
+        );
         assert_eq!(gh_transit.corridor_id(), 1);
     }
 }

@@ -7,6 +7,7 @@ set -eu
 : "${APISIX_TLS_CERT_FILE:?APISIX_TLS_CERT_FILE is required}"
 : "${APISIX_TLS_KEY_FILE:?APISIX_TLS_KEY_FILE is required}"
 : "${APISIX_TLS_SERVER_NAME:?APISIX_TLS_SERVER_NAME is required}"
+: "${PORTAL_ALLOWED_ORIGIN:?PORTAL_ALLOWED_ORIGIN is required}"
 
 for required_file in "$APISIX_TLS_CERT_FILE" "$APISIX_TLS_KEY_FILE"; do
   if [ ! -r "$required_file" ] || [ ! -s "$required_file" ]; then
@@ -59,6 +60,7 @@ sed \
   -e "/__APISIX_TLS_KEY_PEM__/r $key_indented" \
   -e '/__APISIX_TLS_KEY_PEM__/d' \
   -e "s/__APISIX_TLS_SERVER_NAME__/${APISIX_TLS_SERVER_NAME}/g" \
+  -e "s|__PORTAL_ALLOWED_ORIGIN__|${PORTAL_ALLOWED_ORIGIN}|g" \
   "$TEMPLATE" > "$OUTPUT"
 
 chmod 0600 "$OUTPUT"

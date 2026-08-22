@@ -12,69 +12,94 @@ metadata:
 data:
   payment-authorization.rego: |
     package payment.authorization
-    
+
     import future.keywords.if
     import future.keywords.in
-    
-    default allow = false
-    
-    # Allow payment processing for authenticated users with valid roles
+
+    # The verified-claims adapter independently checks the JWT signature,
+    # issuer, audience, expiry, and token shape before this policy receives
+    # input. OPA never parses Authorization itself.
+    default allow := false
+    default deny_reason := "authorization_denied"
+
+    required_audience := data.payment.authorization_config.required_audience
+    required_issuer := data.payment.authorization_config.required_issuer
+    required_roles := data.payment.authorization_config.required_roles
+
     allow if {
-      input.method == "POST"
-      input.path == "/api/v1/payments/process"
-      has_valid_token
-      has_payment_role
-      not_rate_limited
+      not spoofable_identity_header_present
+      verified_claims_valid
+      request_permission
     }
-    
-    # Allow payment status queries for authenticated users
-    allow if {
-      input.method == "GET"
-      startswith(input.path, "/api/v1/payments/status/")
-      has_valid_token
-      has_query_role
+
+    verified_claims_valid if {
+      input.verified_jwt.valid == true
+      input.verified_jwt.sub != ""
+      input.verified_jwt.iss == required_issuer
+      input.verified_jwt.exp > time.now_ns() / 1000000000
+      audience_matches
     }
-    
-    # Check if user has valid JWT token
-    has_valid_token if {
-      token := input.headers.authorization
-      startswith(token, "Bearer ")
-      jwt_payload := io.jwt.decode(trim_prefix(token, "Bearer "))[1]
-      jwt_payload.exp > time.now_ns() / 1000000000
+
+    audience_matches if {
+      is_array(input.verified_jwt.aud)
+      required_audience in input.verified_jwt.aud
     }
-    
-    # Check if user has payment processing role
-    has_payment_role if {
-      token := input.headers.authorization
-      jwt_payload := io.jwt.decode(trim_prefix(token, "Bearer "))[1]
-      "payment:process" in jwt_payload.roles
+
+    audience_matches if {
+      is_string(input.verified_jwt.aud)
+      input.verified_jwt.aud == required_audience
     }
-    
-    # Check if user has query role
-    has_query_role if {
-      token := input.headers.authorization
-      jwt_payload := io.jwt.decode(trim_prefix(token, "Bearer "))[1]
-      "payment:query" in jwt_payload.roles
+
+    request_permission if {
+      input.request.method == "POST"
+      input.request.path == "/api/v1/payments/process"
+      role_matches("payment:process")
     }
-    
-    # Check if request is not rate limited
-    not_rate_limited if {
-      input.rate_limit.current < input.rate_limit.max
+
+    request_permission if {
+      input.request.method == "GET"
+      startswith(input.request.path, "/api/v1/payments/status/")
+      role_matches("payment:query")
     }
-    
-    # Deny reasons
-    reason["invalid_token"] if {
-      not has_valid_token
+
+    role_matches(role) if {
+      role in input.verified_jwt.roles
+      role in required_roles
     }
-    
-    reason["insufficient_permissions"] if {
-      has_valid_token
-      not has_payment_role
-      not has_query_role
+
+    deny_reason := "invalid_verified_claims" if {
+      not verified_claims_valid
     }
-    
-    reason["rate_limit_exceeded"] if {
-      input.rate_limit.current >= input.rate_limit.max
+
+    deny_reason := "insufficient_permissions" if {
+      verified_claims_valid
+      not request_permission
+    }
+
+    spoofable_identity_header_present if {
+      lower(input.request.headers["x-userinfo"]) != ""
+    }
+
+    spoofable_identity_header_present if {
+      lower(input.request.headers["x-id-token"]) != ""
+    }
+
+    spoofable_identity_header_present if {
+      lower(input.request.headers["x-user-id"]) != ""
+    }
+
+  authorization-config.json: |
+    {
+      "payment": {
+        "authorization_config": {
+          "required_audience": "payment-switch-api",
+          "required_issuer": "https://keycloak.example/realms/payment-switch",
+          "required_roles": [
+            "payment:process",
+            "payment:query"
+          ]
+        }
+      }
     }
 
   fraud-detection-policy.rego: |
@@ -201,7 +226,7 @@ spec:
     spec:
       containers:
         - name: opa
-          image: openpolicyagent/opa:latest
+          image: openpolicyagent/opa:0.68.0
           args:
             - "run"
             - "--server"
@@ -438,7 +463,9 @@ spec:
     - name: opa
       enable: true
       config:
-        host: http://opa.apisix:8181
+        # The adapter independently verifies Keycloak RS256/JWKS claims and
+        # constructs input.verified_jwt before it calls the internal OPA server.
+        host: http://opa-verified-claims-adapter.payment-switch.svc.cluster.local:8080
         policy: payment/authorization
         with_route: true
         with_service: true

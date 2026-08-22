@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "secrets": [
+    {
+      "name": "payment-switch/example-secret",
+      "rotated_at": "2026-08-20T00:00:00Z",
+      "source": "Vault path and version, not a secret value",
+      "version": "vault-version-id",
+      "old_version_revoked": false,
+      "consumer_restart_verified": false
+    }
+  ]
+}

@@ -5,7 +5,7 @@ Ensures ongoing compliance beyond point-of-transaction screening.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
 import difflib
@@ -44,7 +44,7 @@ class SanctionsListUpdate:
     update_type: ListUpdateType
     entries_affected: int
     published_at: datetime
-    ingested_at: datetime = field(default_factory=datetime.utcnow)
+    ingested_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     checksum: str = ""
     source_url: str = ""
 
@@ -78,7 +78,7 @@ class RescreeningResult:
     action: MatchAction
     previous_score: float
     score_delta: float
-    screened_at: datetime = field(default_factory=datetime.utcnow)
+    screened_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     acknowledged: bool = False
     
     @property
@@ -150,11 +150,11 @@ class SanctionsRescreeningService:
         self._list_checksums[list_name] = content_hash
         
         update = SanctionsListUpdate(
-            id=f"update-{list_name.lower().replace(' ', '-')}-{datetime.utcnow().strftime('%Y%m%d%H%M')}",
+            id=f"update-{list_name.lower().replace(' ', '-')}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}",
             list_name=list_name,
             update_type=update_type,
             entries_affected=len(entries),
-            published_at=datetime.utcnow(),
+            published_at=datetime.now(timezone.utc),
             checksum=content_hash,
         )
         
@@ -190,7 +190,7 @@ class SanctionsRescreeningService:
             raise ValueError(f"Batch {batch_id} not found")
         
         batch.status = RescreeningStatus.IN_PROGRESS
-        batch.started_at = datetime.utcnow()
+        batch.started_at = datetime.now(timezone.utc)
         
         beneficiaries = self._select_beneficiaries(batch.list_name)
         
@@ -208,13 +208,13 @@ class SanctionsRescreeningService:
             batch.screened_count += 1
         
         batch.status = RescreeningStatus.COMPLETED
-        batch.completed_at = datetime.utcnow()
+        batch.completed_at = datetime.now(timezone.utc)
         
         return batch
     
     def get_new_matches(self, since: Optional[datetime] = None) -> list[RescreeningResult]:
         """Get all new matches detected since a given time"""
-        cutoff = since or (datetime.utcnow() - timedelta(days=7))
+        cutoff = since or (datetime.now(timezone.utc) - timedelta(days=7))
         return [
             r for r in self.results
             if r.is_new_match and r.screened_at >= cutoff
@@ -287,7 +287,7 @@ class SanctionsRescreeningService:
             )
             
             # Update beneficiary record
-            beneficiary.last_screening_at = datetime.utcnow()
+            beneficiary.last_screening_at = datetime.now(timezone.utc)
             beneficiary.last_screening_score = best_score
             if best_score >= 0.95:
                 beneficiary.blocked = True

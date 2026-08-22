@@ -35,6 +35,7 @@ function validateEnv(): void {
       "KEYCLOAK_URL",
       "KEYCLOAK_REALM",
       "KEYCLOAK_CLIENT_ID",
+      "ALLOWED_ORIGINS",
       "APISIX_ADMIN_URL",
       "APISIX_ADMIN_KEY",
       "OPA_URL",
@@ -47,6 +48,13 @@ function validateEnv(): void {
       "PAYMENT_ORCHESTRATOR_URL",
     ]) {
       if (!value(name)) failures.push(`${name} is required in production`);
+    }
+    const origins = value("ALLOWED_ORIGINS")
+      .split(",")
+      .map(origin => origin.trim())
+      .filter(Boolean);
+    if (origins.includes("*")) {
+      failures.push("ALLOWED_ORIGINS must not contain * in production");
     }
 
     for (const name of ["ENCRYPTION_KEY", "WEBHOOK_SIGNING_KEY"]) {

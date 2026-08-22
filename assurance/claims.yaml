@@ -33,7 +33,7 @@ claims:
     assertion: Financial postings never synthesize local success when TigerBeetle is unavailable.
     required: true
     evidence:
-      static_gate: .audit/verify_go_rust_ledger_fx_security.py
+      static_gate: scripts/assurance/verify_ledger_and_settlement_static.py
       live_gate: scripts/assurance/run_dependency_recovery_gates.sh
       status: pending_live
   - id: fx.authoritative-rate
@@ -48,7 +48,7 @@ claims:
     assertion: Portal settlement summaries and lifecycle events are derived from PostgreSQL-backed batches and immutable events rather than generated arrays.
     required: true
     evidence:
-      static_gate: .audit/verify_component_contracts.py
+      static_gate: scripts/assurance/verify_ledger_and_settlement_static.py
       live_gate: scripts/assurance/run_dependency_recovery_gates.sh
       status: pending_live
   - id: ai.cpu-fraud-inference

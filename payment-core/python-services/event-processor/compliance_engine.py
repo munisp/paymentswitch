@@ -5,7 +5,7 @@ Integrates with OpenSearch for transaction monitoring and pattern detection.
 
 import json
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Optional
@@ -51,7 +51,7 @@ class ComplianceAlert:
     transaction_id: str
     description: str
     details: dict = field(default_factory=dict)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     reviewed: bool = False
     reviewer_id: Optional[str] = None
     resolution: Optional[str] = None
@@ -217,7 +217,7 @@ class ComplianceEngine:
             return {"error": "Alert not found"}
         return {
             "report_type": "SAR",
-            "filing_date": datetime.utcnow().isoformat(),
+            "filing_date": datetime.now(timezone.utc).isoformat(),
             "alert_id": alert.id,
             "transaction_id": alert.transaction_id,
             "risk_level": alert.risk_level.value,
@@ -260,5 +260,5 @@ class ComplianceEngine:
 
     @staticmethod
     def _generate_id(prefix: str, txn_id: str) -> str:
-        hash_input = f"{prefix}-{txn_id}-{datetime.utcnow().isoformat()}"
+        hash_input = f"{prefix}-{txn_id}-{datetime.now(timezone.utc).isoformat()}"
         return f"{prefix}-{hashlib.sha256(hash_input.encode()).hexdigest()[:12]}"

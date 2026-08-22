@@ -40,7 +40,10 @@ jobs:
       
       - name: Check staging health
         run: |
-          curl -f https://staging.payment-switch.com/health || echo "Staging not available"
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 30 \
+            https://staging.payment-switch.com/health
       
       - name: Require approval
         uses: trstringer/manual-approval@v1

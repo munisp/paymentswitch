@@ -24,8 +24,8 @@
     "format:check": "echo \"Format check passed\""
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1111.0",
-    "@aws-sdk/s3-request-presigner": "^3.1111.0",
+    "@aws-sdk/client-s3": "^3.1115.0",
+    "@aws-sdk/s3-request-presigner": "^3.1115.0",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "0.221.0",
     "@opentelemetry/instrumentation-express": "0.69.0",
@@ -82,9 +82,10 @@
     "express-rate-limit": "^8.6.2",
     "framer-motion": "^12.23.22",
     "input-otp": "^1.4.2",
+    "ioredis": "^5.6.1",
     "jose": "6.1.0",
     "jspdf": "^4.2.1",
-    "jspdf-autotable": "^5.0.2",
+    "jspdf-autotable": "^5.0.8",
     "lucide-react": "^0.453.0",
     "mdast-util-to-hast": "13.2.1",
     "nanoid": "^5.1.16",
@@ -117,7 +118,7 @@
   "devDependencies": {
     "@builder.io/vite-plugin-jsx-loc": "^0.1.1",
     "@tailwindcss/typography": "^0.5.15",
-    "@tailwindcss/vite": "^4.1.3",
+    "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
@@ -131,13 +132,13 @@
     "@types/react-dom": "^19.1.9",
     "@types/supertest": "^7.2.1",
     "@vitejs/plugin-react": "^5.0.4",
-    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/coverage-v8": "^3.2.7",
     "add": "^2.0.6",
     "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.31.4",
     "esbuild": "^0.25.0",
     "jsdom": "^29.1.1",
-    "pnpm": "^10.15.1",
+    "pnpm": "^10.34.5",
     "postcss": "^8.4.47",
     "prettier": "^3.6.2",
     "supertest": "^7.2.2",
@@ -150,8 +151,8 @@
     "vite": "^7.1.7",
     "vite-plugin-manus-runtime": "^0.0.55",
     "vite-plugin-pwa": "^1.2.0",
-    "vitest": "^2.1.9",
+    "vitest": "^3.2.7",
     "workbox-window": "^7.4.0"
   },
-  "packageManager": "pnpm@10.4.1+sha512.c753b6c3ad7afa13af388fa6d808035a008e30ea9993f58c6663e2bc5ff21679aa4d488b86df57f7b634981b2f827cdcacc698cc0cfb88af"
+  "packageManager": "pnpm@10.34.5"
 }

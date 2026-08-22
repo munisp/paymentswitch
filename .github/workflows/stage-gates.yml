@@ -1,0 +1,237 @@
+name: Stage 3 and Stage 4 Assurance Gates
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage-gates-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  OPA_VERSION: 0.68.0
+
+jobs:
+  static-assurance:
+    name: Static policy and assurance validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install OPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://openpolicyagent.org/downloads/v${OPA_VERSION}/opa_linux_amd64_static" -o opa
+          chmod 0755 opa
+          sudo install -m 0755 opa /usr/local/bin/opa
+          opa version
+
+      - name: Validate custom JWT policy syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          opa fmt --diff payment-core/deployment/kubernetes/opa-jwt-claims.rego
+          opa check payment-core/deployment/kubernetes/opa-jwt-claims.rego
+
+      - name: Evaluate JWT policy deny and allow fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .audit/static-policy
+          cat > .audit/static-policy/data.json <<'JSON'
+          {
+            "payment": {
+              "authorization_config": {
+                "required_audience": "payment-switch-api",
+                "required_issuer": "https://keycloak.example/realms/payment-switch",
+                "required_roles": ["payment:process", "payment:query"]
+              }
+            }
+          }
+          JSON
+          cat > .audit/static-policy/allow.json <<'JSON'
+          {
+            "request": {
+              "method": "GET",
+              "path": "/api/v1/payments/status/tx-1",
+              "headers": {}
+            },
+            "verified_jwt": {
+              "valid": true,
+              "sub": "user-1",
+              "iss": "https://keycloak.example/realms/payment-switch",
+              "aud": ["payment-switch-api"],
+              "exp": 4102444800,
+              "roles": ["payment:query"]
+            }
+          }
+          JSON
+          cat > .audit/static-policy/deny.json <<'JSON'
+          {
+            "request": {
+              "method": "GET",
+              "path": "/api/v1/payments/status/tx-1",
+              "headers": {"x-user-id": "spoofed"}
+            },
+            "verified_jwt": {
+              "valid": true,
+              "sub": "user-1",
+              "iss": "https://keycloak.example/realms/payment-switch",
+              "aud": ["wrong-audience"],
+              "exp": 4102444800,
+              "roles": ["payment:query"]
+            }
+          }
+          JSON
+          cat > .audit/static-policy/wrong-role.json <<'JSON'
+          {
+            "request": {
+              "method": "POST",
+              "path": "/api/v1/payments/process",
+              "headers": {}
+            },
+            "verified_jwt": {
+              "valid": true,
+              "sub": "user-1",
+              "iss": "https://keycloak.example/realms/payment-switch",
+              "aud": "payment-switch-api",
+              "exp": 4102444800,
+              "roles": ["payment:query"]
+            }
+          }
+          JSON
+          opa eval --format=json --data payment-core/deployment/kubernetes/opa-jwt-claims.rego \
+            --data .audit/static-policy/data.json --input .audit/static-policy/allow.json \
+            'data.payment.authorization.allow == true' > .audit/static-policy/allow-result.json
+          jq -e '.result[0].expressions[0].value == true' .audit/static-policy/allow-result.json
+          opa eval --format=json --data payment-core/deployment/kubernetes/opa-jwt-claims.rego \
+            --data .audit/static-policy/data.json --input .audit/static-policy/deny.json \
+            'data.payment.authorization.allow == false' > .audit/static-policy/deny-result.json
+          jq -e '.result[0].expressions[0].value == true' .audit/static-policy/deny-result.json
+          opa eval --format=json --data payment-core/deployment/kubernetes/opa-jwt-claims.rego \
+            --data .audit/static-policy/data.json --input .audit/static-policy/wrong-role.json \
+            'data.payment.authorization.allow == false' > .audit/static-policy/wrong-role-result.json
+          jq -e '.result[0].expressions[0].value == true' .audit/static-policy/wrong-role-result.json
+
+      - name: Validate assurance scripts and claim manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/assurance/live_gate_preflight.sh
+          bash -n scripts/assurance/run_live_identity_gates.sh
+          bash -n scripts/assurance/run_dependency_recovery_gates.sh
+          bash -n scripts/assurance/run_stage_3_4_pipeline.sh
+          python3 -m py_compile scripts/assurance/populate_release_signoff.py scripts/assurance/verify_assurance_claims.py
+          set +e
+          python3 scripts/assurance/verify_assurance_claims.py | tee .audit/static-policy/claim-manifest.log
+          claim_status=${PIPESTATUS[0]}
+          set -e
+          test "$claim_status" -eq 2
+          grep -q '^RELEASE_DENIED pending required evidence:' .audit/static-policy/claim-manifest.log
+
+      - name: Upload static evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-assurance-${{ github.sha }}
+          path: .audit/static-policy
+          if-no-files-found: error
+          retention-days: 14
+
+  live-stage-gates:
+    name: Protected staging Stage 3 and Stage 4 gates
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    needs: static-assurance
+    runs-on: ubuntu-latest
+    environment:
+      name: staging-assurance
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq openssl
+          python3 --version
+
+      - name: Materialize protected assurance environment
+        shell: bash
+        env:
+          ASSURANCE_ENV_FILE: ${{ secrets.ASSURANCE_ENV_FILE }}
+        run: |
+          set -euo pipefail
+          test -n "$ASSURANCE_ENV_FILE"
+          umask 077
+          printf '%s\n' "$ASSURANCE_ENV_FILE" > .env.assurance
+          grep -Eq '^ASSURANCE_MOCK_MODE=false$' .env.assurance
+          ! grep -Eq '(^|=)(changeme|example|mock|placeholder|TODO)([[:space:]]|$)' .env.assurance
+
+      - name: Run complete Stage 3/4 pipeline
+        shell: bash
+        env:
+          ASSURANCE_CONTAINER_RUNTIME: ${{ vars.ASSURANCE_CONTAINER_RUNTIME || 'docker' }}
+          LIVE_GATE_ENV_FILE: ${{ github.workspace }}/.env.assurance
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          chmod 700 scripts/assurance/*.sh
+          scripts/assurance/run_stage_3_4_pipeline.sh
+
+      - name: Generate and validate release sign-off evidence
+        if: always()
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test -n "${ASSURANCE_EVIDENCE_DIR:-}"
+          identity="$ASSURANCE_EVIDENCE_DIR/identity-gates.log"
+          recovery="$ASSURANCE_EVIDENCE_DIR/recovery-gates.log"
+          test -s "$identity"
+          test -s "$recovery"
+          python3 scripts/assurance/populate_release_signoff.py \
+            --template EXECUTIVE_RELEASE_SIGNOFF_SUMMARY_TEMPLATE.md \
+            --identity "$identity" \
+            --recovery "$recovery" \
+            --output "$ASSURANCE_EVIDENCE_DIR/EXECUTIVE_RELEASE_SIGNOFF_SUMMARY.md" \
+            --release "$RELEASE_SHA" \
+            --environment staging-assurance \
+            --prepared-by github-actions
+          grep -q 'Stage 3 conclusion.*PASS' "$ASSURANCE_EVIDENCE_DIR/EXECUTIVE_RELEASE_SIGNOFF_SUMMARY.md"
+          grep -q 'Stage 4 conclusion.*PASS' "$ASSURANCE_EVIDENCE_DIR/EXECUTIVE_RELEASE_SIGNOFF_SUMMARY.md"
+          find .audit -type f -maxdepth 4 -print 2>/dev/null || true
+          find .audit -type f \( -name '*.log' -o -name '*.json' -o -name '*.txt' \) -print0 2>/dev/null |
+            xargs -0 -r grep -HnE 'PASS|FAIL|NOT RUN|SKIPPED|gates passed|PIPELINE_STATUS' || true
+          find .audit -type f -print0 2>/dev/null | xargs -0 -r sha256sum > .audit/evidence-sha256.txt
+
+      - name: Upload live evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-3-4-evidence-${{ github.sha }}
+          path: .audit
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Remove protected environment file
+        if: always()
+        shell: bash
+        run: |
+          shred -u .env.assurance 2>/dev/null || rm -f .env.assurance

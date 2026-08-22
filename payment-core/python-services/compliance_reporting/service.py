@@ -11,7 +11,7 @@ This service handles generation of compliance reports including:
 
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field, asdict
@@ -126,8 +126,8 @@ class CTRReport:
     beneficiary_country: Optional[str] = None
     status: ReportStatus = ReportStatus.DRAFT
     created_by: str = ""
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     submitted_at: Optional[datetime] = None
     fincen_bsa_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -200,7 +200,7 @@ class ComplianceReportingService:
         dates = [t.created_at for t in transactions]
         amounts = [t.amount for t in transactions]
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         sar = SARReport(
             id=str(uuid.uuid4()),
@@ -241,7 +241,7 @@ class ComplianceReportingService:
         if transaction.amount < self.CTR_THRESHOLD:
             raise ValueError(f"Transaction amount {transaction.amount} is below CTR threshold {self.CTR_THRESHOLD}")
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         ctr = CTRReport(
             id=str(uuid.uuid4()),
@@ -327,7 +327,7 @@ class ComplianceReportingService:
     ) -> ComplianceSummary:
         """Generate a compliance summary report"""
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         # Determine period based on report type
         if period_start is None or period_end is None:
@@ -560,7 +560,7 @@ if __name__ == "__main__":
             recipient_id="user_002",
             recipient_name="Jane Smith",
             recipient_country="UK",
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             risk_score=0.3,
         ),
     ]

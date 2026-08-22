@@ -13,7 +13,7 @@ Tightly integrates NIBSS domestic payment modules with core payment switch middl
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
 import json
@@ -864,7 +864,7 @@ class NIBSSTemporalActivities:
             "period": period,
             "regulator": regulator,
             "status": "DRAFT",
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
         }
 
     def run_fraud_scoring(
@@ -891,7 +891,7 @@ class NIBSSTemporalActivities:
             "risk_score": min(risk_score, 100.0),
             "risk_level": "HIGH" if risk_score >= 70 else "MEDIUM" if risk_score >= 40 else "LOW",
             "flags": [],
-            "scored_at": datetime.utcnow().isoformat() + "Z",
+            "scored_at": datetime.now(timezone.utc).isoformat() + "Z",
         }
 
     def index_to_opensearch(
@@ -906,7 +906,7 @@ class NIBSSTemporalActivities:
         return {
             "index": index_name,
             "documents_indexed": len(documents),
-            "indexed_at": datetime.utcnow().isoformat() + "Z",
+            "indexed_at": datetime.now(timezone.utc).isoformat() + "Z",
         }
 
     def write_to_lakehouse(
@@ -921,5 +921,5 @@ class NIBSSTemporalActivities:
         return {
             "table": table_name,
             "records_written": len(records),
-            "written_at": datetime.utcnow().isoformat() + "Z",
+            "written_at": datetime.now(timezone.utc).isoformat() + "Z",
         }

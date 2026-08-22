@@ -20,18 +20,37 @@ else
   pass 'isolated-environment acknowledgement present'
 fi
 
-for command in docker curl jq openssl go cargo rustc node pnpm; do
+for command in curl jq openssl go cargo rustc node pnpm; do
   command_required "$command"
 done
 
-if docker compose version >/dev/null 2>&1; then
-  pass 'docker compose v2 is available'
-else
-  fail 'docker compose v2 is required'
-fi
+container_runtime="${ASSURANCE_CONTAINER_RUNTIME:-docker}"
+case "$container_runtime" in
+  docker)
+    command_required docker
+    if docker compose version >/dev/null 2>&1; then
+      pass 'docker compose v2 is available'
+    else
+      fail 'docker compose v2 is required for ASSURANCE_CONTAINER_RUNTIME=docker'
+    fi
+    ;;
+  podman)
+    command_required podman
+    if podman compose version >/dev/null 2>&1 || command -v podman-compose >/dev/null 2>&1; then
+      pass 'Podman Compose provider is available'
+    else
+      fail 'podman compose or podman-compose is required for ASSURANCE_CONTAINER_RUNTIME=podman'
+    fi
+    ;;
+  *)
+    fail 'ASSURANCE_CONTAINER_RUNTIME must be docker or podman'
+    ;;
+esac
 
 for variable in \
   POSTGRES_PASSWORD \
+  DATABASE_URL \
+  PERMIFY_DATABASE_URI \
   REDIS_PASSWORD \
   MOJALOOP_POSTGRES_PASSWORD \
   JWT_SECRET \
@@ -39,11 +58,21 @@ for variable in \
   APISIX_ADMIN_KEY \
   KEYCLOAK_ADMIN \
   KEYCLOAK_ADMIN_PASSWORD \
+  KEYCLOAK_DB_PASSWORD \
   KEYCLOAK_HOSTNAME \
   KEYCLOAK_ISSUER_URL \
-  KEYCLOAK_APISIX_CLIENT_SECRET \
-  KEYCLOAK_API_CLIENT_SECRET \
   KEYCLOAK_CLIENT_SECRET \
+  OPERATIONAL_CONFIGURATION_URL \
+  OPERATIONAL_CONFIGURATION_TOKEN \
+  KEYCLOAK_APISIX_CLIENT_SECRET \
+  KEYCLOAK_CLIENT_SECRET \
+  KEYCLOAK_URL \
+  ADMIN_KEYCLOAK_CLIENT_ID \
+  ADMIN_KEYCLOAK_CLIENT_SECRET \
+  ADMIN_AUTH_REDIRECT_URI \
+  ADMIN_DASHBOARD_ALLOWED_ORIGIN \
+  ADMIN_AUTH_STATE_SECRET \
+  MOBILE_AUTH_REDIRECT_URI \
   PORTAL_ALLOWED_ORIGIN \
   PORTAL_REDIRECT_URI \
   TLS_CA_FILE \
@@ -55,6 +84,23 @@ for variable in \
   VALID_NONADMIN_BEARER_TOKEN \
   VALID_ADMIN_BEARER_TOKEN; do
   required "$variable"
+done
+
+# A populated variable is not sufficient evidence. Reject obvious mock/example
+# sentinels so local simulation configuration cannot be mistaken for a live gate.
+for variable in \
+  POSTGRES_PASSWORD DATABASE_URL PERMIFY_DATABASE_URI REDIS_PASSWORD \
+  MOJALOOP_POSTGRES_PASSWORD JWT_SECRET GRAFANA_PASSWORD APISIX_ADMIN_KEY \
+  KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_APISIX_CLIENT_SECRET \
+  KEYCLOAK_CLIENT_SECRET OPERATIONAL_CONFIGURATION_TOKEN ADMIN_KEYCLOAK_CLIENT_SECRET \
+  ADMIN_AUTH_STATE_SECRET VALID_USER_BEARER_TOKEN VALID_NONADMIN_BEARER_TOKEN \
+  VALID_ADMIN_BEARER_TOKEN; do
+  value="${!variable:-}"
+  if [[ "${ASSURANCE_MOCK_MODE:-false}" == "true" ]]; then
+    fail "$variable is mock-only; live gates require a real isolated value"
+  elif [[ "$value" =~ (REPLACE_WITH|MOCK_ONLY|MOCK_|EXAMPLE|CHANGE_ME|NOT_A_REAL|PLACEHOLDER) ]]; then
+    fail "$variable contains a mock/example sentinel"
+  fi
 done
 
 if [[ -n "${TLS_CA_FILE:-}" && -r "${TLS_CA_FILE:-/nonexistent}" ]]; then
@@ -91,6 +137,12 @@ if [[ -n "${PORTAL_ALLOWED_ORIGIN:-}" && "${PORTAL_ALLOWED_ORIGIN}" == https://*
   pass 'portal origin and callback use one explicit HTTPS origin'
 else
   fail 'PORTAL_ALLOWED_ORIGIN and PORTAL_REDIRECT_URI must use one explicit HTTPS origin/callback'
+fi
+
+if [[ -n "${ADMIN_DASHBOARD_ALLOWED_ORIGIN:-}" && "${ADMIN_DASHBOARD_ALLOWED_ORIGIN}" == https://* ]] && [[ "${ADMIN_AUTH_REDIRECT_URI:-}" == "${ADMIN_DASHBOARD_ALLOWED_ORIGIN}/api/auth/callback" ]]; then
+  pass 'admin dashboard origin and Authorization Code callback are an exact HTTPS pair'
+else
+  fail 'ADMIN_DASHBOARD_ALLOWED_ORIGIN and ADMIN_AUTH_REDIRECT_URI must use one explicit HTTPS origin/api/auth/callback pair'
 fi
 
 if [[ -n "${APISIX_BASE_URL:-}" && "${APISIX_BASE_URL}" == https://* ]]; then

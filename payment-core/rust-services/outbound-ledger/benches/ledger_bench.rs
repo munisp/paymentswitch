@@ -1,21 +1,20 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use outbound_ledger::{PostingEngine, CorridorFxEngine};
+use outbound_ledger::{CorridorFxEngine, PostingEngine};
 
 fn bench_funding_postings(c: &mut Criterion) {
     let mut engine = PostingEngine::new();
     c.bench_function("funding_postings_growth_tier", |b| {
-        b.iter(|| {
-            engine.generate_funding_postings(1001, 1, 5, 180_000_000)
-        })
+        b.iter(|| engine.generate_funding_postings(1001, 1, 5, 180_000_000))
     });
 }
 
 fn bench_fx_quote(c: &mut Criterion) {
     let mut engine = CorridorFxEngine::new();
+    engine
+        .set_authoritative_rate(5, 1_900_000_000_000)
+        .expect("benchmark fixture must configure a valid authoritative rate");
     c.bench_function("fx_quote_ng_gb", |b| {
-        b.iter(|| {
-            engine.generate_quote(5, 180_000_000).unwrap()
-        })
+        b.iter(|| engine.generate_quote(5, 180_000_000).unwrap())
     });
 }
 
@@ -30,5 +29,10 @@ fn bench_all_corridors(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_funding_postings, bench_fx_quote, bench_all_corridors);
+criterion_group!(
+    benches,
+    bench_funding_postings,
+    bench_fx_quote,
+    bench_all_corridors
+);
 criterion_main!(benches);

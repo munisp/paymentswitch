@@ -5734,10 +5734,10 @@ function PaymentRailsSection({ isAdmin }: { isAdmin: boolean }) {
     onSuccess: invalidateAll,
   });
 
-  const rails = railsQuery.data ?? [];
-  const statuses = statusesQuery.data ?? [];
-  const routing = routingQuery.data ?? [];
-  const dfsps = dfspsQuery.data ?? [];
+  const rails: any[] = Array.isArray(railsQuery.data) ? railsQuery.data : [];
+  const statuses: any[] = Array.isArray(statusesQuery.data) ? statusesQuery.data : [];
+  const routing: any[] = Array.isArray(routingQuery.data) ? routingQuery.data : [];
+  const dfsps: any[] = Array.isArray(dfspsQuery.data) ? dfspsQuery.data : [];
   const railTypes = rails.map(r => r.type);
 
   const railStatusColor = (s: string) => {

@@ -120,13 +120,15 @@ export const settlementRouter = router({
       const events = await db.select().from(settlementEvents)
         .where(eq(settlementEvents.settlementBatchId, batch.id))
         .orderBy(settlementEvents.occurredAt);
+      const reversals = events.filter((event) => event.eventType.toUpperCase().includes('REVERSAL')).length;
+      const chargebacks = events.filter((event) => event.eventType.toUpperCase().includes('CHARGEBACK')).length;
       return {
         ...serializeBatch(batch),
         breakdown: {
           debit: Number(batch.grossAmount),
           credit: Number(batch.netAmount),
-          reversals: 0,
-          chargebacks: 0,
+          reversals,
+          chargebacks,
         },
         timeline: events.map((event) => ({
           event: event.eventType,

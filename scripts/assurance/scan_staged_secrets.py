@@ -32,6 +32,7 @@ REFERENCE_MARKERS = (
     "z.",
     "speakeasy.",
     "opa-authz-",
+    "keycloak_db_password",
 )
 PATTERNS = [
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),

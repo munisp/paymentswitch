@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { createChildLogger } from '../lib/logger';
+import Redis from 'ioredis';
 
 const log = createChildLogger('security');
 
@@ -9,52 +10,57 @@ const log = createChildLogger('security');
  * Falls back to in-memory when Redis is unavailable.
  */
 class RateLimitStore {
-  private memoryStore = new Map<string, { count: number; resetAt: number }>();
+  private readonly memoryStore = new Map<string, { count: number; resetAt: number }>();
+  private readonly redis: Redis | null;
   private accessCount = 0;
-  private redisUrl: string | undefined;
-  private redisAvailable = false;
 
   constructor() {
-    this.redisUrl = process.env.REDIS_URL;
-    if (this.redisUrl) {
-      this.redisAvailable = true;
+    const redisUrl = process.env.REDIS_URL?.trim();
+    if (redisUrl) {
+      this.redis = new Redis(redisUrl, {
+        lazyConnect: true,
+        maxRetriesPerRequest: 1,
+        enableOfflineQueue: false,
+      });
+      this.redis.on('error', (error) => log.error({ error }, 'Rate limiter Redis error'));
       log.info('Rate limiter: Redis-backed mode');
     } else {
-      log.info('Rate limiter: in-memory mode (set REDIS_URL for distributed)');
+      this.redis = null;
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('FATAL: REDIS_URL is required in production for distributed rate limiting');
+      }
+      log.warn('Rate limiter: development-only in-memory mode');
     }
   }
 
-  increment(key: string, windowMs: number): { count: number; resetAt: number } {
+  async increment(key: string, windowMs: number): Promise<{ count: number; resetAt: number }> {
     const now = Date.now();
-    const existing = this.memoryStore.get(key);
+    const resetAt = now + windowMs;
+    if (this.redis) {
+      await this.redis.connect().catch(() => undefined);
+      const redisKey = `rate-limit:${key}`;
+      const count = await this.redis.incr(redisKey);
+      if (count === 1) await this.redis.pexpire(redisKey, windowMs);
+      const ttl = await this.redis.pttl(redisKey);
+      return { count, resetAt: now + Math.max(ttl, 0) };
+    }
 
+    const existing = this.memoryStore.get(key);
     if (existing && existing.resetAt > now) {
       existing.count++;
       return existing;
     }
-
-    const newEntry = {
-      count: 1,
-      resetAt: now + windowMs,
-    };
-    this.memoryStore.set(key, newEntry);
-
-    if (++this.accessCount % 100 === 0) {
-      this.cleanup();
-    }
-
-    return newEntry;
+    const entry = { count: 1, resetAt };
+    this.memoryStore.set(key, entry);
+    if (++this.accessCount % 100 === 0) this.cleanup();
+    return entry;
   }
 
   private cleanup() {
     const now = Date.now();
-    const keysToDelete: string[] = [];
     this.memoryStore.forEach((value, key) => {
-      if (value.resetAt <= now) {
-        keysToDelete.push(key);
-      }
+      if (value.resetAt <= now) this.memoryStore.delete(key);
     });
-    keysToDelete.forEach(key => this.memoryStore.delete(key));
   }
 }
 
@@ -76,23 +82,22 @@ export function rateLimit(options: {
     keyGenerator = (req) => req.ip || "unknown",
   } = options;
 
-  return (req: Request, res: Response, next: NextFunction) => {
-    const key = keyGenerator(req);
-    const { count, resetAt } = rateLimitStore.increment(key, windowMs);
-
-    res.setHeader("X-RateLimit-Limit", max.toString());
-    res.setHeader("X-RateLimit-Remaining", Math.max(0, max - count).toString());
-    res.setHeader("X-RateLimit-Reset", new Date(resetAt).toISOString());
-
-    if (count > max) {
-      res.status(429).json({
-        error: message,
-        retryAfter: Math.ceil((resetAt - Date.now()) / 1000),
-      });
-      return;
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const key = keyGenerator(req);
+      const { count, resetAt } = await rateLimitStore.increment(key, windowMs);
+      res.setHeader("X-RateLimit-Limit", max.toString());
+      res.setHeader("X-RateLimit-Remaining", Math.max(0, max - count).toString());
+      res.setHeader("X-RateLimit-Reset", new Date(resetAt).toISOString());
+      if (count > max) {
+        res.status(429).json({ error: message, retryAfter: Math.ceil(Math.max(0, resetAt - Date.now()) / 1000) });
+        return;
+      }
+      next();
+    } catch (error) {
+      log.error({ error }, 'Rate limiter unavailable');
+      res.status(503).json({ error: 'Rate limiting service unavailable' });
     }
-
-    next();
   };
 }
 
@@ -128,16 +133,20 @@ export function cspHeaders(req: Request, res: Response, next: NextFunction) {
  * CORS headers for API endpoints
  */
 export function corsHeaders(req: Request, res: Response, next: NextFunction) {
-  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['*'];
+  const configuredOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(value => value.trim()).filter(Boolean) ?? [];
   const origin = req.headers.origin;
-
-  if (origin && (allowedOrigins.includes('*') || allowedOrigins.includes(origin))) {
+  if (origin && configuredOrigins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
   }
-
+  res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key");
   res.setHeader("Access-Control-Max-Age", "86400");
+  if (req.method === "OPTIONS" && origin && !configuredOrigins.includes(origin)) {
+    res.status(403).json({ error: "Origin is not allowed" });
+    return;
+  }
 
   if (req.method === "OPTIONS") {
     res.status(204).end();

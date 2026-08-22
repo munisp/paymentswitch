@@ -35,8 +35,8 @@ pub struct CorridorQuote {
     pub corridor_id: u8,
     pub source_amount_kobo: u64,
     pub dest_amount_smallest: u64,
-    pub mid_rate_fp: u64,       // Fixed-point * 1_000_000_000
-    pub applied_rate_fp: u64,   // After spread
+    pub mid_rate_fp: u64,     // Fixed-point * 1_000_000_000
+    pub applied_rate_fp: u64, // After spread
     pub spread_bps: u16,
     pub spread_amount_kobo: u64,
     pub valid_until_epoch_s: u64,
@@ -55,19 +55,149 @@ pub struct CorridorFxEngine {
 impl CorridorFxEngine {
     pub fn new() -> Self {
         let corridors = vec![
-            CorridorConfig { corridor_id: 1, corridor_code: *b"NG-GH", source_currency: 566, dest_currency: 936, max_spread_bps: 150, min_spread_bps: 50, max_txn_kobo: 750_000_000, requires_documentation: false, launch_wave: 1 },
-            CorridorConfig { corridor_id: 2, corridor_code: *b"NG-SN", source_currency: 566, dest_currency: 952, max_spread_bps: 200, min_spread_bps: 75, max_txn_kobo: 750_000_000, requires_documentation: false, launch_wave: 1 },
-            CorridorConfig { corridor_id: 3, corridor_code: *b"NG-CI", source_currency: 566, dest_currency: 952, max_spread_bps: 200, min_spread_bps: 75, max_txn_kobo: 750_000_000, requires_documentation: false, launch_wave: 1 },
-            CorridorConfig { corridor_id: 4, corridor_code: *b"NG-CM", source_currency: 566, dest_currency: 950, max_spread_bps: 200, min_spread_bps: 75, max_txn_kobo: 750_000_000, requires_documentation: false, launch_wave: 1 },
-            CorridorConfig { corridor_id: 5, corridor_code: *b"NG-GB", source_currency: 566, dest_currency: 826, max_spread_bps: 100, min_spread_bps: 30, max_txn_kobo: 75_000_000_000, requires_documentation: true, launch_wave: 2 },
-            CorridorConfig { corridor_id: 6, corridor_code: *b"NG-US", source_currency: 566, dest_currency: 840, max_spread_bps: 100, min_spread_bps: 30, max_txn_kobo: 75_000_000_000, requires_documentation: true, launch_wave: 2 },
-            CorridorConfig { corridor_id: 7, corridor_code: *b"NG-CA", source_currency: 566, dest_currency: 124, max_spread_bps: 120, min_spread_bps: 40, max_txn_kobo: 75_000_000_000, requires_documentation: true, launch_wave: 2 },
-            CorridorConfig { corridor_id: 8, corridor_code: *b"NG-IN", source_currency: 566, dest_currency: 356, max_spread_bps: 150, min_spread_bps: 50, max_txn_kobo: 45_000_000_000, requires_documentation: true, launch_wave: 2 },
-            CorridorConfig { corridor_id: 9, corridor_code: *b"NG-TR", source_currency: 566, dest_currency: 949, max_spread_bps: 175, min_spread_bps: 60, max_txn_kobo: 45_000_000_000, requires_documentation: true, launch_wave: 2 },
-            CorridorConfig { corridor_id: 10, corridor_code: *b"NG-CN", source_currency: 566, dest_currency: 156, max_spread_bps: 80, min_spread_bps: 20, max_txn_kobo: 150_000_000_000, requires_documentation: true, launch_wave: 3 },
-            CorridorConfig { corridor_id: 11, corridor_code: *b"NG-AE", source_currency: 566, dest_currency: 784, max_spread_bps: 90, min_spread_bps: 25, max_txn_kobo: 150_000_000_000, requires_documentation: true, launch_wave: 3 },
-            CorridorConfig { corridor_id: 12, corridor_code: *b"NG-KE", source_currency: 566, dest_currency: 404, max_spread_bps: 150, min_spread_bps: 50, max_txn_kobo: 15_000_000_000, requires_documentation: false, launch_wave: 1 },
-            CorridorConfig { corridor_id: 13, corridor_code: *b"NG-ZA", source_currency: 566, dest_currency: 710, max_spread_bps: 130, min_spread_bps: 40, max_txn_kobo: 15_000_000_000, requires_documentation: false, launch_wave: 1 },
+            CorridorConfig {
+                corridor_id: 1,
+                corridor_code: *b"NG-GH",
+                source_currency: 566,
+                dest_currency: 936,
+                max_spread_bps: 150,
+                min_spread_bps: 50,
+                max_txn_kobo: 750_000_000,
+                requires_documentation: false,
+                launch_wave: 1,
+            },
+            CorridorConfig {
+                corridor_id: 2,
+                corridor_code: *b"NG-SN",
+                source_currency: 566,
+                dest_currency: 952,
+                max_spread_bps: 200,
+                min_spread_bps: 75,
+                max_txn_kobo: 750_000_000,
+                requires_documentation: false,
+                launch_wave: 1,
+            },
+            CorridorConfig {
+                corridor_id: 3,
+                corridor_code: *b"NG-CI",
+                source_currency: 566,
+                dest_currency: 952,
+                max_spread_bps: 200,
+                min_spread_bps: 75,
+                max_txn_kobo: 750_000_000,
+                requires_documentation: false,
+                launch_wave: 1,
+            },
+            CorridorConfig {
+                corridor_id: 4,
+                corridor_code: *b"NG-CM",
+                source_currency: 566,
+                dest_currency: 950,
+                max_spread_bps: 200,
+                min_spread_bps: 75,
+                max_txn_kobo: 750_000_000,
+                requires_documentation: false,
+                launch_wave: 1,
+            },
+            CorridorConfig {
+                corridor_id: 5,
+                corridor_code: *b"NG-GB",
+                source_currency: 566,
+                dest_currency: 826,
+                max_spread_bps: 100,
+                min_spread_bps: 30,
+                max_txn_kobo: 75_000_000_000,
+                requires_documentation: true,
+                launch_wave: 2,
+            },
+            CorridorConfig {
+                corridor_id: 6,
+                corridor_code: *b"NG-US",
+                source_currency: 566,
+                dest_currency: 840,
+                max_spread_bps: 100,
+                min_spread_bps: 30,
+                max_txn_kobo: 75_000_000_000,
+                requires_documentation: true,
+                launch_wave: 2,
+            },
+            CorridorConfig {
+                corridor_id: 7,
+                corridor_code: *b"NG-CA",
+                source_currency: 566,
+                dest_currency: 124,
+                max_spread_bps: 120,
+                min_spread_bps: 40,
+                max_txn_kobo: 75_000_000_000,
+                requires_documentation: true,
+                launch_wave: 2,
+            },
+            CorridorConfig {
+                corridor_id: 8,
+                corridor_code: *b"NG-IN",
+                source_currency: 566,
+                dest_currency: 356,
+                max_spread_bps: 150,
+                min_spread_bps: 50,
+                max_txn_kobo: 45_000_000_000,
+                requires_documentation: true,
+                launch_wave: 2,
+            },
+            CorridorConfig {
+                corridor_id: 9,
+                corridor_code: *b"NG-TR",
+                source_currency: 566,
+                dest_currency: 949,
+                max_spread_bps: 175,
+                min_spread_bps: 60,
+                max_txn_kobo: 45_000_000_000,
+                requires_documentation: true,
+                launch_wave: 2,
+            },
+            CorridorConfig {
+                corridor_id: 10,
+                corridor_code: *b"NG-CN",
+                source_currency: 566,
+                dest_currency: 156,
+                max_spread_bps: 80,
+                min_spread_bps: 20,
+                max_txn_kobo: 150_000_000_000,
+                requires_documentation: true,
+                launch_wave: 3,
+            },
+            CorridorConfig {
+                corridor_id: 11,
+                corridor_code: *b"NG-AE",
+                source_currency: 566,
+                dest_currency: 784,
+                max_spread_bps: 90,
+                min_spread_bps: 25,
+                max_txn_kobo: 150_000_000_000,
+                requires_documentation: true,
+                launch_wave: 3,
+            },
+            CorridorConfig {
+                corridor_id: 12,
+                corridor_code: *b"NG-KE",
+                source_currency: 566,
+                dest_currency: 404,
+                max_spread_bps: 150,
+                min_spread_bps: 50,
+                max_txn_kobo: 15_000_000_000,
+                requires_documentation: false,
+                launch_wave: 1,
+            },
+            CorridorConfig {
+                corridor_id: 13,
+                corridor_code: *b"NG-ZA",
+                source_currency: 566,
+                dest_currency: 710,
+                max_spread_bps: 130,
+                min_spread_bps: 40,
+                max_txn_kobo: 15_000_000_000,
+                requires_documentation: false,
+                launch_wave: 1,
+            },
         ];
 
         // No quote can be issued until a verified market-data adapter loads a
@@ -85,8 +215,14 @@ impl CorridorFxEngine {
     /// Generate an FX quote for a corridor transfer.
     /// Enforces CBN spread caps. Performance target: <100ns.
     #[inline]
-    pub fn generate_quote(&mut self, corridor_id: u8, source_amount_kobo: u64) -> Result<CorridorQuote, FxError> {
-        let config = self.corridors.iter()
+    pub fn generate_quote(
+        &mut self,
+        corridor_id: u8,
+        source_amount_kobo: u64,
+    ) -> Result<CorridorQuote, FxError> {
+        let config = self
+            .corridors
+            .iter()
             .find(|c| c.corridor_id == corridor_id)
             .ok_or(FxError::UnknownCorridor)?;
 
@@ -98,7 +234,9 @@ impl CorridorFxEngine {
             return Err(FxError::ZeroAmount);
         }
 
-        let mid_rate = *self.rates.get(corridor_id as usize)
+        let mid_rate = *self
+            .rates
+            .get(corridor_id as usize)
             .ok_or(FxError::UnknownCorridor)?;
         if mid_rate == 0 {
             return Err(FxError::RateUnavailable);
@@ -121,13 +259,15 @@ impl CorridorFxEngine {
             .checked_mul(1_000_000_000)
             .ok_or(FxError::ArithmeticOverflow)?
             / applied_rate as u128;
-        let dest_amount = u64::try_from(dest_amount_u128).map_err(|_| FxError::ArithmeticOverflow)?;
+        let dest_amount =
+            u64::try_from(dest_amount_u128).map_err(|_| FxError::ArithmeticOverflow)?;
 
         let spread_amount_u128 = (source_amount_kobo as u128)
             .checked_mul(spread_bps as u128)
             .ok_or(FxError::ArithmeticOverflow)?
             / 10_000;
-        let spread_amount = u64::try_from(spread_amount_u128).map_err(|_| FxError::ArithmeticOverflow)?;
+        let spread_amount =
+            u64::try_from(spread_amount_u128).map_err(|_| FxError::ArithmeticOverflow)?;
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -135,11 +275,16 @@ impl CorridorFxEngine {
             .as_secs();
 
         let quote_id = self.quote_counter;
-        self.quote_counter = self.quote_counter.checked_add(1).ok_or(FxError::QuoteIdExhausted)?;
+        self.quote_counter = self
+            .quote_counter
+            .checked_add(1)
+            .ok_or(FxError::QuoteIdExhausted)?;
 
         // Quote validity: Wave 1 corridors = 60s, Wave 2/3 = 30s
         let validity = if config.launch_wave == 1 { 60 } else { 30 };
-        let valid_until_epoch_s = now.checked_add(validity).ok_or(FxError::ArithmeticOverflow)?;
+        let valid_until_epoch_s = now
+            .checked_add(validity)
+            .ok_or(FxError::ArithmeticOverflow)?;
 
         Ok(CorridorQuote {
             corridor_id,
@@ -155,11 +300,18 @@ impl CorridorFxEngine {
     }
 
     /// Load an authoritative fixed-point mid-rate from a verified market-data adapter.
-    pub fn set_authoritative_rate(&mut self, corridor_id: u8, mid_rate_fp: u64) -> Result<(), FxError> {
+    pub fn set_authoritative_rate(
+        &mut self,
+        corridor_id: u8,
+        mid_rate_fp: u64,
+    ) -> Result<(), FxError> {
         if mid_rate_fp == 0 {
             return Err(FxError::RateUnavailable);
         }
-        let slot = self.rates.get_mut(corridor_id as usize).ok_or(FxError::UnknownCorridor)?;
+        let slot = self
+            .rates
+            .get_mut(corridor_id as usize)
+            .ok_or(FxError::UnknownCorridor)?;
         *slot = mid_rate_fp;
         Ok(())
     }
@@ -237,14 +389,20 @@ mod tests {
     #[test]
     fn test_rate_is_unavailable_until_authoritative_feed_loads_it() {
         let mut engine = CorridorFxEngine::new();
-        assert_eq!(engine.generate_quote(1, 10_000_000), Err(FxError::RateUnavailable));
+        assert_eq!(
+            engine.generate_quote(1, 10_000_000),
+            Err(FxError::RateUnavailable)
+        );
     }
 
     #[test]
     fn test_quote_rejects_destination_amount_overflow() {
         let mut engine = CorridorFxEngine::new();
         engine.set_authoritative_rate(10, 1).unwrap();
-        assert_eq!(engine.generate_quote(10, 150_000_000_000), Err(FxError::ArithmeticOverflow));
+        assert_eq!(
+            engine.generate_quote(10, 150_000_000_000),
+            Err(FxError::ArithmeticOverflow)
+        );
     }
 
     #[test]
@@ -266,14 +424,19 @@ mod tests {
         let mut engine = CorridorFxEngine::new();
         engine.set_authoritative_rate(1, 125_000_000_000).unwrap();
         engine.quote_counter = u64::MAX;
-        assert_eq!(engine.generate_quote(1, 10_000_000), Err(FxError::QuoteIdExhausted));
+        assert_eq!(
+            engine.generate_quote(1, 10_000_000),
+            Err(FxError::QuoteIdExhausted)
+        );
     }
 
     #[test]
     fn test_all_corridors_have_rates() {
         let mut engine = CorridorFxEngine::new();
         for corridor_id in 1..=13u8 {
-            engine.set_authoritative_rate(corridor_id, 1_000_000_000).unwrap();
+            engine
+                .set_authoritative_rate(corridor_id, 1_000_000_000)
+                .unwrap();
             let result = engine.generate_quote(corridor_id, 10_000_000);
             assert!(result.is_ok(), "Corridor {} failed", corridor_id);
         }

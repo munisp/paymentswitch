@@ -5,7 +5,7 @@ from escalated compliance screenings.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
 import hashlib
@@ -103,7 +103,7 @@ class SuspiciousActivityReport:
     compliance_officer: str = ""
     
     # Timestamps
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     submitted_at: Optional[datetime] = None
     acknowledged_at: Optional[datetime] = None
     deadline: Optional[datetime] = None
@@ -114,7 +114,7 @@ class SuspiciousActivityReport:
     
     def __post_init__(self):
         if not self.reference:
-            self.reference = f"NORP-SAR-{datetime.utcnow().strftime('%Y%m%d')}-{self.id[-6:]}"
+            self.reference = f"NORP-SAR-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{self.id[-6:]}"
         if not self.deadline:
             days = {
                 SARPriority.CRITICAL: 1,
@@ -122,7 +122,7 @@ class SuspiciousActivityReport:
                 SARPriority.MEDIUM: 7,
                 SARPriority.LOW: 15,
             }
-            self.deadline = datetime.utcnow() + timedelta(days=days[self.priority])
+            self.deadline = datetime.now(timezone.utc) + timedelta(days=days[self.priority])
 
 
 class SARFilingService:
@@ -177,7 +177,7 @@ class SARFilingService:
             beneficiary_account=transfer_details.get("beneficiary_account", ""),
             dest_country=transfer_details.get("dest_country", ""),
             purpose=transfer_details.get("purpose", ""),
-            timestamp=datetime.fromisoformat(transfer_details.get("timestamp", datetime.utcnow().isoformat())),
+            timestamp=datetime.fromisoformat(transfer_details.get("timestamp", datetime.now(timezone.utc).isoformat())),
             status=transfer_details.get("status", "blocked"),
             screening_score=screening_result.get("score", 0),
             matched_list=screening_result.get("list", ""),
@@ -220,8 +220,8 @@ class SARFilingService:
         # In production, this would POST to NFIU API
         # For now, simulate submission
         sar.status = SARStatus.SUBMITTED
-        sar.submitted_at = datetime.utcnow()
-        sar.nfiu_reference = f"NFIU-{datetime.utcnow().strftime('%Y')}-{hashlib.md5(sar.id.encode()).hexdigest()[:8].upper()}"
+        sar.submitted_at = datetime.now(timezone.utc)
+        sar.nfiu_reference = f"NFIU-{datetime.now(timezone.utc).strftime('%Y')}-{hashlib.md5(sar.id.encode()).hexdigest()[:8].upper()}"
         
         return {
             "success": True,
@@ -241,12 +241,17 @@ class SARFilingService:
     
     def get_overdue_sars(self) -> list:
         """Get SARs past their filing deadline"""
-        now = datetime.utcnow()
-        return [
-            sar for sar in self.reports
-            if sar.deadline and now > sar.deadline
-            and sar.status not in (SARStatus.SUBMITTED, SARStatus.ACKNOWLEDGED)
-        ]
+        now = datetime.now(timezone.utc)
+        overdue = []
+        for sar in self.reports:
+            if not sar.deadline:
+                continue
+            deadline = sar.deadline
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=timezone.utc)
+            if now > deadline and sar.status not in (SARStatus.SUBMITTED, SARStatus.ACKNOWLEDGED):
+                overdue.append(sar)
+        return overdue
     
     def _classify_category(self, screening_result: dict) -> SARCategory:
         matched_list = screening_result.get("list", "").upper()

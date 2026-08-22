@@ -1,151 +1,144 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Activity,
-  TrendingUp,
-  Clock,
-  Users,
-  AlertTriangle,
-  CheckCircle,
-  XCircle,
-  Wallet,
-} from 'lucide-react';
+'use client';
+
+import React, { useEffect, useState } from 'react';
+import { Activity, CheckCircle, Clock, Wallet } from 'lucide-react';
 import { MetricCard, MetricGrid } from './MetricCard';
-import { TransactionChart, MultiLineChart } from './TransactionChart';
 import { ParticipantHealthGrid } from './ParticipantHealth';
-import { KillSwitchPanel, EmergencyActions } from './KillSwitchPanel';
+import { KillSwitchPanel } from './KillSwitchPanel';
 import { Card, CardHeader, CardTitle, CardContent } from '../common/Card';
 import { Badge } from '../common/Badge';
 import { formatDateTime, formatCurrency } from '@/lib/utils';
-import type { DashboardMetrics, ParticipantHealth, KillSwitch, Transaction } from '@/types';
+import {
+  lakehouseAPI,
+  type NOCMetrics,
+  type ParticipantHealth,
+  type KillSwitch,
+  type Transaction,
+} from '@/lib/api';
 import { createLogger } from '@/lib/logger';
+
 const log = createLogger('NOCDashboard');
 
 export function NOCDashboard() {
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
-  const [chartData, setChartData] = useState<Array<{ timestamp: string; tps: number; successRate: number; latency: number }>>([]);
+  const [metrics, setMetrics] = useState<NOCMetrics | null>(null);
   const [participants, setParticipants] = useState<ParticipantHealth[]>([]);
   const [killSwitches, setKillSwitches] = useState<KillSwitch[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
-  const [isGlobalHalted, setIsGlobalHalted] = useState(false);
 
-  // Render only backend-sourced data; synthetic defaults are prohibited.
+  // The view displays only persisted operational-read-model records. A failure is
+  // rendered as unavailable; it is never replaced with synthetic values.
   useEffect(() => {
-    (async () => {
+    let active = true;
+
+    const loadNocData = async () => {
       try {
-        const { lakehouseAPI } = await import('@/lib/api');
         const nocData = await lakehouseAPI.getNOCMetrics();
-        if (nocData?.metrics) setMetrics(nocData.metrics as DashboardMetrics);
-        if (nocData?.chart_data) setChartData(nocData.chart_data as typeof chartData);
-        if (nocData?.participant_health) setParticipants(nocData.participant_health as unknown as ParticipantHealth[]);
-        if (nocData?.kill_switches) setKillSwitches(nocData.kill_switches as unknown as KillSwitch[]);
-        if (nocData?.recent_transactions) setRecentTransactions(nocData.recent_transactions as unknown as Transaction[]);
-      } catch (err) { log.error('NOC API unavailable, using defaults:', err); }
-    })();
+        if (!active) return;
+        setMetrics(nocData);
+        setParticipants(nocData.participant_health);
+        setKillSwitches(nocData.kill_switches);
+        setRecentTransactions(nocData.recent_transactions);
+      } catch (error) {
+        if (active) {
+          log.error('NOC API is unavailable; no synthetic dashboard data will be displayed', error);
+        }
+      }
+    };
+
+    void loadNocData();
+    return () => {
+      active = false;
+    };
   }, []);
+
+  const handleActivateKillSwitch = async (id: string, reason: string) => {
+    await lakehouseAPI.activateKillSwitch(id, reason);
+  };
+
+  const handleDeactivateKillSwitch = async (id: string) => {
+    await lakehouseAPI.deactivateKillSwitch(id);
+  };
 
   if (!metrics) {
     return (
       <Card>
         <CardHeader><CardTitle>NOC data unavailable</CardTitle></CardHeader>
-        <CardContent className="text-sm text-gray-600">No live NOC metrics were returned by the backend. Synthetic values are intentionally disabled.</CardContent>
+        <CardContent className="text-sm text-gray-600">
+          No live NOC metrics were returned by the operational read model. Synthetic values are intentionally disabled.
+        </CardContent>
       </Card>
     );
   }
 
-  const handleActivateKillSwitch = async (id: string, reason: string) => {
-    log.error({ id, reason }, 'Kill-switch activation endpoint is not wired; refusing local-only mutation');
-    throw new Error('Kill-switch activation is unavailable until the backend command endpoint is connected');
-  };
-
-  const handleDeactivateKillSwitch = async (id: string) => {
-    log.error({ id }, 'Kill-switch deactivation endpoint is not wired; refusing local-only mutation');
-    throw new Error('Kill-switch deactivation is unavailable until the backend command endpoint is connected');
-  };
-
   return (
     <div className="space-y-6">
-      {/* Key Metrics */}
       <MetricGrid columns={4}>
         <MetricCard
-          title="Transactions Per Second"
-          value={metrics.tps.toFixed(0)}
-          change={5.2}
-          trend="up"
+          title={metrics.tps.label}
+          value={metrics.tps.value}
+          change={metrics.tps.change}
+          changeLabel={metrics.tps.change_label}
+          trend={metrics.tps.trend}
+          format="number"
           icon={<Activity className="h-5 w-5" />}
         />
         <MetricCard
-          title="Success Rate"
-          value={metrics.successRate}
+          title={metrics.success_rate.label}
+          value={metrics.success_rate.value}
+          change={metrics.success_rate.change}
+          changeLabel={metrics.success_rate.change_label}
+          trend={metrics.success_rate.trend}
           format="percentage"
-          change={0.3}
-          trend="up"
           icon={<CheckCircle className="h-5 w-5" />}
         />
         <MetricCard
-          title="Avg Latency"
-          value={`${metrics.avgLatencyMs.toFixed(0)}ms`}
-          change={-2.1}
-          trend="down"
+          title={metrics.avg_latency.label}
+          value={`${metrics.avg_latency.value}ms`}
+          change={metrics.avg_latency.change}
+          changeLabel={metrics.avg_latency.change_label}
+          trend={metrics.avg_latency.trend}
           icon={<Clock className="h-5 w-5" />}
         />
         <MetricCard
-          title="Today's Volume"
-          value={metrics.totalVolumeToday}
+          title={metrics.daily_volume.label}
+          value={metrics.daily_volume.value}
+          change={metrics.daily_volume.change}
+          changeLabel={metrics.daily_volume.change_label}
+          trend={metrics.daily_volume.trend}
           format="currency"
-          change={12.5}
-          trend="up"
           icon={<Wallet className="h-5 w-5" />}
         />
       </MetricGrid>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <TransactionChart
-          data={chartData}
-          title="Transaction Rate (TPS)"
-          dataKey="tps"
-          color="#0ea5e9"
-          type="area"
-        />
-        <MultiLineChart
-          data={chartData}
-          title="Performance Metrics"
-          lines={[
-            { dataKey: 'successRate', color: '#22c55e', name: 'Success Rate (%)' },
-            { dataKey: 'latency', color: '#f59e0b', name: 'Latency (ms)' },
-          ]}
-        />
-      </div>
+      <Card>
+        <CardHeader><CardTitle>Historical performance series unavailable</CardTitle></CardHeader>
+        <CardContent className="text-sm text-gray-600">
+          The current PostgreSQL operational read model does not expose a persisted time-series projection. The dashboard does not draw a substitute chart.
+        </CardContent>
+      </Card>
 
-      {/* Participant Health */}
       <ParticipantHealthGrid
         participants={participants}
-        onParticipantClick={(fspId) => log.info('Clicked participant:', fspId)}
+        onParticipantClick={(participantId) => log.info('Participant selected', { participantId })}
       />
 
-      {/* Kill Switches and Emergency Controls */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <KillSwitchPanel
-            killSwitches={killSwitches}
-            onActivate={handleActivateKillSwitch}
-            onDeactivate={handleDeactivateKillSwitch}
-          />
-        </div>
-        <EmergencyActions
-          isGlobalHalted={isGlobalHalted}
-          onGlobalHalt={() => setIsGlobalHalted(true)}
-          onResumeAll={() => setIsGlobalHalted(false)}
+      <div className="grid grid-cols-1 gap-6">
+        <KillSwitchPanel
+          killSwitches={killSwitches}
+          onActivate={handleActivateKillSwitch}
+          onDeactivate={handleDeactivateKillSwitch}
         />
+        <Card>
+          <CardHeader><CardTitle>Global emergency control unavailable</CardTitle></CardHeader>
+          <CardContent className="text-sm text-gray-600">
+            No authoritative global kill-switch command endpoint is registered in the platform. The dashboard does not simulate a global halt locally.
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Recent Transactions */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Recent Transactions</CardTitle>
-          <button className="text-sm text-primary-600 hover:text-primary-700 font-medium">
-            View All
-          </button>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -162,25 +155,21 @@ export function NOCDashboard() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {recentTransactions.map((txn) => (
-                  <tr key={txn.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-primary-600">
-                      {txn.transferId}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{txn.payerFsp}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{txn.payeeFsp}</td>
+                {recentTransactions.map((transaction) => (
+                  <tr key={transaction.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-primary-600">{transaction.id}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{transaction.payer}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{transaction.payee}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {formatCurrency(txn.amount, txn.currency)}
+                      {formatCurrency(transaction.amount, transaction.currency)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <Badge status={txn.state}>{txn.state}</Badge>
+                      <Badge status={transaction.status}>{transaction.status}</Badge>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {txn.latencyMs ? `${txn.latencyMs}ms` : '-'}
+                      {transaction.latency_ms === undefined ? 'Unavailable' : `${transaction.latency_ms}ms`}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {formatDateTime(txn.createdAt)}
-                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDateTime(transaction.timestamp)}</td>
                   </tr>
                 ))}
               </tbody>

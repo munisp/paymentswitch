@@ -13,7 +13,22 @@ if [[ "${ALLOW_DESTRUCTIVE_RECOVERY_TESTS:-}" != "true" ]]; then
   exit 1
 fi
 
-compose=(docker compose --env-file "${LIVE_GATE_ENV_FILE:-$ROOT/.env.assurance}" -f "$ROOT/docker-compose.unified.yml")
+container_runtime="${ASSURANCE_CONTAINER_RUNTIME:-docker}"
+case "$container_runtime" in
+  docker)
+    compose=(docker compose)
+    inspect_cmd=(docker inspect)
+    ;;
+  podman)
+    if podman compose version >/dev/null 2>&1; then compose=(podman compose); else compose=(podman-compose); fi
+    inspect_cmd=(podman inspect)
+    ;;
+  *)
+    printf 'Unsupported ASSURANCE_CONTAINER_RUNTIME=%s; expected docker or podman.\n' "$container_runtime" >&2
+    exit 1
+    ;;
+esac
+compose+=(--env-file "${LIVE_GATE_ENV_FILE:-$ROOT/.env.assurance}" -f "$ROOT/docker-compose.unified.yml")
 base_url="${APISIX_BASE_URL%/}"
 ca_file="$TLS_CA_FILE"
 results_file="${DEPENDENCY_RECOVERY_RESULTS_FILE:-$ROOT/.audit/dependency-recovery-gate-results.txt}"
@@ -44,9 +59,8 @@ wait_healthy() {
   local limit=90
   for ((i=0; i<limit; i++)); do
     local cid health
-    cid="${compose[*]} ps -q $service"
-    cid="$(eval "$cid")"
-    health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || true)"
+    cid="$("${compose[@]}" ps -q "$service")"
+    health="$("${inspect_cmd[@]}" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || true)"
     if [[ "$health" == "healthy" || "$health" == "running" ]]; then
       printf 'PASS %s recovered (%s)\n' "$service" "$health" | tee -a "$results_file"
       return 0

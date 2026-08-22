@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -93,28 +94,37 @@ func main() {
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/ready", readyHandler)
 
-	// ILP Protocol endpoints
-	mux.HandleFunc("/api/v1/ilp/generate", generateILPHandler)
-	mux.HandleFunc("/api/v1/ilp/verify", verifyFulfillmentHandler)
+	// Every financial instruction requires a realm role issued by Keycloak. A
+	// valid bearer token alone is not authority to move funds, register an FSP,
+	// inspect a balance, or generate a fulfillment-capable ILP packet.
+	operators := []string{"operator", "admin"}
+	regulators := []string{"admin", "cbn"}
 
-	// Transfer endpoints
-	mux.HandleFunc("/api/v1/transfers/execute", executeTransferHandler)
-	mux.HandleFunc("/api/v1/transfers/prepare", prepareTransferHandler)
+	// ILP Protocol endpoints
+	mux.HandleFunc("/api/v1/ilp/generate", requireLedgerRoles(generateILPHandler, operators...))
+	mux.HandleFunc("/api/v1/ilp/verify", requireLedgerRoles(verifyFulfillmentHandler, operators...))
+
+	// The legacy direct execution path uses an audited simulated adapter. Keep
+	// the endpoint explicit but unavailable rather than risking fabricated or
+	// non-durable money movement. Production uses Mojaloop prepare/fulfill/abort.
+	mux.HandleFunc("/api/v1/transfers/execute", legacyLedgerEndpointDisabled)
+	mux.HandleFunc("/api/v1/transfers/prepare", requireLedgerRoles(prepareTransferHandler, operators...))
 
 	// Mojaloop Transfer Flow endpoints (TigerBeetle-backed)
-	mux.HandleFunc("/api/v1/mojaloop/transfers/prepare", mojaloopPrepareHandler)
-	mux.HandleFunc("/api/v1/mojaloop/transfers/fulfill", mojaloopFulfillHandler)
-	mux.HandleFunc("/api/v1/mojaloop/transfers/abort", mojaloopAbortHandler)
-	mux.HandleFunc("/api/v1/mojaloop/transfers/execute", mojaloopExecuteHandler)
-	mux.HandleFunc("/api/v1/mojaloop/participants/register", registerParticipantHandler)
-	mux.HandleFunc("/api/v1/mojaloop/participants/position", getParticipantPositionHandler)
+	mux.HandleFunc("/api/v1/mojaloop/transfers/prepare", requireLedgerRoles(mojaloopPrepareHandler, operators...))
+	mux.HandleFunc("/api/v1/mojaloop/transfers/fulfill", requireLedgerRoles(mojaloopFulfillHandler, operators...))
+	mux.HandleFunc("/api/v1/mojaloop/transfers/abort", requireLedgerRoles(mojaloopAbortHandler, operators...))
+	mux.HandleFunc("/api/v1/mojaloop/transfers/execute", legacyLedgerEndpointDisabled)
+	mux.HandleFunc("/api/v1/mojaloop/participants/register", requireLedgerRoles(registerParticipantHandler, regulators...))
+	mux.HandleFunc("/api/v1/mojaloop/participants/position", legacyLedgerEndpointDisabled)
 
 	// Ledger endpoints
-	mux.HandleFunc("/api/v1/ledger/reconcile", reconcileHandler)
-	mux.HandleFunc("/api/v1/ledger/balance", getBalanceHandler)
+	mux.HandleFunc("/api/v1/ledger/reconcile", requireLedgerRoles(reconcileHandler, regulators...))
+	mux.HandleFunc("/api/v1/ledger/balance", requireLedgerRoles(getBalanceHandler, operators...))
 
-	// TigerBeetle endpoints
-	mux.HandleFunc("/api/v1/tigerbeetle/transfer", tigerBeetleTransferHandler)
+	// Raw TigerBeetle execution is disabled. Only the persisted Mojaloop state
+	// machine may create, post, or void funds holds.
+	mux.HandleFunc("/api/v1/tigerbeetle/transfer", legacyLedgerEndpointDisabled)
 
 	// Every non-health ledger route independently verifies a Keycloak RS256
 	// bearer token. APISIX remains the edge enforcement point, but no direct
@@ -142,7 +152,7 @@ func main() {
 	// Create server
 	server := &http.Server{
 		Addr:         ":" + port,
-		Handler:      loggingMiddleware(corsMiddleware(auth.Middleware(mux))),
+		Handler:      loggingMiddleware(corsMiddleware(auth.Middleware(bodyLimitMiddleware(mux)))),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -174,6 +184,57 @@ func main() {
 }
 
 // Middleware
+const maxLedgerRequestBodyBytes int64 = 1 << 20
+
+func bodyLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxLedgerRequestBodyBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func validatePrepareRequest(transferID, payerFSP, payeeFSP string, amount uint64, currency, ilpPacket, condition string) error {
+	if strings.TrimSpace(transferID) == "" || len(transferID) > 128 {
+		return fmt.Errorf("transferId is required and must be at most 128 characters")
+	}
+	if strings.TrimSpace(payerFSP) == "" || strings.TrimSpace(payeeFSP) == "" || payerFSP == payeeFSP {
+		return fmt.Errorf("payerFsp and distinct payeeFsp are required")
+	}
+	if amount == 0 {
+		return fmt.Errorf("amount must be positive")
+	}
+	if _, err := mojaloop.RequireCurrencyLedger(currency); err != nil {
+		return err
+	}
+	if strings.TrimSpace(ilpPacket) == "" || strings.TrimSpace(condition) == "" {
+		return fmt.Errorf("ilpPacket and condition are required")
+	}
+	return nil
+}
+
+func legacyLedgerEndpointDisabled(w http.ResponseWriter, r *http.Request) {
+	writeError(w, http.StatusServiceUnavailable, "Legacy ledger endpoint disabled", "Use the persisted Mojaloop prepare/fulfill/abort flow.")
+}
+
+func requireLedgerRoles(next http.HandlerFunc, roles ...string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims := integration.GetClaimsFromContext(r.Context())
+		if claims == nil {
+			writeError(w, http.StatusUnauthorized, "Authentication context missing", "")
+			return
+		}
+		for _, role := range roles {
+			if claims.HasRole(role) {
+				next(w, r)
+				return
+			}
+		}
+		writeError(w, http.StatusForbidden, "Insufficient ledger role", "")
+	}
+}
+
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -186,8 +247,6 @@ func corsMiddleware(next http.Handler) http.Handler {
 	var allowed []string
 	if origins := os.Getenv("CORS_ALLOWED_ORIGINS"); origins != "" {
 		allowed = strings.Split(origins, ",")
-	} else {
-		allowed = []string{"https://app.paymentswitch.ng", "https://admin.paymentswitch.ng"}
 	}
 	allowedSet := make(map[string]bool, len(allowed))
 	for _, o := range allowed {
@@ -257,7 +316,14 @@ func generateILPHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, result)
+	// The fulfillment is a settlement secret and must never be returned through
+	// an external generation endpoint. Only condition, packet, and expiry are
+	// needed by the prepare-side caller.
+	writeJSON(w, http.StatusOK, map[string]string{
+		"ilpPacket":  result.ILPPacket,
+		"condition":  result.Condition,
+		"expiration": result.Expiration,
+	})
 }
 
 func verifyFulfillmentHandler(w http.ResponseWriter, r *http.Request) {
@@ -347,12 +413,14 @@ func prepareTransferHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Do not return the fulfillment secret to the prepare caller. Its disclosure
+	// would permit a caller to complete a pending transfer outside the intended
+	// counterparty fulfillment path.
 	response := map[string]interface{}{
-		"transferId":  req.TransferID,
-		"ilpPacket":   ilpResult.ILPPacket,
-		"condition":   ilpResult.Condition,
-		"fulfillment": ilpResult.Fulfillment,
-		"expiration":  ilpResult.Expiration,
+		"transferId": req.TransferID,
+		"ilpPacket":  ilpResult.ILPPacket,
+		"condition":  ilpResult.Condition,
+		"expiration": ilpResult.Expiration,
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -491,15 +559,30 @@ func mojaloopPrepareHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
+	if err := validatePrepareRequest(req.TransferID, req.PayerFSP, req.PayeeFSP, req.Amount, req.Currency, req.ILPPacket, req.Condition); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid transfer preparation", err.Error())
+		return
+	}
 
-	expiration, _ := time.Parse("2006-01-02T15:04:05.000Z", req.Expiration)
-	if expiration.IsZero() {
-		expiration = time.Now().UTC().Add(30 * time.Second)
+	expiration, err := time.Parse("2006-01-02T15:04:05.000Z", req.Expiration)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid transfer expiration", "expiration must be an RFC3339 millisecond UTC timestamp")
+		return
+	}
+	now := time.Now().UTC()
+	if !expiration.After(now) || expiration.After(now.Add(5*time.Minute)) {
+		writeError(w, http.StatusBadRequest, "Invalid transfer expiration", "expiration must be in the next five minutes")
+		return
 	}
 
 	ctx := r.Context()
-	// FIXED: Use production adapter with PostgreSQL persistence
-	adapter := mojaloop.GetProductionMojaloopAdapter()
+	// Use the durable adapter. A missing PostgreSQL store is a hard dependency
+	// failure, not an opportunity to use an in-memory transfer path.
+	adapter, err := mojaloop.GetProductionMojaloopAdapter()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Transfer store unavailable", err.Error())
+		return
+	}
 	result, err := adapter.PrepareTransfer(ctx, &mojaloop.PrepareTransferRequest{
 		TransferID: req.TransferID,
 		PayerFSP:   req.PayerFSP,
@@ -534,10 +617,17 @@ func mojaloopFulfillHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
+	if strings.TrimSpace(req.TransferID) == "" || strings.TrimSpace(req.Fulfillment) == "" {
+		writeError(w, http.StatusBadRequest, "Invalid transfer fulfillment", "transferId and fulfillment are required")
+		return
+	}
 
 	ctx := r.Context()
-	// FIXED: Use production adapter with PostgreSQL persistence
-	adapter := mojaloop.GetProductionMojaloopAdapter()
+	adapter, err := mojaloop.GetProductionMojaloopAdapter()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Transfer store unavailable", err.Error())
+		return
+	}
 	result, err := adapter.FulfillTransfer(ctx, &mojaloop.FulfillTransferRequest{
 		TransferID:  req.TransferID,
 		Fulfillment: req.Fulfillment,
@@ -567,10 +657,17 @@ func mojaloopAbortHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
+	if strings.TrimSpace(req.TransferID) == "" || strings.TrimSpace(req.ErrorCode) == "" {
+		writeError(w, http.StatusBadRequest, "Invalid transfer abort", "transferId and errorCode are required")
+		return
+	}
 
 	ctx := r.Context()
-	// FIXED: Use production adapter with PostgreSQL persistence
-	adapter := mojaloop.GetProductionMojaloopAdapter()
+	adapter, err := mojaloop.GetProductionMojaloopAdapter()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Transfer store unavailable", err.Error())
+		return
+	}
 	result, err := adapter.AbortTransfer(ctx, &mojaloop.AbortTransferRequest{
 		TransferID:       req.TransferID,
 		ErrorCode:        req.ErrorCode,
@@ -641,11 +738,22 @@ func registerParticipantHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid request body", err.Error())
 		return
 	}
+	if strings.TrimSpace(req.FSPID) == "" || req.AccountID == 0 {
+		writeError(w, http.StatusBadRequest, "Invalid participant registration", "fspId and nonzero accountId are required")
+		return
+	}
+	if _, err := mojaloop.RequireCurrencyLedger(req.Currency); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid participant registration", err.Error())
+		return
+	}
 
 	ctx := r.Context()
-	// FIXED: Use production adapter with PostgreSQL persistence
-	adapter := mojaloop.GetProductionMojaloopAdapter()
-	err := adapter.RegisterParticipant(ctx, req.FSPID, req.AccountID, req.Currency)
+	adapter, err := mojaloop.GetProductionMojaloopAdapter()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Transfer store unavailable", err.Error())
+		return
+	}
+	err = adapter.RegisterParticipant(ctx, req.FSPID, req.AccountID, req.Currency)
 
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to register participant", err.Error())

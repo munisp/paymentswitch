@@ -10,6 +10,7 @@ build/
 # Environment variables
 .env
 .env.local
+.env.assurance
 .env.development.local
 .env.test.local
 .env.production.local
@@ -111,3 +112,14 @@ target/
 e2e_test_results_*.json
 .audit/
 audit/artifacts/
+
+# Generated local Rust coverage reports
+payment-core/rust-services/outbound-ledger/coverage-*/
+
+# Local test certificates
+certs/
+test-certs/
+
+# Local audit archives
+*.audit.tar
+*.audit.tar.gz

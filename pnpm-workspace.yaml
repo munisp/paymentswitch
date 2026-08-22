@@ -1,26 +1,21 @@
 packages:
-  - '.'
+  - "."
+
 patchedDependencies:
   wouter@3.7.1: patches/wouter@3.7.1.patch
   exceljs@4.4.0: patches/exceljs@4.4.0.patch
+
 overrides:
-  'brace-expansion': '>=2.1.4'
-  dompurify: '>=3.4.13'
-  'fast-xml-parser': '>=5.10.1'
-  'mdast-util-to-hast': '13.2.1'
-  'mdast-util-to-hast@13.2.0': '13.2.1'
-  'streamdown>rehype-raw>hast-util-raw>mdast-util-to-hast': '13.2.1'
-  'streamdown>remark-rehype>mdast-util-to-hast': '13.2.1'
-  lodash: '4.18.1'
-  'lodash-es': '4.18.1'
-  minimatch: '>=5.1.8'
-  'path-to-regexp': '0.1.13'
-  'path-to-regexp@0.1.12': '0.1.13'
-  'lodash-es@4.17.21': '4.18.1'
-  'uuid@<11.1.1': '11.1.1'
-  'uuid@8.3.2': '11.1.1'
-  'exceljs>uuid': '11.1.1'
-  'streamdown>mermaid>uuid': '11.1.1'
-  qs: '>=6.15.3'
-  'tailwindcss>nanoid': '3.3.7'
-  tmp: '>=0.2.6'
+  # Security-fixed transitive packages. Keep selectors compatible with pnpm v10.
+  mdast-util-to-hast: 13.2.1
+  uuid: 11.1.1
+  "exceljs>uuid": 11.1.1
+  qs: ">=6.15.3"
+  tmp: ">=0.2.6"
+  # ExcelJS 4.x transitively pins old archive utilities; preserve each major API.
+  "minimatch@3.1.2": 3.1.4
+  "minimatch@5.1.6": 5.1.9
+  "brace-expansion@1.1.12": 1.1.18
+  "brace-expansion@2.0.2": 2.1.4
+  lodash: 4.18.1
+  "lodash-es": 4.18.1

@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"crypto/rand"
+	"errors"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -245,15 +246,7 @@ func (s *SandboxService) CreateEnvironment(orgID, name string, config *SandboxCo
 	defer s.mu.Unlock()
 
 	if config == nil {
-		config = &SandboxConfig{
-			EnableMockResponses: true,
-			SimulateLatency:     true,
-			LatencyMinMs:        100,
-			LatencyMaxMs:        500,
-			FailureRate:         0.05,
-			AutoApproveKYC:      true,
-			DefaultCurrency:     "NGN",
-		}
+		return nil, errors.New("sandbox configuration is required; mock responses and automatic KYC approval must be explicitly configured")
 	}
 
 	env := &SandboxEnvironment{

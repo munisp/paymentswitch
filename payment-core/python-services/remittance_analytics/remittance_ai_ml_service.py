@@ -19,7 +19,7 @@ import json
 import time
 import logging
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import numpy as np
@@ -158,7 +158,7 @@ async def train_remittance_prophet(req: RemittanceProphetRequest):
             "training_samples": len(df),
             "cross_validation_folds": len(perf),
             "confidence_score": round(100 - float(perf["mape"].mean()) * 100, 2),
-            "last_trained": datetime.utcnow().isoformat(),
+            "last_trained": datetime.now(timezone.utc).isoformat(),
             "direction": req.direction,
             "corridor": req.corridor,
             "regressors": ["is_salary_day", "is_month_end", "is_holiday"],

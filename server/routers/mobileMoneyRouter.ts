@@ -43,11 +43,14 @@ export const mobileMoneyRouter = router({
       recipientPhone: z.string(),
       amount: z.number().positive(),
       narration: z.string().optional(),
+      idempotencyKey: z.string().min(16).max(128),
     }))
     .mutation(async ({ ctx, input }) => {
       log.info({ provider: input.provider, amount: input.amount, userId: ctx.user.id }, 'Mobile money transfer initiated');
       return await sendMobileMoneyTransfer({
-        remittanceId: `REM-${Date.now()}`,
+        ownerId: String(ctx.user.id),
+        idempotencyKey: input.idempotencyKey,
+        remittanceId: `REM-${ctx.user.id}-${input.idempotencyKey}`,
         provider: input.provider,
         recipientPhone: input.recipientPhone,
         amount: input.amount,
@@ -57,8 +60,8 @@ export const mobileMoneyRouter = router({
 
   getTransferStatus: protectedProcedure
     .input(z.object({ reference: z.string() }))
-    .query(async ({ input }) => {
-      return await getMobileMoneyTransferStatus(input.reference);
+    .query(async ({ ctx, input }) => {
+      return await getMobileMoneyTransferStatus(String(ctx.user.id), input.reference);
     }),
 
   checkBalance: protectedProcedure
@@ -78,8 +81,9 @@ export const mobileMoneyRouter = router({
       provider: z.string().optional(),
       limit: z.number().min(1).max(100).optional().default(20),
     }).optional())
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       return await getMobileMoneyHistory({
+        ownerId: String(ctx.user.id),
         provider: input?.provider,
         limit: input?.limit ?? 20,
       });

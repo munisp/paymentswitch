@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/payment-switch/go-services/internal/database"
+	"github.com/payment-switch/go-services/internal/integration"
 	"github.com/payment-switch/go-services/internal/tigerbeetle"
 	pb "github.com/payment-switch/go-services/pkg/grpc/ledger"
 	grpcInterceptors "github.com/payment-switch/go-services/pkg/grpc/interceptors"
@@ -340,6 +341,15 @@ func main() {
 	}
 	defer db.Close()
 
+	keycloakConfig := integration.DefaultKeycloakConfig()
+	if value := os.Getenv("KEYCLOAK_URL"); value != "" { keycloakConfig.BaseURL = value }
+	if value := os.Getenv("KEYCLOAK_REALM"); value != "" { keycloakConfig.Realm = value }
+	if value := os.Getenv("KEYCLOAK_CLIENT_ID"); value != "" { keycloakConfig.ClientID = value }
+	if value := os.Getenv("KEYCLOAK_REQUIRED_AUDIENCE"); value != "" { keycloakConfig.RequiredAudience = value }
+	if value := os.Getenv("KEYCLOAK_REQUIRED_ISSUER"); value != "" { keycloakConfig.RequiredIssuer = value }
+	keycloakValidator, err := integration.NewKeycloakJWTValidator(keycloakConfig)
+	if err != nil { log.Fatalf("Failed to initialize Keycloak JWT validator: %v", err) }
+
 	// Create gRPC server
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
 	if err != nil {
@@ -349,10 +359,11 @@ func main() {
 	grpcServer := grpc.NewServer(
 		grpc.MaxRecvMsgSize(10*1024*1024), // 10MB
 		grpc.MaxSendMsgSize(10*1024*1024), // 10MB
-		grpc.ChainUnaryInterceptor(
-			grpcInterceptors.ServerUnaryRecoveryInterceptor(),
-			grpcInterceptors.ServerUnaryLoggingInterceptor(),
-		),
+			grpc.ChainUnaryInterceptor(
+				grpcInterceptors.ServerUnaryRecoveryInterceptor(),
+				grpcInterceptors.ServerUnaryLoggingInterceptor(),
+				grpcInterceptors.LedgerUnaryAuthInterceptor(grpcInterceptors.LedgerAuthConfig{Validator: keycloakValidator}),
+			),
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionIdle:     5 * time.Minute,
 			MaxConnectionAge:      30 * time.Minute,

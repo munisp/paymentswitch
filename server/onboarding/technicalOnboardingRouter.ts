@@ -793,24 +793,44 @@ export const technicalOnboardingRouter = router({
       const db = await getDb();
       if (!db) throw new Error("Database not available");
 
-      // Update status to submitted
-      await db
+      // Transition the caller's persisted configuration and retain its real ID for review linkage.
+      const [configuration] = await db
         .update(technicalConfigurations)
-        .set({ status: "submitted" })
+        .set({ status: "submitted", updatedAt: new Date() })
         .where(
           and(
             eq(technicalConfigurations.applicationId, input.applicationId),
             eq(technicalConfigurations.userId, ctx.user.id)
           )
-        );
+        )
+        .returning({ id: technicalConfigurations.id });
 
-      // Create review record
-      await db.insert(technicalOnboardingReviews).values({
-        configurationId: 0,
-        applicationId: input.applicationId,
-        reviewerId: 0, // Will be assigned to admin
-        status: "pending",
-      });
+      if (!configuration) {
+        throw new Error(
+          "Technical configuration not found for this application and user"
+        );
+      }
+
+      // A configuration can have only one active review. The reviewer remains
+      // null until a privileged reviewer claims a terminal decision.
+      const [pendingReview] = await db
+        .select({ id: technicalOnboardingReviews.id })
+        .from(technicalOnboardingReviews)
+        .where(
+          and(
+            eq(technicalOnboardingReviews.configurationId, configuration.id),
+            eq(technicalOnboardingReviews.status, "pending")
+          )
+        )
+        .limit(1);
+
+      if (!pendingReview) {
+        await db.insert(technicalOnboardingReviews).values({
+          configurationId: configuration.id,
+          applicationId: input.applicationId,
+          status: "pending",
+        });
+      }
 
       // Send notification to admins
       try {
@@ -884,52 +904,57 @@ export const technicalOnboardingRouter = router({
       const db = await getDb();
       if (!db) throw new Error("Database not available");
 
-      // Update review
-      await db
-        .update(technicalOnboardingReviews)
-        .set({
-          status: input.status,
-          reviewerId: ctx.user.id,
-          comments: input.comments || null,
-          correctionsRequired: input.correctionsRequired
-            ? JSON.stringify(input.correctionsRequired)
-            : null,
-        })
-        .where(eq(technicalOnboardingReviews.id, input.reviewId));
-
-      // Update technical config status
       const [review] = await db
         .select()
         .from(technicalOnboardingReviews)
         .where(eq(technicalOnboardingReviews.id, input.reviewId))
         .limit(1);
 
-      if (review) {
-        await db
-          .update(technicalConfigurations)
-          .set({
-            status:
-              input.status === "approved"
-                ? "approved"
-                : input.status === "rejected"
-                  ? "rejected"
-                  : "draft",
-          })
-          .where(
-            eq(technicalConfigurations.applicationId, review.applicationId ?? 0)
-          );
+      if (!review) {
+        throw new Error('Technical onboarding review not found');
       }
+
+      // Persist the administrator assignment and terminal review outcome.
+      await db
+        .update(technicalOnboardingReviews)
+        .set({
+          status: input.status,
+          reviewerId: ctx.user.id,
+          correctionsRequired: input.correctionsRequired
+            ? JSON.stringify(input.correctionsRequired)
+            : null,
+          reviewedAt: new Date(),
+        })
+        .where(eq(technicalOnboardingReviews.id, input.reviewId));
+
+      await db
+        .update(technicalConfigurations)
+        .set({
+          status:
+            input.status === "approved"
+              ? "approved"
+              : input.status === "rejected"
+                ? "rejected"
+                : "draft",
+          updatedAt: new Date(),
+        })
+        .where(eq(technicalConfigurations.id, review.configurationId));
 
       // Send notification to participant
       try {
         const { notifyOwner } = await import("../_core/notification");
         const statusText =
-          review.status === "approved" ? "approved" : "rejected";
+          input.status === "approved"
+            ? "approved"
+            : input.status === "rejected"
+              ? "rejected"
+              : "corrections requested";
         const message =
-          review.status === "approved"
-            ? `Your technical configuration has been approved. You can now proceed to the next step.`
-            : `Your technical configuration has been rejected. Reason: ${review.reviewNotes || "Please review and resubmit."}`;
-
+          input.status === "approved"
+            ? "Your technical configuration has been approved. You can now proceed to the next step."
+            : input.status === "rejected"
+              ? `Your technical configuration has been rejected. Reason: ${input.comments || "Please review and resubmit."}`
+              : `Corrections are required before technical onboarding can proceed: ${(input.correctionsRequired || []).join(", ") || "Please review the reviewer comments."}`;
         await notifyOwner({
           title: `Technical Configuration ${statusText.charAt(0).toUpperCase() + statusText.slice(1)}`,
           content: message,

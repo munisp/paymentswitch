@@ -5,8 +5,15 @@ edition = "2021"
 description = "Ultra-low-latency TigerBeetle ledger service for outbound remittance double-entry postings"
 
 [dependencies]
+async-trait = "0.1"
+deadpool-postgres = { version = "0.14", features = ["rt_tokio_1"] }
+native-tls = "0.2"
+postgres-native-tls = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
 
 [dev-dependencies]
 criterion = "0.5"

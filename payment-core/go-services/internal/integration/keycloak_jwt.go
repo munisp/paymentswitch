@@ -227,12 +227,15 @@ func (v *KeycloakJWTValidator) ValidateToken(ctx context.Context, tokenString st
 func (v *KeycloakJWTValidator) validateClaims(claims *JWTClaims) error {
 	now := time.Now()
 
-	// Check expiration
-	if claims.ExpiresAt > 0 {
-		expTime := time.Unix(claims.ExpiresAt, 0)
-		if now.After(expTime.Add(v.config.ClockSkew)) {
-			return fmt.Errorf("token expired")
-		}
+	// Payment-service bearer tokens must be short-lived and explicitly expire.
+	// Treating an omitted exp claim as valid would permit an indefinitely reusable
+	// signed token if an issuer or mapper were misconfigured.
+	if claims.ExpiresAt <= 0 {
+		return fmt.Errorf("token expiration claim is required")
+	}
+	expTime := time.Unix(claims.ExpiresAt, 0)
+	if now.After(expTime.Add(v.config.ClockSkew)) {
+		return fmt.Errorf("token expired")
 	}
 
 	// Check not before
@@ -310,6 +313,12 @@ func (v *KeycloakJWTValidator) parseRSAPublicKey(jwk *JWK) (*rsa.PublicKey, erro
 	if jwk.Kty != "RSA" {
 		return nil, fmt.Errorf("unsupported key type: %s", jwk.Kty)
 	}
+	if jwk.Alg != "" && jwk.Alg != "RS256" {
+		return nil, fmt.Errorf("unsupported JWK algorithm: %s", jwk.Alg)
+	}
+	if jwk.Use != "" && jwk.Use != "sig" {
+		return nil, fmt.Errorf("JWK use must be sig, got %s", jwk.Use)
+	}
 
 	// Decode modulus
 	nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
@@ -327,6 +336,9 @@ func (v *KeycloakJWTValidator) parseRSAPublicKey(jwk *JWK) (*rsa.PublicKey, erro
 	for _, b := range eBytes {
 		e = e<<8 + int(b)
 	}
+	if n.Sign() <= 0 || e < 3 || e%2 == 0 {
+		return nil, fmt.Errorf("invalid RSA public key parameters")
+	}
 
 	return &rsa.PublicKey{N: n, E: e}, nil
 }
@@ -339,12 +351,12 @@ func (v *KeycloakJWTValidator) verifySignature(message, signature string, public
 		return fmt.Errorf("failed to decode signature: %w", err)
 	}
 
-			digest := sha256.Sum256([]byte(message))
-		if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, digest[:], sigBytes); err != nil {
-			return fmt.Errorf("invalid JWT signature: %w", err)
-		}
+	digest := sha256.Sum256([]byte(message))
+	if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, digest[:], sigBytes); err != nil {
+		return fmt.Errorf("invalid JWT signature: %w", err)
+	}
 
-		return nil
+	return nil
 
 }
 
