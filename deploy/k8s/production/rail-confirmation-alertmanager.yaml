@@ -1,0 +1,46 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: rail-confirmation-paging
+  namespace: payment-switch-monitoring
+  labels:
+    alertmanagerConfig: payment-switch
+spec:
+  route:
+    receiver: rail-confirmation-warning
+    groupBy: [alertname, service]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    routes:
+      - receiver: rail-confirmation-page
+        matchers:
+          - name: service
+            matchType: '='
+            value: rail-confirmation-ingest
+          - name: severity
+            matchType: '='
+            value: critical
+        continue: false
+  receivers:
+    - name: rail-confirmation-page
+      pagerdutyConfigs:
+        - routingKey:
+            name: payment-switch-alerting-secrets
+            key: pagerduty-routing-key
+          sendResolved: true
+          severity: critical
+          description: '{{ .CommonAnnotations.summary }}'
+          details:
+            runbook: '{{ .CommonAnnotations.runbook_url }}'
+            alertname: '{{ .CommonLabels.alertname }}'
+            service: '{{ .CommonLabels.service }}'
+    - name: rail-confirmation-warning
+      slackConfigs:
+        - apiURL:
+            name: payment-switch-alerting-secrets
+            key: slack-webhook-url
+          channel: '#payment-switch-warnings'
+          sendResolved: true
+          title: '{{ .CommonAnnotations.summary }}'
+          text: '{{ .CommonAnnotations.description }}'

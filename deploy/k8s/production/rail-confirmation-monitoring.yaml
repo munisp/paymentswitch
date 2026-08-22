@@ -20,7 +20,7 @@ spec:
         ca:
           secret:
             name: go-ledger-reconciliation-mtls
-            key: ca.crt
+            key: server-ca.crt
         serverName: go-ledger-reconciliation.payment-switch.svc.cluster.local
         insecureSkipVerify: false
 ---
