@@ -4,7 +4,9 @@ Replaces in-memory dicts with database-backed storage.
 """
 
 import os
+import json
 import logging
+import uuid
 from typing import Optional, Dict, List
 from decimal import Decimal
 from datetime import datetime
@@ -81,6 +83,48 @@ async def _ensure_schema(pool: Pool):
             );
             CREATE INDEX IF NOT EXISTS idx_pp_window ON participant_positions(window_id);
             CREATE INDEX IF NOT EXISTS idx_pp_participant ON participant_positions(participant_id);
+
+            CREATE TABLE IF NOT EXISTS settlement_reconciliation_cases (
+                case_id UUID PRIMARY KEY,
+                window_id TEXT NOT NULL REFERENCES settlement_windows(window_id),
+                settlement_id TEXT NOT NULL,
+                canonical_transfer_id_128 CHAR(32),
+                reason TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'OPEN',
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                claimed_by TEXT,
+                claim_expires_at TIMESTAMPTZ,
+                ledger_evidence JSONB,
+                rail_evidence JSONB,
+                resolution JSONB,
+                last_error TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                resolved_at TIMESTAMPTZ,
+                UNIQUE(window_id, settlement_id)
+            );
+            CREATE INDEX IF NOT EXISTS settlement_reconciliation_open_idx
+                ON settlement_reconciliation_cases(created_at) WHERE state = 'OPEN';
+
+            CREATE TABLE IF NOT EXISTS outbox_events (
+                id BIGSERIAL PRIMARY KEY,
+                aggregate_type VARCHAR(64) NOT NULL,
+                aggregate_id VARCHAR(128) NOT NULL,
+                event_type VARCHAR(128) NOT NULL,
+                payload JSONB NOT NULL,
+                deduplication_key VARCHAR(256),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                published_at TIMESTAMPTZ,
+                claimed_by TEXT,
+                claim_expires_at TIMESTAMPTZ,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT
+            );
+            ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS deduplication_key VARCHAR(256);
+            ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS claimed_by TEXT;
+            ALTER TABLE outbox_events ADD COLUMN IF NOT EXISTS claim_expires_at TIMESTAMPTZ;
+            CREATE UNIQUE INDEX IF NOT EXISTS outbox_events_deduplication_key_uidx
+                ON outbox_events(deduplication_key) WHERE deduplication_key IS NOT NULL;
         """)
     logger.info("Settlement schema ensured")
 
@@ -134,18 +178,45 @@ async def update_window_status(window_id: str, status: str, end_time: Optional[d
             )
 
 
-async def mark_window_reconciliation_required(window_id: str) -> None:
-    """Quarantine a processing settlement window after an ambiguous external dispatch outcome."""
+async def mark_window_reconciliation_required(
+    window_id: str,
+    settlement_id: str,
+    reason: str,
+    canonical_transfer_id_128: Optional[str] = None,
+) -> str:
+    """Quarantine a processing window and create one durable reconciliation case/outbox event."""
     pool = await get_pool()
+    case_id = str(uuid.uuid4())
     async with pool.acquire() as conn:
-        result = await conn.execute(
-            """UPDATE settlement_windows
-               SET status='RECONCILIATION_REQUIRED', updated_at=NOW()
-               WHERE window_id=$1 AND status='PROCESSING'""",
-            window_id,
-        )
-        if result != "UPDATE 1":
-            raise RuntimeError("settlement window is not in PROCESSING state")
+        async with conn.transaction():
+            result = await conn.execute(
+                """UPDATE settlement_windows
+                   SET status='RECONCILIATION_REQUIRED', updated_at=NOW()
+                   WHERE window_id=$1 AND status='PROCESSING'""",
+                window_id,
+            )
+            if result != "UPDATE 1":
+                raise RuntimeError("settlement window is not in PROCESSING state")
+            existing_case = await conn.fetchrow(
+                """INSERT INTO settlement_reconciliation_cases
+                   (case_id, window_id, settlement_id, canonical_transfer_id_128, reason)
+                   VALUES ($1, $2, $3, $4, $5)
+                   ON CONFLICT (window_id, settlement_id)
+                   DO UPDATE SET reason=EXCLUDED.reason, updated_at=NOW()
+                   RETURNING case_id""",
+                case_id, window_id, settlement_id, canonical_transfer_id_128, reason[:2000],
+            )
+            resolved_case_id = str(existing_case["case_id"])
+            await conn.execute(
+                """INSERT INTO outbox_events
+                   (aggregate_type, aggregate_id, event_type, payload, deduplication_key)
+                   VALUES ('settlement_window', $1, 'settlement.reconciliation.required', $2, $3)
+                   ON CONFLICT (deduplication_key) DO NOTHING""",
+                window_id,
+                json.dumps({"windowId": window_id, "settlementId": settlement_id, "caseId": resolved_case_id}),
+                f"settlement-reconciliation-required:{window_id}:{settlement_id}",
+            )
+    return resolved_case_id
 
 
 async def finalize_window(window_id: str, total_amount: Decimal, settlement_reference: str, finality_certificate: Dict):
@@ -160,7 +231,7 @@ async def finalize_window(window_id: str, total_amount: Decimal, settlement_refe
                    finality_certificate=$4, settled_at=NOW(), updated_at=NOW()
                WHERE window_id=$1 AND status='PROCESSING'
                RETURNING *""",
-            window_id, total_amount, settlement_reference, finality_certificate,
+            window_id, total_amount, settlement_reference, json.dumps(finality_certificate),
         )
         if row is None:
             raise RuntimeError("settlement window is not in PROCESSING state")

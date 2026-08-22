@@ -1,0 +1,94 @@
+name: Daily Payment Assurance
+
+on:
+  schedule:
+    - cron: '21 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-payment-assurance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-payment-contracts:
+    name: Multi-language payment contract verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '10.4.1'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: payment-core/go-services/go.mod
+          cache-dependency-path: payment-core/go-services/go.sum
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Node dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify TypeScript payment and ISO boundaries
+        run: |
+          pnpm run check
+          pnpm exec vitest run server/api/paymentRestRoutes.test.ts server/lib/iso20022.test.ts
+
+      - name: Verify Go money-movement controls
+        working-directory: payment-core/go-services
+        run: go test ./internal/mojaloop/... ./pkg/ledger/...
+
+      - name: Verify Rust ledger and RTGS controls
+        working-directory: payment-core/rust-services/outbound-ledger
+        run: cargo test --lib
+
+      - name: Verify Python settlement and reconciliation controls
+        run: |
+          python -m py_compile \
+            payment-core/services/settlement/main.py \
+            payment-core/services/settlement/persistence.py \
+            payment-core/services/settlement/routers.py \
+            payment-core/services/settlement/reconciliation_worker.py \
+            scripts/assurance/validate_multilanguage_settlement_contract.py
+          python -m unittest payment-core/services/settlement/test_reconciliation_worker.py
+          python scripts/assurance/validate_multilanguage_settlement_contract.py \
+            | tee daily-payment-assurance.json
+
+      - name: Validate migration and deployment contracts
+        run: |
+          test -s drizzle/0051_multilanguage_idempotency_settlement_contract.sql
+          test -s drizzle/0052_cross_store_reconciliation_saga.sql
+          grep -q 'settlement-reconciliation-worker' deploy/k8s/production/settlement-reconciliation-worker.yaml
+          git diff --check
+
+      - name: Upload assurance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-payment-assurance-${{ github.run_id }}
+          path: |
+            daily-payment-assurance.json
+            drizzle/0051_multilanguage_idempotency_settlement_contract.sql
+            drizzle/0052_cross_store_reconciliation_saga.sql
+          if-no-files-found: warn
+          retention-days: 90

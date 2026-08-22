@@ -258,7 +258,11 @@ async def execute_settlement(
     except Exception as e:
         if dispatch_started:
             try:
-                await db.mark_window_reconciliation_required(request.windowId)
+                await db.mark_window_reconciliation_required(
+                    request.windowId,
+                    settlement_id,
+                    str(e),
+                )
             except Exception as quarantine_error:
                 logger.critical("Unable to quarantine ambiguous settlement window %s: %s", request.windowId, quarantine_error)
         logger.error(f"Settlement execution failed: {e}")
