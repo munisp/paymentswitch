@@ -598,3 +598,138 @@ func (db *DB) LookupPaymentSagaEvidence(ctx context.Context, canonicalTransferID
 	}
 	return &evidence, nil
 }
+
+// PostingExpectationEvidence is the immutable expected economic posting loaded for reconciliation.
+type PostingExpectationEvidence struct {
+	CanonicalTransferID128 string
+	DebitAccountID128      string
+	CreditAccountID128     string
+	AmountMinor            string
+	Currency               string
+	Ledger                 uint32
+	Code                   uint16
+	RailID                 string
+	RailMessageID          string
+}
+
+// RailSigningKeyEvidence contains the immutable verification material and lifecycle state.
+type RailSigningKeyEvidence struct {
+	RailID     string
+	KeyID      string
+	Algorithm  string
+	PublicKey  []byte
+	Status     string
+	ValidFrom  time.Time
+	ValidUntil time.Time
+	RevokedAt  *time.Time
+}
+
+// SignedRailConfirmationEvidence is raw signed evidence; verification always happens in Go.
+type SignedRailConfirmationEvidence struct {
+	RailID        string
+	KeyID         string
+	Algorithm     string
+	RawPayload    []byte
+	Signature     []byte
+	PayloadSHA256 string
+	ReceivedAt    time.Time
+}
+
+func (db *DB) LookupPostingExpectation(ctx context.Context, canonicalTransferID128 string) (*PostingExpectationEvidence, error) {
+	row := db.conn.QueryRowContext(ctx, `
+		SELECT canonical_transfer_id_128, debit_account_id_128, credit_account_id_128,
+		       amount_minor::text, currency, ledger, code, rail_id, rail_message_id
+		FROM payment_posting_expectations
+		WHERE canonical_transfer_id_128 = $1`, canonicalTransferID128)
+	var evidence PostingExpectationEvidence
+	if err := row.Scan(&evidence.CanonicalTransferID128, &evidence.DebitAccountID128, &evidence.CreditAccountID128,
+		&evidence.AmountMinor, &evidence.Currency, &evidence.Ledger, &evidence.Code, &evidence.RailID, &evidence.RailMessageID); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("lookup posting expectation: %w", err)
+	}
+	return &evidence, nil
+}
+
+func (db *DB) LookupSignedRailConfirmation(ctx context.Context, canonicalTransferID128 string) (*SignedRailConfirmationEvidence, error) {
+	row := db.conn.QueryRowContext(ctx, `
+		SELECT rail_id, key_id, algorithm, raw_payload, signature, payload_sha256, received_at
+		FROM rail_settlement_confirmations
+		WHERE canonical_transfer_id_128 = $1
+		ORDER BY verified_at DESC
+		LIMIT 1`, canonicalTransferID128)
+	var evidence SignedRailConfirmationEvidence
+	if err := row.Scan(&evidence.RailID, &evidence.KeyID, &evidence.Algorithm, &evidence.RawPayload,
+		&evidence.Signature, &evidence.PayloadSHA256, &evidence.ReceivedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("lookup signed rail confirmation: %w", err)
+	}
+	return &evidence, nil
+}
+
+func (db *DB) LookupRailSigningKey(ctx context.Context, railID, keyID string) (*RailSigningKeyEvidence, error) {
+	row := db.conn.QueryRowContext(ctx, `
+		SELECT rail_id, key_id, algorithm, public_key, status, valid_from, valid_until, revoked_at
+		FROM rail_signing_keys WHERE rail_id = $1 AND key_id = $2`, railID, keyID)
+	var evidence RailSigningKeyEvidence
+	if err := row.Scan(&evidence.RailID, &evidence.KeyID, &evidence.Algorithm, &evidence.PublicKey,
+		&evidence.Status, &evidence.ValidFrom, &evidence.ValidUntil, &evidence.RevokedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("lookup rail signing key: %w", err)
+	}
+	return &evidence, nil
+}
+
+// InsertPostingExpectation writes the one immutable economic instruction before ledger dispatch.
+func (db *DB) InsertPostingExpectation(ctx context.Context, evidence PostingExpectationEvidence, requestHash string) error {
+	_, err := db.conn.ExecContext(ctx, `
+		INSERT INTO payment_posting_expectations
+		(canonical_transfer_id_128, debit_account_id_128, credit_account_id_128, amount_minor,
+		 currency, ledger, code, rail_id, rail_message_id, request_hash)
+		VALUES ($1,$2,$3,$4::numeric,$5,$6,$7,$8,$9,$10)`,
+		evidence.CanonicalTransferID128, evidence.DebitAccountID128, evidence.CreditAccountID128,
+		evidence.AmountMinor, evidence.Currency, evidence.Ledger, evidence.Code,
+		evidence.RailID, evidence.RailMessageID, requestHash)
+	if err != nil {
+		return fmt.Errorf("insert immutable posting expectation: %w", err)
+	}
+	return nil
+}
+
+// InsertRailSigningKey is for the controlled rail-key ingestion process. The database trigger
+// prevents later modification of public key material and only permits one-way lifecycle changes.
+func (db *DB) InsertRailSigningKey(ctx context.Context, evidence RailSigningKeyEvidence) error {
+	_, err := db.conn.ExecContext(ctx, `
+		INSERT INTO rail_signing_keys (rail_id, key_id, algorithm, public_key, status, valid_from, valid_until, revoked_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		evidence.RailID, evidence.KeyID, evidence.Algorithm, evidence.PublicKey, evidence.Status,
+		evidence.ValidFrom, evidence.ValidUntil, evidence.RevokedAt)
+	if err != nil {
+		return fmt.Errorf("insert rail signing key: %w", err)
+	}
+	return nil
+}
+
+// InsertSignedRailConfirmation persists exact signed bytes only after the rail adapter has
+// performed the required scheme-native transport checks. Cryptographic verification still occurs
+// at projection time so a later key revocation or evidence mismatch cannot be ignored.
+func (db *DB) InsertSignedRailConfirmation(ctx context.Context, confirmationID string, canonicalTransferID128 string, settlementReference string, evidence SignedRailConfirmationEvidence, verifiedAt time.Time) error {
+	_, err := db.conn.ExecContext(ctx, `
+		INSERT INTO rail_settlement_confirmations
+		(confirmation_id, canonical_transfer_id_128, rail_id, key_id, algorithm, rail_message_id,
+		 settlement_reference, raw_payload, signature, payload_sha256, verified_at)
+		VALUES ($1::uuid,$2,$3,$4,$5,
+		        (convert_from($6, 'UTF8')::jsonb->>'railMessageId'),
+		        $7,$6,$8,$9,$10)`,
+		confirmationID, canonicalTransferID128, evidence.RailID, evidence.KeyID, evidence.Algorithm,
+		evidence.RawPayload, settlementReference, evidence.Signature, evidence.PayloadSHA256, verifiedAt)
+	if err != nil {
+		return fmt.Errorf("insert signed rail confirmation: %w", err)
+	}
+	return nil
+}
