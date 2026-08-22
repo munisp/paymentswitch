@@ -26,6 +26,7 @@ export interface DistributedCircuitBreakerStore {
     state: CircuitState;
     probeGranted: boolean;
     nextAttempt: number;
+    probeToken?: string;
   }>;
   recordOutcome(
     name: string,
@@ -34,6 +35,7 @@ export interface DistributedCircuitBreakerStore {
     successThreshold: number,
     nowMs: number,
     resetTimeout: number,
+    probeToken?: string,
   ): Promise<void>;
 }
 
@@ -108,6 +110,7 @@ export class CircuitBreaker extends EventEmitter {
   async execute<T>(fn: () => Promise<T>): Promise<T> {
     this.totalRequests++;
     let halfOpenProbe = false;
+    let distributedProbeToken: string | undefined;
 
     if (this.distributedState) {
       const remote = await this.distributedState.beforeCall(
@@ -135,6 +138,7 @@ export class CircuitBreaker extends EventEmitter {
       if (remote.state === CircuitState.HALF_OPEN) {
         this.state = CircuitState.HALF_OPEN;
         this.nextAttempt = remote.nextAttempt;
+        distributedProbeToken = remote.probeToken;
       } else if (remote.state === CircuitState.CLOSED) {
         this.state = CircuitState.CLOSED;
         this.nextAttempt = 0;
@@ -183,6 +187,7 @@ export class CircuitBreaker extends EventEmitter {
           this.successThreshold,
           Date.now(),
           this.resetTimeout,
+          distributedProbeToken,
         );
       }
       return result;
@@ -199,6 +204,7 @@ export class CircuitBreaker extends EventEmitter {
           this.successThreshold,
           Date.now(),
           this.resetTimeout,
+          distributedProbeToken,
         );
       }
       throw error;

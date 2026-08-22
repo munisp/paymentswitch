@@ -8,6 +8,9 @@ EVIDENCE_DIR="${ASSURANCE_EVIDENCE_DIR:-$ROOT_DIR/.audit/stage-3-4-pipeline-$(da
 RUNTIME="${CONTAINER_RUNTIME:-auto}"
 COMPOSE_FILE="${ASSURANCE_COMPOSE_FILE:-$ROOT_DIR/docker-compose.unified.yml}"
 mkdir -p "$EVIDENCE_DIR"
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  printf 'ASSURANCE_EVIDENCE_DIR=%s\n' "$EVIDENCE_DIR" >> "$GITHUB_ENV"
+fi
 exec > >(tee "$EVIDENCE_DIR/pipeline.log") 2>&1
 
 fail() { echo "PIPELINE_STATUS=FAIL reason=$*"; exit 1; }
