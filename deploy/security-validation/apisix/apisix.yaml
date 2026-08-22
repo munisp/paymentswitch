@@ -1,0 +1,34 @@
+routes:
+  - id: authz-check
+    uri: /api/v1/authz/check
+    methods: [POST]
+    upstream:
+      type: roundrobin
+      nodes:
+        host.docker.internal:3000: 1
+    plugins:
+      request-id: {}
+      openid-connect:
+        bearer_only: true
+        ssl_verify: false
+        discovery: http://keycloak:8080/realms/paymentswitch/.well-known/openid-configuration
+        client_id: paymentswitch-api
+      limit-req:
+        rate: 50
+        burst: 100
+        rejected_code: 429
+        key: remote_addr
+
+  - id: api-catchall
+    uri: /api/*
+    upstream:
+      type: roundrobin
+      nodes:
+        host.docker.internal:3000: 1
+    plugins:
+      request-id: {}
+      limit-req:
+        rate: 100
+        burst: 200
+        rejected_code: 429
+        key: remote_addr

@@ -1,0 +1,37 @@
+name: Risk Acceptance Expiration Gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  risk-acceptance-gate:
+    name: Enforce temporary vulnerability exception
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install policy dependencies
+        run: python -m pip install --disable-pip-version-check --no-input PyYAML
+
+      - name: Enforce exception scope and expiration
+        run: |
+          python scripts/assurance/check_risk_acceptance.py \
+            --policy audit/risk-acceptance-exceptions.yaml \
+            --audit audit/artifacts/pnpm-audit-after-second-wave-final.json

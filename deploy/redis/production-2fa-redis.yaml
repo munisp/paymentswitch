@@ -1,0 +1,95 @@
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: paymentswitch-2fa-redis
+  namespace: paymentswitch
+  labels:
+    app.kubernetes.io/name: paymentswitch
+    app.kubernetes.io/component: authentication
+    security.paymentswitch.io/provider: enterprise-vault
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: enterprise-vault
+    kind: ClusterSecretStore
+  target:
+    name: paymentswitch-2fa-redis
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: REDIS_URL
+      remoteRef:
+        key: paymentswitch/production/redis
+        property: url
+    - secretKey: REDIS_USERNAME
+      remoteRef:
+        key: paymentswitch/production/redis
+        property: username
+    - secretKey: REDIS_PASSWORD
+      remoteRef:
+        key: paymentswitch/production/redis
+        property: password
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: paymentswitch-2fa-redis-config
+  namespace: paymentswitch
+  labels:
+    app.kubernetes.io/name: paymentswitch
+    app.kubernetes.io/component: authentication
+data:
+  TWO_FACTOR_REDIS_REQUIRED: "true"
+  REDIS_TLS: "true"
+  REDIS_CONNECT_TIMEOUT_MS: "3000"
+  REDIS_SOCKET_TIMEOUT_MS: "3000"
+  REDIS_RECONNECT_MAX_RETRIES: "5"
+  TWO_FACTOR_MAX_ATTEMPTS: "5"
+  TWO_FACTOR_ATTEMPT_WINDOW_SECONDS: "900"
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: paymentswitch-2fa-client-pdb
+  namespace: paymentswitch
+spec:
+  maxUnavailable: 25%
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: paymentswitch
+      app.kubernetes.io/component: api
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: paymentswitch-2fa-redis-egress
+  namespace: paymentswitch
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: paymentswitch
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: paymentswitch-data
+      ports:
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 6380
+---
+# Add these entries to the paymentswitch API Deployment container:
+# envFrom:
+#   - secretRef:
+#       name: paymentswitch-2fa-redis
+#   - configMapRef:
+#       name: paymentswitch-2fa-redis-config
+#
+# The REDIS_URL must be the managed Redis primary endpoint or provider failover
+# endpoint. Do not point application pods at a single ephemeral Redis pod.
+# The endpoint must use rediss:// and be backed by TLS, AUTH/ACLs, replication,
+# automatic failover, backups, and provider-side multi-zone placement.

@@ -1,6 +1,6 @@
 # Admin PKCE Migration, Onboarding Integrity, and Identity Preflight Handoff
 
-**Implemented revision:** [`8b8af7a`](https://github.com/munisp/paymentswitch/commit/8b8af7a)  
+**Implemented revision:** [`8b8af7a`](https://github.com/munisp/paymentswitch/commit/8b8af7a)
 **Scope:** The standalone admin dashboard authentication flow, PostgreSQL onboarding integrity migration `0042`, and the current isolated identity-assurance preflight state.
 
 ## 1. Memory-only access token and silent refresh implementation

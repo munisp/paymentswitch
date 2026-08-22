@@ -1,6 +1,6 @@
 # AES-256-GCM Encrypted HttpOnly Session Implementation
 
-**Component:** `admin-dashboard/src/lib/auth/server.ts`  
+**Component:** `admin-dashboard/src/lib/auth/server.ts`
 **Purpose:** Protect the admin dashboard’s authorization-state and refresh-token cookie payloads from browser-script access, passive disclosure, and undetected modification while preserving a server-mediated Authorization Code + PKCE flow.
 
 > This design encrypts and authenticates cookie **contents**. Cookie transport policy (`HttpOnly`, `Secure`, `SameSite`, path, expiry) is enforced separately through Next.js cookie attributes. Both controls are required.

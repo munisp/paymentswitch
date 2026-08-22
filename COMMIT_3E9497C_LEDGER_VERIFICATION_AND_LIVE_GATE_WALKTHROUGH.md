@@ -1,7 +1,7 @@
 # Commit `3e9497c` Ledger Verification and Mandatory Live-Gate Walkthrough
 
-**Commit:** `3e9497c` — `Harden ledger fund flows and authorization`  
-**Verification basis:** Direct review of the committed diff, repository source, and post-commit local validation.  
+**Commit:** `3e9497c` — `Harden ledger fund flows and authorization`
+**Verification basis:** Direct review of the committed diff, repository source, and post-commit local validation.
 **Conclusion:** The commit removes several code-level paths that could fabricate successful money movement. It **does not** establish production readiness because live TigerBeetle, PostgreSQL, Keycloak, APISIX, OPA, and provider evidence is absent.
 
 ## 1. Verified TigerBeetle Transport Changes

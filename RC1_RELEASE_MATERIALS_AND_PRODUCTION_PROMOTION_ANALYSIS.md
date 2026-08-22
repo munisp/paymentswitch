@@ -1,8 +1,8 @@
 # v0.1.0-rc.1 Release Materials and Production-Promotion Analysis
 
-**Release:** `v0.1.0-rc.1 — Evidence-Bounded Release Candidate`  
-**Tagged revision:** `d6d750d76719194416afa56a5bd130c12ffc905c`  
-**RC.1 tag target:** `d6d750d76719194416afa56a5bd130c12ffc905c`  
+**Release:** `v0.1.0-rc.1 — Evidence-Bounded Release Candidate`
+**Tagged revision:** `d6d750d76719194416afa56a5bd130c12ffc905c`
+**RC.1 tag target:** `d6d750d76719194416afa56a5bd130c12ffc905c`
 **Main after subsequent hardening:** `584ce5c` at the time this document was updated
 
 > The immutable RC.1 tag remains an ancestor of `main`, but it is no longer identical to `main` because later PKCE, APISIX/Compose, and dashboard-contract remediation commits followed it. The release remains intentionally a prerelease and must not be promoted to production while required isolated live-dependency evidence and dependency-audit remediation remain incomplete.

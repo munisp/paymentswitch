@@ -268,7 +268,7 @@ Do not scale the six-member StatefulSet after formatting. TigerBeetle membership
 
 ## 5. References
 
-[1]: [APISIX OPA plugin documentation](https://apisix.apache.org/docs/apisix/3.2/plugins/opa/) — OPA request envelope and policy result contract.  
-[2]: [APISIX OpenID Connect plugin documentation](https://apisix.apache.org/docs/apisix/plugins/openid-connect/) — JWKS validation and authenticated user information behavior.  
-[3]: [TigerBeetle deployment documentation](https://docs.tigerbeetle.com/operating/deploying/) — data-file formatting, ordered peer lists, fixed membership, unique cluster ID, and six-replica production recommendation.  
+[1]: [APISIX OPA plugin documentation](https://apisix.apache.org/docs/apisix/3.2/plugins/opa/) — OPA request envelope and policy result contract.
+[2]: [APISIX OpenID Connect plugin documentation](https://apisix.apache.org/docs/apisix/plugins/openid-connect/) — JWKS validation and authenticated user information behavior.
+[3]: [TigerBeetle deployment documentation](https://docs.tigerbeetle.com/operating/deploying/) — data-file formatting, ordered peer lists, fixed membership, unique cluster ID, and six-replica production recommendation.
 [4]: [TigerBeetle Docker deployment documentation](https://docs.tigerbeetle.com/operating/deploying/docker/) — format-before-start, io_uring/seccomp, and locked-memory considerations.

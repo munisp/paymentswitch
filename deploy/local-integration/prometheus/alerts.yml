@@ -1,0 +1,19 @@
+groups:
+  - name: local-integration
+    rules:
+      - alert: LocalIntegrationServiceDown
+        expr: probe_success == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Local integration endpoint is down"
+          description: "Probe {{ $labels.instance }} has failed for more than one minute."
+      - alert: TemporalMetricsMissing
+        expr: absent(up{job="temporal"})
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Temporal metrics target missing"
+          description: "Prometheus cannot find the Temporal metrics target."

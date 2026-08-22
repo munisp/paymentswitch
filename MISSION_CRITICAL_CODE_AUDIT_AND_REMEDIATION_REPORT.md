@@ -1,8 +1,8 @@
 # Mission-Critical Code Audit and Remediation Report
 
-**Repository:** `munisp/paymentswitch`  
-**Assessment date:** 2026-08-20  
-**Assessment basis:** Static review of active TypeScript, Go, Rust, Python, APISIX/OPA, Keycloak, Kubernetes, Compose, schemas, and the local automated suites.  
+**Repository:** `munisp/paymentswitch`
+**Assessment date:** 2026-08-20
+**Assessment basis:** Static review of active TypeScript, Go, Rust, Python, APISIX/OPA, Keycloak, Kubernetes, Compose, schemas, and the local automated suites.
 **Release decision:** **Not approved for production.**
 
 > This is an evidence-bounded engineering assessment, not a certification. Passing unit and contract tests does not prove correctness against live Keycloak, APISIX, PostgreSQL, TigerBeetle, payment providers, or a recovery scenario.

@@ -1,7 +1,7 @@
 # Admin XSS, Onboarding Schema, and Live Identity Contract Review
 
-**Original review baseline:** Legacy password-grant and durable browser-token implementation  
-**Remediation revision:** `8b8af7a` (PKCE migration) and `584ce5c` (NOC contract/build remediation)  
+**Original review baseline:** Legacy password-grant and durable browser-token implementation
+**Remediation revision:** `8b8af7a` (PKCE migration) and `584ce5c` (NOC contract/build remediation)
 **Scope:** The standalone Next.js admin dashboard identity model, user-scoped technical/security onboarding persistence, and the isolated APISIX–Keycloak live-gate contract.
 
 > **Current conclusion:** The review’s two highest-impact admin identity findings—password grant in dashboard code and durable `localStorage` token storage—are remediated. The platform remains a prerelease because runtime APISIX/Keycloak evidence, dependency recovery evidence, secret-at-rest work for onboarding data, nonce-based CSP, and other release gates remain outstanding.
@@ -76,4 +76,4 @@ Production promotion remains blocked until the following evidence/control items 
 [2]: admin-dashboard/src/lib/auth/AuthContext.tsx "Memory-only access token and silent refresh"
 [3]: drizzle/0042_onboarding_integrity.sql "Onboarding integrity migration"
 [4]: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html "OWASP Session Management Cheat Sheet"
-[5]: scripts/assurance/live_gate_preflight.sh "Identity preflight" 
+[5]: scripts/assurance/live_gate_preflight.sh "Identity preflight"

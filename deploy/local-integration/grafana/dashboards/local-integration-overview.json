@@ -1,0 +1,71 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Keycloak readiness",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "targets": [{"expr": "probe_success{job=\"local-service-blackbox-http\",instance=\"http://keycloak:8080/health/ready\"}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "none", "mappings": [{"type": "value", "value": "1", "text": "UP"}, {"type": "value", "value": "0", "text": "DOWN"}]}, "overrides": []}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "TigerBeetle TCP",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "targets": [{"expr": "probe_success{job=\"local-service-blackbox-tcp\",instance=\"tigerbeetle:3000\"}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "none", "mappings": [{"type": "value", "value": "1", "text": "UP"}, {"type": "value", "value": "0", "text": "DOWN"}]}, "overrides": []}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Temporal frontend TCP",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "targets": [{"expr": "probe_success{job=\"local-service-blackbox-tcp\",instance=\"temporal:7233\"}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "none", "mappings": [{"type": "value", "value": "1", "text": "UP"}, {"type": "value", "value": "0", "text": "DOWN"}]}, "overrides": []}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "PostgreSQL TCP",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "targets": [{"expr": "probe_success{job=\"local-service-blackbox-tcp\",instance=\"postgres:5432\"}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "none", "mappings": [{"type": "value", "value": "1", "text": "UP"}, {"type": "value", "value": "0", "text": "DOWN"}]}, "overrides": []}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Temporal request rate",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "targets": [{"expr": "sum(rate(temporal_request_total[5m]))", "legendFormat": "requests/s", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Temporal request latency",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(temporal_request_latency_bucket[5m])))", "legendFormat": "p95", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Probe latency",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+      "targets": [{"expr": "probe_duration_seconds", "legendFormat": "{{job}} {{instance}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["paymentswitch", "local-integration", "temporal", "tigerbeetle"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "browser",
+  "title": "Payment Switch Local Integration",
+  "uid": "paymentswitch-local-integration",
+  "version": 1
+}

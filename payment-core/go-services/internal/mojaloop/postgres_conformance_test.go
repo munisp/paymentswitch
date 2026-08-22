@@ -259,24 +259,22 @@ func (s *PostgresConformanceTestSuite) TestTransferOperationsWithPostgres() {
 func (s *PostgresConformanceTestSuite) TestTigerBeetleIntegration() {
 	s.t.Run("TigerBeetle_ServiceHealth", func(t *testing.T) {
 		resp, err := s.httpClient.Get(s.baseURL + "/api/v1/tigerbeetle/health")
-		if err != nil {
-			t.Logf("TigerBeetle health check failed (may not be exposed): %v", err)
-			return
-		}
-		defer resp.Body.Close()
+			if err != nil {
+				t.Fatalf("TigerBeetle health check failed: %v", err)
+			}
+			defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusOK {
-			t.Logf("TigerBeetle health check returned %d", resp.StatusCode)
-		}
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("TigerBeetle health check returned %d", resp.StatusCode)
+			}
 	})
 
 	s.t.Run("TigerBeetle_AccountLookup", func(t *testing.T) {
 		// This test verifies that account lookups still go through TigerBeetle
 		resp, err := s.httpClient.Get(s.baseURL + "/api/v1/mojaloop/participants/position?fspId=dfsp1")
-		if err != nil {
-			t.Logf("Position lookup failed: %v", err)
-			return
-		}
+			if err != nil {
+				t.Fatalf("Position lookup failed: %v", err)
+			}
 		defer resp.Body.Close()
 
 		// We just verify the endpoint responds - actual balance verification

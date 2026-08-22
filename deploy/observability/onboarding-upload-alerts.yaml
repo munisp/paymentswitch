@@ -1,0 +1,151 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: paymentswitch-onboarding-upload-alerts
+  labels:
+    app.kubernetes.io/name: paymentswitch
+    prometheus: kube-prometheus
+spec:
+  groups:
+    - name: paymentswitch.cleanup-cronjob
+      rules:
+        - alert: PaymentswitchMultipartCleanupConsecutiveFailures
+          expr: (count(kube_job_status_failed{namespace="paymentswitch", job_name=~"paymentswitch-multipart-cleanup-.*"} == 1) >= 3) and (time() - kube_cronjob_status_last_successful_time{namespace="paymentswitch", cronjob="paymentswitch-multipart-cleanup"} > 1800)
+          for: 10m
+          labels:
+            severity: critical
+            service: onboarding-cleanup
+            paging: "true"
+          annotations:
+            summary: Multipart cleanup CronJob has failed consecutively
+            description: "The multipart cleanup CronJob has at least three failed Jobs in the paymentswitch namespace. Inspect Job logs and storage permissions immediately."
+            runbook_url: https://runbooks.example.com/paymentswitch/multipart-cleanup
+        - alert: PaymentswitchMultipartCleanupActiveDeadlineExceeded
+          expr: max by (namespace, job_name) (kube_job_status_failed{namespace="paymentswitch", job_name=~"paymentswitch-multipart-cleanup-.*"} * on (namespace, job_name) group_left(reason) kube_job_status_reason{namespace="paymentswitch", job_name=~"paymentswitch-multipart-cleanup-.*", reason="DeadlineExceeded"}) > 0
+          for: 2m
+          labels:
+            severity: critical
+            service: onboarding-cleanup
+            paging: "true"
+          annotations:
+            summary: Multipart cleanup Job exceeded its active deadline
+            description: "A multipart cleanup Job exceeded activeDeadlineSeconds and was terminated before completing its batch."
+            runbook_url: https://runbooks.example.com/paymentswitch/multipart-cleanup
+        - alert: PaymentswitchMultipartCleanupUnavailable
+          expr: absent(kube_cronjob_status_last_schedule_time{namespace="paymentswitch", cronjob="paymentswitch-multipart-cleanup"}) or (time() - kube_cronjob_status_last_schedule_time{namespace="paymentswitch", cronjob="paymentswitch-multipart-cleanup"}) > 1800
+          for: 10m
+          labels:
+            severity: critical
+            service: onboarding-cleanup
+            paging: "true"
+          annotations:
+            summary: Multipart cleanup CronJob has not scheduled recently
+            description: "No multipart cleanup Job has been scheduled for more than 30 minutes."
+            runbook_url: https://runbooks.example.com/paymentswitch/multipart-cleanup
+    - name: paymentswitch.redis-resilience
+      rules:
+        - alert: PaymentswitchRedisCircuitBreakerTrips
+          expr: increase(paymentswitch_redis_circuit_breaker_trips_total[10m]) >= 3
+          for: 2m
+          labels:
+            severity: critical
+            service: redis-resilience
+            paging: "true"
+          annotations:
+            summary: Redis circuit breaker is tripping frequently
+            description: "At least three Redis circuit-breaker openings occurred during the last ten minutes. 2FA and other Redis-backed operations may be failing closed; inspect Sentinel quorum, network paths, and Redis saturation."
+            runbook_url: https://runbooks.example.com/paymentswitch/redis-sentinel-disaster-recovery
+        - alert: PaymentswitchRedisSentinelFailoverSlow
+          expr: (rate(paymentswitch_redis_sentinel_failover_duration_seconds_sum[10m]) / clamp_min(rate(paymentswitch_redis_sentinel_failover_duration_seconds_count[10m]), 0.001)) > 10
+          for: 5m
+          labels:
+            severity: critical
+            service: redis-resilience
+            paging: "true"
+          annotations:
+            summary: Redis Sentinel failover discovery is slow
+            description: "Average Redis Sentinel topology discovery exceeds ten seconds. Validate Sentinel quorum and primary promotion health before continuing production traffic."
+            runbook_url: https://runbooks.example.com/paymentswitch/redis-sentinel-disaster-recovery
+    - name: paymentswitch.security-auth
+      rules:
+        - alert: PaymentswitchTwoFactorRedisFailClosed
+          expr: increase(paymentswitch_two_factor_redis_fail_closed_total[10m]) > 0
+          for: 2m
+          labels:
+            severity: critical
+            service: authentication
+            paging: "true"
+          annotations:
+            summary: 2FA verification is failing closed because Redis is unavailable
+            description: "At least one 2FA reservation or release failed because the production Redis state store was unavailable. Verification is being rejected by design; inspect Redis Sentinel/Cluster health and application connectivity."
+            runbook_url: https://runbooks.example.com/paymentswitch/two-factor-redis
+    - name: paymentswitch.onboarding-uploads
+      rules:
+        - alert: PaymentswitchAbandonedMultipartUploads
+          expr: paymentswitch_multipart_uploads_abandoned > 0
+          for: 10m
+          labels:
+            severity: warning
+            service: onboarding
+          annotations:
+            summary: Multipart uploads are abandoned
+            description: "{{ $value }} multipart upload sessions are past their expiry and require lifecycle cleanup."
+        - alert: PaymentswitchMultipartAbortSpike
+          expr: increase(paymentswitch_multipart_uploads_aborted_total[15m]) > 10
+          for: 5m
+          labels:
+            severity: warning
+            service: onboarding
+          annotations:
+            summary: Multipart upload aborts are elevated
+            description: More than ten multipart uploads were aborted during the last fifteen minutes.
+        - alert: PaymentswitchOnboardingDraftConflictSpike
+          expr: increase(paymentswitch_onboarding_draft_conflicts_total[10m]) > 5
+          for: 5m
+          labels:
+            severity: warning
+            service: onboarding
+          annotations:
+            summary: Onboarding draft conflicts are elevated
+            description: Concurrent or stale draft writers are generating frequent conflicts.
+        - alert: PaymentswitchMultipartCleanupErrorRateHigh
+          expr: (sum(rate(paymentswitch_multipart_cleanup_failures_total[10m])) / clamp_min(sum(rate(paymentswitch_multipart_cleanup_claimed_total[10m])), 0.001)) > 0.10
+          for: 10m
+          labels:
+            severity: critical
+            service: onboarding-cleanup
+            paging: "true"
+          annotations:
+            summary: Multipart cleanup error rate exceeds 10 percent
+            description: More than ten percent of claimed multipart sessions are failing cleanup during the last ten minutes.
+            runbook_url: https://runbooks.example.com/paymentswitch/multipart-cleanup
+        - alert: PaymentswitchMultipartCleanupBacklogCritical
+          expr: max(paymentswitch_multipart_uploads_abandoned) > 100
+          for: 15m
+          labels:
+            severity: critical
+            service: onboarding-cleanup
+            paging: "true"
+          annotations:
+            summary: Multipart cleanup backlog is critically high
+            description: More than 100 expired multipart sessions have remained abandoned for at least fifteen minutes.
+            runbook_url: https://runbooks.example.com/paymentswitch/multipart-cleanup
+        - alert: PaymentswitchMultipartCleanupBacklogGrowing
+          expr: deriv(paymentswitch_multipart_uploads_abandoned[30m]) > 0
+          for: 20m
+          labels:
+            severity: warning
+            service: onboarding-cleanup
+          annotations:
+            summary: Multipart cleanup backlog is growing
+            description: The expired multipart session backlog has a positive slope over thirty minutes.
+            runbook_url: https://runbooks.example.com/paymentswitch/multipart-cleanup
+        - alert: PaymentswitchMultipartCompletionRateLow
+          expr: (sum(rate(paymentswitch_multipart_uploads_completed_total[15m])) / clamp_min(sum(rate(paymentswitch_multipart_uploads_started_total[15m])), 0.001)) < 0.90
+          for: 15m
+          labels:
+            severity: critical
+            service: onboarding
+          annotations:
+            summary: Multipart completion rate is below 90 percent
+            description: Investigate storage endpoint, CORS, presign, or client upload failures.

@@ -1,0 +1,240 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: permify-schema-paymentswitch-v1
+  namespace: paymentswitch
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+data:
+  schema.dsl: |
+    entity user {}
+
+    entity tenant {
+      relation member @user
+      relation admin @user
+      permission read = member or admin
+      permission manage = admin
+    }
+
+    entity organization {
+      relation tenant @tenant
+      permission read = tenant.read
+      permission manage = tenant.manage
+    }
+
+    entity merchant {
+      relation tenant @tenant
+      relation owner @user
+      relation operator @user
+      permission read = owner or operator or tenant.read
+      permission write = owner or operator or tenant.manage
+      permission manage = owner or tenant.manage
+    }
+
+    entity payment {
+      relation merchant @merchant
+      relation reviewer @user
+      permission read = merchant.read or reviewer
+      permission process = merchant.write
+      permission approve = reviewer and merchant.manage
+    }
+
+    entity payout {
+      relation merchant @merchant
+      relation approver @user
+      permission read = merchant.read or approver
+      permission create = merchant.write
+      permission approve = approver and merchant.manage
+    }
+
+    entity kyc_case {
+      relation merchant @merchant
+      relation reviewer @user
+      permission read = merchant.read or reviewer
+      permission review = reviewer or merchant.manage
+    }
+
+    entity report {
+      relation merchant @merchant
+      permission read = merchant.read
+      permission export = merchant.manage
+    }
+
+    entity settlement {
+      relation merchant @merchant
+      permission read = merchant.read
+      permission initiate = merchant.manage
+    }
+
+    entity api_credential {
+      relation merchant @merchant
+      permission read = merchant.manage
+      permission rotate = merchant.manage
+      permission revoke = merchant.manage
+    }
+
+    entity break_glass {
+      relation security_admin @user
+      permission activate = security_admin
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: permify-tuple-migration-script
+  namespace: paymentswitch
+  annotations:
+    argocd.argoproj.io/sync-wave: "11"
+data:
+  migrate.sh: |
+    #!/bin/sh
+    set -eu
+
+    : "${PERMIFY_URL:?PERMIFY_URL is required}"
+    : "${PERMIFY_TENANT_ID:?PERMIFY_TENANT_ID is required}"
+    : "${PERMIFY_TOKEN:?PERMIFY_TOKEN is required}"
+    : "${SCHEMA_FILE:?SCHEMA_FILE is required}"
+    : "${TENANT_ID:?TENANT_ID is required}"
+
+    api="${PERMIFY_URL%/}"
+    auth="Authorization: Bearer ${PERMIFY_TOKEN}"
+    case "${TENANT_ID}" in
+      ""|*[!A-Za-z0-9._-]*) echo "TENANT_ID contains unsafe characters" >&2; exit 1 ;;
+    esac
+
+    # The curl image intentionally has no dynamic scripting runtime. Escape the
+    # DSL with POSIX tools so this hook has no hidden package-install step.
+    schema_payload="$(printf '{"schema":"'; sed ':a;N;$!ba;s/\\/\\\\/g;s/"/\\"/g;s/$/\\n/;s/\\n$//' "${SCHEMA_FILE}"; printf '"}')"
+
+    schema_response="$(curl --fail-with-body --silent --show-error \
+      --retry 5 --retry-all-errors --connect-timeout 5 --max-time 30 \
+      -H "${auth}" -H 'Content-Type: application/json' \
+      -X POST "${api}/v1/tenants/${PERMIFY_TENANT_ID}/schemas/write" \
+      --data "${schema_payload}")"
+
+    schema_version="$(printf '%s' "${schema_response}" | sed -n 's/.*"schemaVersion"[[:space:]]*:[[:space:]]*"\([^\"]*\)".*/\1/p; s/.*"schema_version"[[:space:]]*:[[:space:]]*"\([^\"]*\)".*/\1/p' | head -n 1)"
+    test -n "${schema_version}" || {
+      echo "Permify schema write returned no schema version" >&2
+      exit 1
+    }
+
+    # Every tuple is fully typed and is scoped to the migration tenant. The
+    # endpoint is idempotent for the same entity/relation/subject tuple.
+    tuples="{\"tuples\":[{\"entity\":{\"type\":\"organization\",\"id\":\"${TENANT_ID}\"},\"relation\":\"tenant\",\"subject\":{\"type\":\"tenant\",\"id\":\"${TENANT_ID}\"}},{\"entity\":{\"type\":\"merchant\",\"id\":\"${TENANT_ID}\"},\"relation\":\"tenant\",\"subject\":{\"type\":\"tenant\",\"id\":\"${TENANT_ID}\"}}],\"metadata\":{\"schema_version\":\"paymentswitch-v1\"}}"
+
+    curl --fail-with-body --silent --show-error \
+      --retry 5 --retry-all-errors --connect-timeout 5 --max-time 30 \
+      -H "${auth}" -H 'Content-Type: application/json' \
+      -X POST "${api}/v1/tenants/${PERMIFY_TENANT_ID}/relationships/write" \
+      --data "${tuples}" >/dev/null
+
+    printf '%s\n' "schema_version=${schema_version}" > /status/schema-version
+    printf '%s\n' "tenant_id=${TENANT_ID}" >> /status/schema-version
+    printf '%s\n' "migration_status=success" >> /status/schema-version
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: permify-schema-and-tuples-migrate
+  namespace: paymentswitch
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "20"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 180
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: permify-migration
+        app.kubernetes.io/component: authorization-migration
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: permify-migration
+          image: curlimages/curl:8.10.1
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "/opt/migration/migrate.sh"]
+          env:
+            - name: PERMIFY_URL
+              valueFrom:
+                secretKeyRef:
+                  name: permify-client
+                  key: url
+            - name: PERMIFY_TENANT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: permify-client
+                  key: tenant-id
+            - name: PERMIFY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: permify-client
+                  key: token
+            - name: TENANT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: paymentswitch-bootstrap-tenant
+                  key: tenant-id
+            - name: SCHEMA_FILE
+              value: /opt/schema/schema.dsl
+          volumeMounts:
+            - name: migration
+              mountPath: /opt/migration
+              readOnly: true
+            - name: schema
+              mountPath: /opt/schema
+              readOnly: true
+            - name: status
+              mountPath: /status
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: migration
+          configMap:
+            name: permify-tuple-migration-script
+            defaultMode: 0555
+        - name: schema
+          configMap:
+            name: permify-schema-paymentswitch-v1
+            items:
+              - key: schema.dsl
+                path: schema.dsl
+        - name: status
+          emptyDir: {}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: paymentswitch-permify-migration
+  namespace: argocd
+spec:
+  project: paymentswitch
+  source:
+    repoURL: https://github.com/munisp/paymentswitch.git
+    targetRevision: main
+    path: deploy
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: paymentswitch
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+  ignoreDifferences:
+    - group: batch
+      kind: Job
+      jsonPointers:
+        - /spec/template/metadata

@@ -1,14 +1,14 @@
-import { z } from 'zod';
-import { router, protectedProcedure } from '../_core/trpc';
-import { TRPCError } from '@trpc/server';
-import { getDb } from '../db';
-import { users } from '../../drizzle/schema';
-import { eq } from 'drizzle-orm';
-import * as twoFactorService from '../services/twoFactorService';
+import { z } from "zod";
+import { router, protectedProcedure } from "../_core/trpc";
+import { TRPCError } from "@trpc/server";
+import { getDb } from "../db";
+import { users } from "../../drizzle/schema";
+import { eq } from "drizzle-orm";
+import * as twoFactorService from "../services/twoFactorService";
 
 /**
  * Two-Factor Authentication Router
- * 
+ *
  * Provides endpoints for 2FA setup, verification, and management.
  */
 
@@ -20,8 +20,8 @@ export const twoFactorRouter = router({
     const db = await getDb();
     if (!db) {
       throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Database not available',
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Database not available",
       });
     }
 
@@ -32,17 +32,17 @@ export const twoFactorRouter = router({
       .where(eq(users.id, ctx.user.id))
       .limit(1);
 
-    if (user[0]?.twoFactorEnabled === 'true') {
+    if (user[0]?.twoFactorEnabled === "true") {
       throw new TRPCError({
-        code: 'BAD_REQUEST',
-        message: '2FA is already enabled for this account',
+        code: "BAD_REQUEST",
+        message: "2FA is already enabled for this account",
       });
     }
 
     // Generate 2FA secret and QR code
     const setup = await twoFactorService.generateTwoFactorSecret(
-      ctx.user.email || ctx.user.name || 'User',
-      'Crypto Remittance'
+      ctx.user.email || ctx.user.name || "User",
+      "Crypto Remittance"
     );
 
     // Store secret temporarily (not enabled yet)
@@ -73,17 +73,32 @@ export const twoFactorRouter = router({
       const db = await getDb();
       if (!db) {
         throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Database not available',
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Database not available",
         });
       }
 
-      // Check rate limit
-      const rateLimit = twoFactorService.checkTwoFactorRateLimit(ctx.user.id);
-      if (!rateLimit.allowed) {
+      let reservation: Awaited<
+        ReturnType<typeof twoFactorService.reserveTwoFactorAttempt>
+      >;
+      try {
+        reservation = await twoFactorService.reserveTwoFactorAttempt(
+          ctx.user.id
+        );
+      } catch (error) {
+        if (error instanceof twoFactorService.TwoFactorRedisUnavailableError) {
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: "Two-factor verification is temporarily unavailable",
+            cause: error,
+          });
+        }
+        throw error;
+      }
+      if (!reservation.allowed) {
         throw new TRPCError({
-          code: 'TOO_MANY_REQUESTS',
-          message: `Too many attempts. Try again after ${rateLimit.lockedUntil?.toLocaleTimeString()}`,
+          code: "TOO_MANY_REQUESTS",
+          message: `Too many attempts. Try again after ${reservation.retryAfterSeconds} seconds`,
         });
       }
 
@@ -96,8 +111,8 @@ export const twoFactorRouter = router({
 
       if (!user[0]?.twoFactorSecret) {
         throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '2FA setup not initiated. Please call setup first.',
+          code: "BAD_REQUEST",
+          message: "2FA setup not initiated. Please call setup first.",
         });
       }
 
@@ -107,12 +122,27 @@ export const twoFactorRouter = router({
         user[0].twoFactorSecret
       );
 
-      twoFactorService.recordTwoFactorAttempt(ctx.user.id, verification.isValid);
+      if (verification.isValid) {
+        try {
+          await twoFactorService.releaseTwoFactorAttempt(ctx.user.id);
+        } catch (error) {
+          if (
+            error instanceof twoFactorService.TwoFactorRedisUnavailableError
+          ) {
+            throw new TRPCError({
+              code: "SERVICE_UNAVAILABLE",
+              message: "Two-factor verification is temporarily unavailable",
+              cause: error,
+            });
+          }
+          throw error;
+        }
+      }
 
       if (!verification.isValid) {
         throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Invalid verification code',
+          code: "BAD_REQUEST",
+          message: "Invalid verification code",
         });
       }
 
@@ -124,14 +154,14 @@ export const twoFactorRouter = router({
       await db
         .update(users)
         .set({
-          twoFactorEnabled: 'true',
+          twoFactorEnabled: "true",
           twoFactorBackupCodes: JSON.stringify(hashedBackupCodes),
         })
         .where(eq(users.id, ctx.user.id));
 
       return {
         success: true,
-        message: '2FA enabled successfully',
+        message: "2FA enabled successfully",
         backupCodes,
       };
     }),
@@ -150,17 +180,32 @@ export const twoFactorRouter = router({
       const db = await getDb();
       if (!db) {
         throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Database not available',
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Database not available",
         });
       }
 
-      // Check rate limit
-      const rateLimit = twoFactorService.checkTwoFactorRateLimit(ctx.user.id);
-      if (!rateLimit.allowed) {
+      let reservation: Awaited<
+        ReturnType<typeof twoFactorService.reserveTwoFactorAttempt>
+      >;
+      try {
+        reservation = await twoFactorService.reserveTwoFactorAttempt(
+          ctx.user.id
+        );
+      } catch (error) {
+        if (error instanceof twoFactorService.TwoFactorRedisUnavailableError) {
+          throw new TRPCError({
+            code: "SERVICE_UNAVAILABLE",
+            message: "Two-factor verification is temporarily unavailable",
+            cause: error,
+          });
+        }
+        throw error;
+      }
+      if (!reservation.allowed) {
         throw new TRPCError({
-          code: 'TOO_MANY_REQUESTS',
-          message: `Too many attempts. Try again after ${rateLimit.lockedUntil?.toLocaleTimeString()}`,
+          code: "TOO_MANY_REQUESTS",
+          message: `Too many attempts. Try again after ${reservation.retryAfterSeconds} seconds`,
         });
       }
 
@@ -171,10 +216,10 @@ export const twoFactorRouter = router({
         .where(eq(users.id, ctx.user.id))
         .limit(1);
 
-      if (!user[0] || user[0].twoFactorEnabled !== 'true') {
+      if (!user[0] || user[0].twoFactorEnabled !== "true") {
         throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '2FA is not enabled for this account',
+          code: "BAD_REQUEST",
+          message: "2FA is not enabled for this account",
         });
       }
 
@@ -183,8 +228,11 @@ export const twoFactorRouter = router({
 
       if (input.useBackupCode) {
         // Verify backup code
-        const backupCodes = JSON.parse(user[0].twoFactorBackupCodes || '[]');
-        const result = twoFactorService.verifyBackupCode(input.token, backupCodes);
+        const backupCodes = JSON.parse(user[0].twoFactorBackupCodes || "[]");
+        const result = twoFactorService.verifyBackupCode(
+          input.token,
+          backupCodes
+        );
         isValid = result.isValid;
 
         if (isValid) {
@@ -202,8 +250,8 @@ export const twoFactorRouter = router({
         // Verify TOTP token
         if (!user[0].twoFactorSecret) {
           throw new TRPCError({
-            code: 'INTERNAL_SERVER_ERROR',
-            message: '2FA secret not found',
+            code: "INTERNAL_SERVER_ERROR",
+            message: "2FA secret not found",
           });
         }
 
@@ -214,27 +262,42 @@ export const twoFactorRouter = router({
         isValid = verification.isValid;
       }
 
-      twoFactorService.recordTwoFactorAttempt(ctx.user.id, isValid);
+      if (isValid) {
+        try {
+          await twoFactorService.releaseTwoFactorAttempt(ctx.user.id);
+        } catch (error) {
+          if (
+            error instanceof twoFactorService.TwoFactorRedisUnavailableError
+          ) {
+            throw new TRPCError({
+              code: "SERVICE_UNAVAILABLE",
+              message: "Two-factor verification is temporarily unavailable",
+              cause: error,
+            });
+          }
+          throw error;
+        }
+      }
 
       if (!isValid) {
         throw new TRPCError({
-          code: 'BAD_REQUEST',
+          code: "BAD_REQUEST",
           message: input.useBackupCode
-            ? 'Invalid backup code'
-            : 'Invalid verification code',
+            ? "Invalid backup code"
+            : "Invalid verification code",
         });
       }
 
       // Issue new session token with 2FA verified flag
-      const { sdk } = await import('../_core/sdk');
-      const { COOKIE_NAME, ONE_YEAR_MS } = await import('@shared/const');
-      const { getSessionCookieOptions } = await import('../_core/cookies');
-      
+      const { sdk } = await import("../_core/sdk");
+      const { COOKIE_NAME, ONE_YEAR_MS } = await import("@shared/const");
+      const { getSessionCookieOptions } = await import("../_core/cookies");
+
       const newSessionToken = await sdk.signSession(
         {
           openId: ctx.user.sub,
-          appId: ctx.session?.appId || process.env.VITE_APP_ID || '',
-          name: ctx.user.name || '',
+          appId: ctx.session?.appId || process.env.VITE_APP_ID || "",
+          name: ctx.user.name || "",
           twoFactorVerified: true,
         },
         { expiresInMs: ONE_YEAR_MS }
@@ -242,15 +305,20 @@ export const twoFactorRouter = router({
 
       // Set new cookie with 2FA verified
       const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.cookie(COOKIE_NAME, newSessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+      ctx.res.cookie(COOKIE_NAME, newSessionToken, {
+        ...cookieOptions,
+        maxAge: ONE_YEAR_MS,
+      });
 
       return {
         success: true,
-        message: '2FA verified successfully',
+        message: "2FA verified successfully",
         remainingBackupCodes: remainingBackupCodes?.length,
         shouldRegenerateBackupCodes:
           remainingBackupCodes &&
-          twoFactorService.shouldRegenerateBackupCodes(remainingBackupCodes.length),
+          twoFactorService.shouldRegenerateBackupCodes(
+            remainingBackupCodes.length
+          ),
       };
     }),
 
@@ -267,8 +335,8 @@ export const twoFactorRouter = router({
       const db = await getDb();
       if (!db) {
         throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Database not available',
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Database not available",
         });
       }
 
@@ -279,18 +347,18 @@ export const twoFactorRouter = router({
         .where(eq(users.id, ctx.user.id))
         .limit(1);
 
-      if (!user[0] || user[0].twoFactorEnabled !== 'true') {
+      if (!user[0] || user[0].twoFactorEnabled !== "true") {
         throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '2FA is not enabled for this account',
+          code: "BAD_REQUEST",
+          message: "2FA is not enabled for this account",
         });
       }
 
       // Verify token before disabling
       if (!user[0].twoFactorSecret) {
         throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: '2FA secret not found',
+          code: "INTERNAL_SERVER_ERROR",
+          message: "2FA secret not found",
         });
       }
 
@@ -301,8 +369,8 @@ export const twoFactorRouter = router({
 
       if (!verification.isValid) {
         throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Invalid verification code',
+          code: "BAD_REQUEST",
+          message: "Invalid verification code",
         });
       }
 
@@ -310,7 +378,7 @@ export const twoFactorRouter = router({
       await db
         .update(users)
         .set({
-          twoFactorEnabled: 'false',
+          twoFactorEnabled: "false",
           twoFactorSecret: null,
           twoFactorBackupCodes: null,
         })
@@ -318,7 +386,7 @@ export const twoFactorRouter = router({
 
       return {
         success: true,
-        message: '2FA disabled successfully',
+        message: "2FA disabled successfully",
       };
     }),
 
@@ -329,8 +397,8 @@ export const twoFactorRouter = router({
     const db = await getDb();
     if (!db) {
       throw new TRPCError({
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Database not available',
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Database not available",
       });
     }
 
@@ -342,8 +410,8 @@ export const twoFactorRouter = router({
 
     if (!user[0]) {
       throw new TRPCError({
-        code: 'NOT_FOUND',
-        message: 'User not found',
+        code: "NOT_FOUND",
+        message: "User not found",
       });
     }
 
@@ -352,7 +420,7 @@ export const twoFactorRouter = router({
       : [];
 
     return {
-      enabled: user[0].twoFactorEnabled === 'true',
+      enabled: user[0].twoFactorEnabled === "true",
       backupCodesCount: backupCodes.length,
       shouldRegenerateBackupCodes: twoFactorService.shouldRegenerateBackupCodes(
         backupCodes.length
@@ -373,8 +441,8 @@ export const twoFactorRouter = router({
       const db = await getDb();
       if (!db) {
         throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Database not available',
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Database not available",
         });
       }
 
@@ -385,18 +453,18 @@ export const twoFactorRouter = router({
         .where(eq(users.id, ctx.user.id))
         .limit(1);
 
-      if (!user[0] || user[0].twoFactorEnabled !== 'true') {
+      if (!user[0] || user[0].twoFactorEnabled !== "true") {
         throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '2FA is not enabled for this account',
+          code: "BAD_REQUEST",
+          message: "2FA is not enabled for this account",
         });
       }
 
       // Verify token before regenerating
       if (!user[0].twoFactorSecret) {
         throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: '2FA secret not found',
+          code: "INTERNAL_SERVER_ERROR",
+          message: "2FA secret not found",
         });
       }
 
@@ -407,8 +475,8 @@ export const twoFactorRouter = router({
 
       if (!verification.isValid) {
         throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'Invalid verification code',
+          code: "BAD_REQUEST",
+          message: "Invalid verification code",
         });
       }
 

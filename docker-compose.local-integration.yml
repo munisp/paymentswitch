@@ -1,0 +1,185 @@
+name: paymentswitch-local-integration
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16.4-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-paymentswitch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.local-integration}
+      POSTGRES_DB: ${POSTGRES_DB:-paymentswitch}
+    ports:
+      - "${POSTGRES_PUBLISHED_PORT:-55432}:5432"
+    volumes:
+      - local-integration-postgres:/var/lib/postgresql/data
+      - ./deploy/local-integration/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [paymentswitch]
+
+  keycloak:
+    image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.3.2}
+    restart: unless-stopped
+    command: ["start-dev", "--http-port=8080", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER:-keycloak}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in .env.local-integration}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env.local-integration}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_PUBLISHED_PORT:-18080}:8080"
+    volumes:
+      - ./config/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks: [paymentswitch]
+
+  temporal:
+    image: ${TEMPORAL_IMAGE:-temporalio/auto-setup:1.27.2}
+    restart: unless-stopped
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ${TEMPORAL_DB_USER:-temporal}
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:?Set TEMPORAL_DB_PASSWORD in .env.local-integration}
+      POSTGRES_SEEDS: postgres
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development.yaml
+      ENABLE_ES: "false"
+      DEFAULT_NAMESPACE: ${TEMPORAL_NAMESPACE:-paymentswitch}
+      DEFAULT_NAMESPACE_RETENTION: ${TEMPORAL_RETENTION:-1}
+      PROMETHEUS_ENDPOINT: 0.0.0.0:9090
+    ports:
+      - "${TEMPORAL_PUBLISHED_PORT:-17233}:7233"
+      - "${TEMPORAL_METRICS_PUBLISHED_PORT:-18000}:9090"
+    volumes:
+      - ./deploy/local-integration/temporal/dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 7233"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks: [paymentswitch]
+
+  temporal-ui:
+    image: ${TEMPORAL_UI_IMAGE:-temporalio/ui:2.39.0}
+    restart: unless-stopped
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:${TEMPORAL_UI_PUBLISHED_PORT:-18088}
+    ports:
+      - "${TEMPORAL_UI_PUBLISHED_PORT:-18088}:8080"
+    depends_on:
+      temporal:
+        condition: service_healthy
+    networks: [paymentswitch]
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v2.55.1}
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "${PROMETHEUS_PUBLISHED_PORT:-19090}:9090"
+    volumes:
+      - ./deploy/local-integration/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/local-integration/prometheus/blackbox.yml:/etc/prometheus/blackbox.yml:ro
+      - ./deploy/local-integration/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - local-integration-prometheus:/prometheus
+    depends_on:
+      temporal:
+        condition: service_healthy
+      tigerbeetle:
+        condition: service_healthy
+      blackbox-exporter:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9090/-/ready | grep -q Ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [paymentswitch]
+
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:11.2.0}
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env.local-integration}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "${GRAFANA_PUBLISHED_PORT:-13001}:3000"
+    volumes:
+      - local-integration-grafana:/var/lib/grafana
+      - ./deploy/local-integration/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/local-integration/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:3000/api/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [paymentswitch]
+
+  blackbox-exporter:
+    image: ${BLACKBOX_IMAGE:-prom/blackbox-exporter:v0.25.0}
+    restart: unless-stopped
+    command: ["--config.file=/etc/blackbox_exporter/config.yml"]
+    ports:
+      - "${BLACKBOX_PUBLISHED_PORT:-19115}:9115"
+    volumes:
+      - ./deploy/local-integration/prometheus/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    networks: [paymentswitch]
+
+  tigerbeetle:
+    image: ${TIGERBEETLE_IMAGE:-ghcr.io/tigerbeetle/tigerbeetle:0.16.30}
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-ec"]
+    command: >-
+      if [ ! -f /var/lib/tigerbeetle/tigerbeetle.tigerbeetle ]; then
+        tigerbeetle format --cluster=0 --replica=0 --development /var/lib/tigerbeetle/tigerbeetle.tigerbeetle;
+      fi;
+      exec tigerbeetle start --addresses=0.0.0.0:3000 /var/lib/tigerbeetle/tigerbeetle.tigerbeetle
+    ports:
+      - "${TIGERBEETLE_PUBLISHED_PORT:-13000}:3000"
+    volumes:
+      - local-integration-tigerbeetle:/var/lib/tigerbeetle
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /var/lib/tigerbeetle/tigerbeetle.tigerbeetle"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [paymentswitch]
+
+volumes:
+  local-integration-postgres:
+  local-integration-tigerbeetle:
+  local-integration-prometheus:
+  local-integration-grafana:
+
+networks:
+  paymentswitch:
+    driver: bridge

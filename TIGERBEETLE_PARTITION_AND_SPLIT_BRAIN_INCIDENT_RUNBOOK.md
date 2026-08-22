@@ -1,9 +1,9 @@
 # TigerBeetle Partition and Suspected Split-Brain Incident Response and Rollback Runbook
 
-**System:** Payment Switch TigerBeetle ledger cluster  
-**Applies to:** Production and production-like environments only  
-**Severity:** SEV-1 whenever money movement is affected or conflicting leadership/commit evidence is suspected  
-**Authority:** Incident Commander (IC), Ledger SRE, Finance Controls, and Security On-Call  
+**System:** Payment Switch TigerBeetle ledger cluster
+**Applies to:** Production and production-like environments only
+**Severity:** SEV-1 whenever money movement is affected or conflicting leadership/commit evidence is suspected
+**Authority:** Incident Commander (IC), Ledger SRE, Finance Controls, and Security On-Call
 **Purpose:** Preserve ledger correctness and prevent duplicate or unauthorized movement of funds during a partition, quorum loss, replica corruption, or suspected split-brain condition.
 
 > **Safety principle:** Do not trade consistency for availability. TigerBeetle is designed to preserve strict serializability or become safely unavailable when it cannot operate safely. During a suspected split-brain event, **freeze payment writes first, preserve evidence, and do not manually force leaders, create a replacement cluster, reformat data files, or delete PVCs.** [1] [2]
@@ -170,6 +170,6 @@ Within five business days, complete a blameless post-incident review. It must in
 
 ## References
 
-[1]: [TigerBeetle Cluster Recommendations](https://docs.tigerbeetle.com/operating/cluster/) — six-replica recommendation, leadership, availability, and independent fault domains.  
-[2]: [TigerBeetle Recovering](https://docs.tigerbeetle.com/operating/recovering/) — recovery of permanently lost replica data files and prohibition on `format`.  
+[1]: [TigerBeetle Cluster Recommendations](https://docs.tigerbeetle.com/operating/cluster/) — six-replica recommendation, leadership, availability, and independent fault domains.
+[2]: [TigerBeetle Recovering](https://docs.tigerbeetle.com/operating/recovering/) — recovery of permanently lost replica data files and prohibition on `format`.
 [3]: [TigerBeetle Safety](https://docs.tigerbeetle.com/concepts/safety/) — strict serializability, client-generated transfer-ID idempotency, consensus behavior, and safety model.

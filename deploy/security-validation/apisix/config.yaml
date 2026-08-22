@@ -1,0 +1,30 @@
+apisix:
+  node_listen: 9080
+  enable_admin: true
+  ssl:
+    enable: false
+    listen:
+      - port: 9443
+  enable_control: true
+  enable_ipv6: false
+
+deployment:
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
+
+admin:
+  allow_admin:
+    - 172.16.0.0/12
+  admin_key_required: true
+  admin_key:
+    - name: admin
+      key: apisix-local-only
+      role: admin
+
+plugins:
+  - request-id
+  - openid-connect
+  - limit-req
+  - proxy-rewrite
+  - prometheus

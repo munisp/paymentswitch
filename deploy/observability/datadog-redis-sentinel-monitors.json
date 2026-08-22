@@ -1,0 +1,36 @@
+{
+  "monitors": [
+    {
+      "name": "Paymentswitch Redis Sentinel circuit breaker trips",
+      "type": "query alert",
+      "query": "sum(last_10m):sum:paymentswitch.redis.circuit_breaker.trips{env:production,service:paymentswitch-*} >= 3",
+      "message": "{{#is_alert}}Redis circuit breaker opened at least three times in ten minutes. 2FA may be failing closed. Page SRE and Security. {{/is_alert}} @pagerduty-paymentswitch @slack-paymentswitch-oncall",
+      "tags": ["service:redis-resilience", "severity:critical", "security_control:fail_closed"],
+      "options": {"thresholds": {"critical": 3}, "notify_no_data": true, "no_data_timeframe": 10, "renotify_interval": 15}
+    },
+    {
+      "name": "Paymentswitch Redis Sentinel failover duration",
+      "type": "query alert",
+      "query": "avg(last_10m):sum:paymentswitch.redis.sentinel.failover_duration_seconds{env:production} / sum:paymentswitch.redis.sentinel.failover_duration_observations{env:production} > 10",
+      "message": "{{#is_alert}}Redis Sentinel topology discovery is averaging more than ten seconds. Validate Sentinel quorum and primary promotion.{{/is_alert}} @pagerduty-paymentswitch",
+      "tags": ["service:redis-resilience", "severity:critical"],
+      "options": {"thresholds": {"critical": 10}, "notify_no_data": true, "no_data_timeframe": 10}
+    },
+    {
+      "name": "Paymentswitch 2FA Redis fail closed",
+      "type": "query alert",
+      "query": "sum(last_10m):sum:paymentswitch.two_factor.redis_fail_closed{env:production} > 0",
+      "message": "{{#is_alert}}2FA requests are being rejected because authoritative Redis state is unavailable. This is fail closed by design. Inspect Redis and Sentinel immediately.{{/is_alert}} @pagerduty-paymentswitch @slack-paymentswitch-security",
+      "tags": ["service:authentication", "severity:critical", "security_control:fail_closed"],
+      "options": {"thresholds": {"critical": 0}, "notify_no_data": false, "renotify_interval": 10}
+    },
+    {
+      "name": "Paymentswitch Redis Sentinel topology changes",
+      "type": "query alert",
+      "query": "sum(last_15m):sum:paymentswitch.redis.sentinel.topology_changes{env:production} >= 2",
+      "message": "{{#is_alert}}Redis primary topology changed at least twice in fifteen minutes. Investigate flapping, network partitions, or unauthorized promotion.{{/is_alert}} @slack-paymentswitch-oncall",
+      "tags": ["service:redis-resilience", "severity:warning"],
+      "options": {"thresholds": {"critical": 2}, "notify_no_data": false}
+    }
+  ]
+}

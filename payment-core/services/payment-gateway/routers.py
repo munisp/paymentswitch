@@ -6,7 +6,7 @@ import uuid
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
 import redis.asyncio as aioredis
 from temporalio.client import Client as TemporalClient
 
@@ -48,6 +48,7 @@ def get_redis_client():
 async def initiate_payment(
     request: PaymentRequest,
     background_tasks: BackgroundTasks,
+    http_request: Request,
     temporal_client = Depends(get_temporal_client()),
     redis_client = Depends(get_redis_client())
 ):
@@ -67,7 +68,15 @@ async def initiate_payment(
     Raises:
         HTTPException: If payment initiation fails
     """
-    transaction_id = str(uuid.uuid4())
+    idempotency_key = (http_request.headers.get("idempotency-key") or "").strip()
+    if idempotency_key:
+        if len(idempotency_key) > 100 or not all(
+            character.isalnum() or character in "-_" for character in idempotency_key
+        ):
+            raise HTTPException(status_code=400, detail="Invalid Idempotency-Key")
+        transaction_id = idempotency_key
+    else:
+        transaction_id = str(uuid.uuid4())
     timestamp = datetime.utcnow().isoformat()
     
     try:
@@ -126,21 +135,26 @@ async def initiate_payment(
             logger.info(f"Started payment workflow {workflow_id} for transaction {transaction_id}")
             
         except Exception as e:
-            logger.error(f"Failed to start workflow: {e}")
-            # Update status to failed
-            await redis_client.setex(
-                f"txn:{transaction_id}",
-                3600,
-                str({
-                    **workflow_input,
-                    "status": TransactionStatus.FAILED.value,
-                    "failure_reason": f"Workflow start failed: {str(e)}"
-                })
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to initiate payment workflow: {str(e)}"
-            )
+            if e.__class__.__name__ == "WorkflowAlreadyStartedError":
+                logger.info(
+                    "Replayed payment initiation for existing workflow %s",
+                    workflow_id,
+                )
+            else:
+                logger.error(f"Failed to start workflow: {e}")
+                await redis_client.setex(
+                    f"txn:{transaction_id}",
+                    3600,
+                    str({
+                        **workflow_input,
+                        "status": TransactionStatus.FAILED.value,
+                        "failure_reason": "Workflow start failed"
+                    })
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail="Failed to initiate payment workflow"
+                )
         
         # Calculate estimated completion time (5 seconds for typical transaction)
         estimated_completion = (datetime.utcnow() + timedelta(seconds=5)).isoformat()

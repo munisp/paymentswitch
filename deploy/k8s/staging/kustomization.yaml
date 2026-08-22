@@ -11,6 +11,7 @@ resources:
   - migration-job.yaml
   - network-policy.yaml
   - service-account.yaml
+  - tigerbeetle-statefulset.yaml
 
 images:
   - name: ghcr.io/your-org/payment-switch/web-portal

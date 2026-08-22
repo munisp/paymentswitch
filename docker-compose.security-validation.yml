@@ -1,0 +1,111 @@
+name: paymentswitch-security-validation
+
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_USER: paymentswitch
+      POSTGRES_PASSWORD: paymentswitch-local-only
+      POSTGRES_DB: paymentswitch
+    ports: ["55433:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paymentswitch -d paymentswitch"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [security]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.2
+    command: ["start-dev", "--http-port=8080", "--import-realm"]
+    environment:
+      KC_DB: dev-file
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin-local-only
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+    ports: ["18081:8080"]
+    volumes:
+      - ./deploy/security-validation/keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks: [security]
+
+  opa:
+    image: openpolicyagent/opa:0.70.0
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "/policies"]
+    volumes:
+      - ./security/opa:/policies:ro
+    ports: ["18181:8181"]
+    healthcheck:
+      test: ["CMD", "/opa", "eval", "--fail-defined", "--data=/policies", "data.paymentswitch.authz"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [security]
+
+  permify:
+    image: ghcr.io/permify/permify:latest
+    command: ["serve"]
+    environment:
+      PERMIFY_DATABASE_ENGINE: memory
+      PERMIFY_SERVER_HTTP_PORT: "3476"
+      PERMIFY_SERVER_GRPC_PORT: "3478"
+    ports: ["13476:3476", "13478:3478"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:3476/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks: [security]
+
+  apisix:
+    image: apache/apisix:3.11.0-debian
+    environment:
+      APISIX_STAND_ALONE: "true"
+      APISIX_ADMIN_KEY: apisix-local-only
+    ports: ["19080:9080", "19443:9443"]
+    volumes:
+      - ./deploy/security-validation/apisix/config.yaml:/usr/local/apisix/conf/config.yaml:ro
+      - ./deploy/security-validation/apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    depends_on:
+      keycloak: {condition: service_healthy}
+      opa: {condition: service_healthy}
+      permify: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks: [security]
+
+  tigerbeetle:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.16.30
+    entrypoint: ["/bin/sh", "-ec"]
+    command: >-
+      if [ ! -f /var/lib/tigerbeetle/ledger.tigerbeetle ]; then
+        tigerbeetle format --cluster=0 --replica=0 --development /var/lib/tigerbeetle/ledger.tigerbeetle;
+      fi;
+      exec tigerbeetle start --addresses=0.0.0.0:3000 /var/lib/tigerbeetle/ledger.tigerbeetle
+    ports: ["13001:3000"]
+    volumes:
+      - security-validation-tigerbeetle:/var/lib/tigerbeetle
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /var/lib/tigerbeetle/ledger.tigerbeetle"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [security]
+
+networks:
+  security:
+    driver: bridge
+
+volumes:
+  security-validation-tigerbeetle:

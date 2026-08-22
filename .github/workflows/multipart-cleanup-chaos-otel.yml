@@ -1,0 +1,115 @@
+name: Multipart cleanup chaos and tracing
+
+on:
+  pull_request:
+    paths:
+      - "server/jobs/**"
+      - "server/storageMultipart.ts"
+      - "server/observability/**"
+      - "deploy/cleanup/**"
+      - "deploy/observability/**"
+      - "scripts/chaos/**"
+      - ".github/workflows/multipart-cleanup-chaos-otel.yml"
+  workflow_dispatch:
+
+jobs:
+  cleanup-chaos-otel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16.4
+        env:
+          POSTGRES_USER: paymentswitch
+          POSTGRES_PASSWORD: paymentswitch
+          POSTGRES_DB: paymentswitch_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U paymentswitch -d paymentswitch_test"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      DATABASE_URL: postgresql://paymentswitch:paymentswitch@127.0.0.1:5432/paymentswitch_test
+      TEST_USER_ID: "1"
+      LOCALSTACK_ENDPOINT: http://127.0.0.1:4566
+      S3_ENDPOINT: http://127.0.0.1:4566
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: test
+      S3_SECRET_KEY: test
+      S3_BUCKET: paymentswitch-test
+      RUN_LOCALSTACK_MULTIPART_TEST: "true"
+      OTEL_SERVICE_NAME: paymentswitch-multipart-cleanup-ci
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://127.0.0.1:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_TRACES_SAMPLER: always_on
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.4.1
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Start LocalStack and Toxiproxy
+        run: |
+          docker run -d --name localstack -p 4566:4566 -e SERVICES=s3 localstack/localstack:3.8
+          docker run -d --name toxiproxy -p 8474:8474 -p 4567:4567 shopify/toxiproxy:2.5.0
+          timeout 60 bash -c 'until curl -fsS http://127.0.0.1:4566/_localstack/health; do sleep 2; done'
+          aws --endpoint-url http://127.0.0.1:4566 s3 mb s3://paymentswitch-test
+          curl -fsS -X POST http://127.0.0.1:8474/proxies \
+            -H 'content-type: application/json' \
+            -d '{"name":"paymentswitch-s3","listen":"0.0.0.0:4567","upstream":"host.docker.internal:4566","enabled":true}'
+      - name: Apply database migrations
+        run: pnpm exec drizzle-kit migrate
+      - name: Start OpenTelemetry collector
+        run: |
+          cat > /tmp/otel-config.yaml <<'EOF'
+          receivers:
+            otlp:
+              protocols:
+                http:
+          exporters:
+            debug:
+              verbosity: detailed
+          service:
+            pipelines:
+              traces:
+                receivers: [otlp]
+                exporters: [debug]
+          EOF
+          docker run -d --name otel-collector --network host \
+            -v /tmp/otel-config.yaml:/etc/otelcol-contrib/config.yaml \
+            otel/opentelemetry-collector-contrib:0.111.0 \
+            --config=/etc/otelcol-contrib/config.yaml
+      - name: Run normal cleanup integration test
+        run: pnpm exec vitest run server/jobs/multipartCleanup.localstack.integration.test.ts
+      - name: Run latency chaos and verify retries
+        env:
+          ALLOW_CHAOS: "true"
+          CHAOS_MODE: latency
+          CHAOS_LATENCY_MS: "2000"
+          CHAOS_SECONDS: "10"
+          TOXIPROXY_URL: http://127.0.0.1:8474
+          TOXIPROXY_PROXY: paymentswitch-s3
+          CLEANUP_COMMAND: "pnpm exec tsx server/jobs/multipartCleanupRunner.ts"
+        run: ./scripts/chaos/multipart-cleanup-chaos.sh
+      - name: Run S3 outage chaos and verify failed cleanup state
+        env:
+          ALLOW_CHAOS: "true"
+          CHAOS_MODE: outage
+          CHAOS_SECONDS: "10"
+          TOXIPROXY_URL: http://127.0.0.1:8474
+          TOXIPROXY_PROXY: paymentswitch-s3
+          CLEANUP_COMMAND: "pnpm exec tsx server/jobs/multipartCleanupRunner.ts"
+        run: ./scripts/chaos/multipart-cleanup-chaos.sh
+      - name: Verify exported trace evidence
+        run: |
+          docker logs otel-collector 2>&1 | tee audit/artifacts/ci-otel-collector.log
+          grep -E 'cleanup\.multipart|storage\.s3\.abort_multipart|trace_id' audit/artifacts/ci-otel-collector.log
+      - name: Validate repository
+        run: |
+          pnpm exec tsc --noEmit
+          pnpm run build
+          git diff --check

@@ -1,13 +1,170 @@
-import speakeasy from 'speakeasy';
-import QRCode from 'qrcode';
-import crypto from 'crypto';
-import { createChildLogger } from '../lib/logger';
+import speakeasy from "speakeasy";
+import QRCode from "qrcode";
+import crypto from "crypto";
+import { createChildLogger } from "../lib/logger";
+import { createClient, type RedisClientType } from "redis";
+import { recordTwoFactorRedisUnavailable } from "../observability/metrics";
+import { RedisSentinelManager } from "../security/redisSentinelManager";
 
-const log = createChildLogger('twoFactor');
+const log = createChildLogger("twoFactor");
+const twoFactorRedisUrl = process.env.REDIS_URL;
+const twoFactorRedisRequired =
+  process.env.NODE_ENV === "production" ||
+  process.env.TWO_FACTOR_REDIS_REQUIRED === "true";
+let twoFactorRedis: RedisClientType | undefined;
+let twoFactorRedisConnect: Promise<RedisClientType> | undefined;
+let twoFactorSentinelManager: RedisSentinelManager | undefined;
+
+function getTwoFactorSentinelManager(): RedisSentinelManager {
+  if (!twoFactorSentinelManager) {
+    const urls = (
+      process.env.REDIS_SENTINEL_URLS ??
+      process.env.REDIS_URL ??
+      ""
+    )
+      .split(",")
+      .map(value => value.trim())
+      .filter(Boolean);
+    twoFactorSentinelManager = new RedisSentinelManager({
+      sentinelUrls: urls,
+      masterName: process.env.REDIS_SENTINEL_MASTER,
+      username: process.env.REDIS_USERNAME,
+      password: process.env.REDIS_PASSWORD,
+      tls: process.env.REDIS_TLS !== "false",
+      failureThreshold: Number(
+        process.env.REDIS_CIRCUIT_FAILURE_THRESHOLD ?? 3
+      ),
+      cooldownMs: Number(process.env.REDIS_CIRCUIT_COOLDOWN_MS ?? 10000),
+      connectTimeoutMs: Number(process.env.REDIS_CONNECT_TIMEOUT_MS ?? 3000),
+    });
+  }
+  return twoFactorSentinelManager;
+}
+
+async function getTwoFactorRedis(): Promise<RedisClientType> {
+  if (!twoFactorRedisUrl) {
+    throw new Error("REDIS_URL is required for distributed 2FA attempts");
+  }
+  if (twoFactorRedis?.isReady) return twoFactorRedis;
+  if (!twoFactorRedisConnect) {
+    const client = createClient({ url: twoFactorRedisUrl });
+    client.on("error", () => undefined);
+    twoFactorRedisConnect = client.connect().then(() => {
+      twoFactorRedis = client as RedisClientType;
+      return twoFactorRedis;
+    });
+  }
+  return twoFactorRedisConnect;
+}
+
+const TWO_FACTOR_ATTEMPT_SCRIPT = `
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return { count, redis.call('TTL', KEYS[1]) }
+`;
+
+const TWO_FACTOR_RESERVE_SCRIPT = `
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[2]) end
+local ttl = redis.call('TTL', KEYS[1])
+if count > tonumber(ARGV[1]) then
+  redis.call('DECR', KEYS[1])
+  return { 0, count, ttl }
+end
+return { 1, count, ttl }
+`;
+
+const TWO_FACTOR_RELEASE_SCRIPT = `
+local count = tonumber(redis.call('GET', KEYS[1]) or '0')
+if count <= 1 then
+  redis.call('DEL', KEYS[1])
+  return 0
+end
+return redis.call('DECR', KEYS[1])
+`;
+
+export class TwoFactorRedisUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super("Distributed 2FA attempt storage is unavailable");
+    this.name = "TwoFactorRedisUnavailableError";
+    this.cause = cause;
+  }
+  cause?: unknown;
+}
+
+export async function reserveTwoFactorAttempt(userId: number): Promise<{
+  allowed: boolean;
+  remainingAttempts: number;
+  retryAfterSeconds: number;
+}> {
+  try {
+    const raw = (await getTwoFactorSentinelManager().execute(redis =>
+      redis.eval(TWO_FACTOR_RESERVE_SCRIPT, {
+        keys: [`paymentswitch:2fa:attempts:${userId}`],
+        arguments: ["5", "900"],
+      })
+    )) as [number | string, number | string, number | string];
+    /*
+      keys: [`paymentswitch:2fa:attempts:${userId}`],
+      arguments: ["5", "900"],
+    })) as [number | string, number | string, number | string];
+    */
+    const allowed = Number(raw[0]) === 1;
+    const count = Number(raw[1]);
+    return {
+      allowed,
+      remainingAttempts: allowed ? Math.max(0, 5 - count) : 0,
+      retryAfterSeconds: Math.max(1, Number(raw[2])),
+    };
+  } catch (error) {
+    if (twoFactorRedisRequired) {
+      recordTwoFactorRedisUnavailable("reserve");
+      throw new TwoFactorRedisUnavailableError(error);
+    }
+    const fallback = await checkTwoFactorRateLimit(userId);
+    if (!fallback.allowed) {
+      return {
+        allowed: false,
+        remainingAttempts: 0,
+        retryAfterSeconds: Math.max(
+          1,
+          Math.ceil(
+            ((fallback.lockedUntil?.getTime() ?? Date.now()) - Date.now()) /
+              1000
+          )
+        ),
+      };
+    }
+    await recordTwoFactorAttempt(userId, false);
+    return {
+      allowed: true,
+      remainingAttempts: Math.max(0, fallback.remainingAttempts - 1),
+      retryAfterSeconds: 900,
+    };
+  }
+}
+
+export async function releaseTwoFactorAttempt(userId: number): Promise<void> {
+  try {
+    await getTwoFactorSentinelManager().execute(redis =>
+      redis.eval(TWO_FACTOR_RELEASE_SCRIPT, {
+        keys: [`paymentswitch:2fa:attempts:${userId}`],
+        arguments: [],
+      })
+    );
+  } catch (error) {
+    if (twoFactorRedisRequired) {
+      recordTwoFactorRedisUnavailable("release");
+      throw new TwoFactorRedisUnavailableError(error);
+    }
+    const attempt = attemptCache.get(userId);
+    if (attempt && attempt.attempts > 0) attempt.attempts -= 1;
+  }
+}
 
 /**
  * Two-Factor Authentication Service
- * 
+ *
  * Provides TOTP (Time-based One-Time Password) functionality for 2FA.
  * Supports QR code generation for authenticator apps and backup codes for account recovery.
  */
@@ -29,7 +186,7 @@ export interface TwoFactorVerificationResult {
  */
 export async function generateTwoFactorSecret(
   userEmail: string,
-  appName: string = 'Crypto Remittance'
+  appName: string = "Crypto Remittance"
 ): Promise<TwoFactorSetupResult> {
   // Generate secret
   const secret = speakeasy.generateSecret({
@@ -38,7 +195,7 @@ export async function generateTwoFactorSecret(
   });
 
   if (!secret.otpauth_url) {
-    throw new Error('Failed to generate OTP auth URL');
+    throw new Error("Failed to generate OTP auth URL");
   }
 
   // Generate QR code
@@ -65,19 +222,21 @@ export function verifyTwoFactorToken(
   try {
     const verified = speakeasy.totp.verify({
       secret,
-      encoding: 'base32',
+      encoding: "base32",
       token,
       window: 2, // Allow 2 time steps before/after for clock drift
     });
 
     return {
       isValid: verified,
-      message: verified ? '2FA token verified successfully' : 'Invalid 2FA token',
+      message: verified
+        ? "2FA token verified successfully"
+        : "Invalid 2FA token",
     };
   } catch (error) {
     return {
       isValid: false,
-      message: 'Error verifying 2FA token',
+      message: "Error verifying 2FA token",
     };
   }
 }
@@ -116,7 +275,7 @@ export function generateBackupCodes(count: number = 10): string[] {
 
   for (let i = 0; i < count; i++) {
     // Generate 8-character alphanumeric code
-    const code = crypto.randomBytes(4).toString('hex').toUpperCase();
+    const code = crypto.randomBytes(4).toString("hex").toUpperCase();
     codes.push(code);
   }
 
@@ -134,10 +293,7 @@ export function hashBackupCodes(codes: string[]): string[] {
  * Hash a single backup code
  */
 function hashBackupCode(code: string): string {
-  return crypto
-    .createHash('sha256')
-    .update(code.toUpperCase())
-    .digest('hex');
+  return crypto.createHash("sha256").update(code.toUpperCase()).digest("hex");
 }
 
 /**
@@ -146,17 +302,14 @@ function hashBackupCode(code: string): string {
 export function generateCurrentToken(secret: string): string {
   return speakeasy.totp({
     secret,
-    encoding: 'base32',
+    encoding: "base32",
   });
 }
 
 /**
  * Validate 2FA setup by verifying a token
  */
-export function validateTwoFactorSetup(
-  token: string,
-  secret: string
-): boolean {
+export function validateTwoFactorSetup(token: string, secret: string): boolean {
   const result = verifyTwoFactorToken(token, secret);
   return result.isValid;
 }
@@ -175,8 +328,8 @@ export interface DisableTwoFactorRequest {
  */
 export function formatBackupCodes(codes: string[]): string {
   return codes
-    .map((code, index) => `${index + 1}. ${code.match(/.{1,4}/g)?.join('-')}`)
-    .join('\n');
+    .map((code, index) => `${index + 1}. ${code.match(/.{1,4}/g)?.join("-")}`)
+    .join("\n");
 }
 
 /**
@@ -195,22 +348,22 @@ export function shouldRegenerateBackupCodes(
  */
 export interface SmsTwoFactorOptions {
   phoneNumber: string;
-  provider: 'twilio' | 'africas_talking';
+  provider: "twilio" | "africas_talking";
 }
 
 export async function sendSmsVerificationCode(
   options: SmsTwoFactorOptions
-): Promise<{ success: boolean; code: string; expiresAt: Date }> {
+): Promise<{ success: boolean; code?: string; expiresAt: Date }> {
   // Generate 6-digit code
-  const { randomInt } = require('crypto');
+  const { randomInt } = require("crypto");
   const code = String(randomInt(100000, 999999));
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
   // In production, integrate with SMS provider
-  if (process.env.NODE_ENV === 'production') {
-    if (options.provider === 'twilio') {
+  if (process.env.NODE_ENV === "production") {
+    if (options.provider === "twilio") {
       await sendTwilioSms(options.phoneNumber, code);
-    } else if (options.provider === 'africas_talking') {
+    } else if (options.provider === "africas_talking") {
       await sendAfricasTalkingSms(options.phoneNumber, code);
     }
   } else {
@@ -219,7 +372,7 @@ export async function sendSmsVerificationCode(
 
   return {
     success: true,
-    code,
+    ...(process.env.NODE_ENV === "production" ? {} : { code }),
     expiresAt,
   };
 }
@@ -235,20 +388,20 @@ export function verifySmsCode(
   if (new Date() > expiresAt) {
     return {
       isValid: false,
-      message: 'Verification code has expired',
+      message: "Verification code has expired",
     };
   }
 
   if (providedCode !== storedCode) {
     return {
       isValid: false,
-      message: 'Invalid verification code',
+      message: "Invalid verification code",
     };
   }
 
   return {
     isValid: true,
-    message: 'SMS code verified successfully',
+    message: "SMS code verified successfully",
   };
 }
 
@@ -261,17 +414,17 @@ async function sendTwilioSms(phoneNumber: string, code: string): Promise<void> {
   const fromNumber = process.env.TWILIO_PHONE_NUMBER;
 
   if (!accountSid || !authToken || !fromNumber) {
-    throw new Error('Twilio credentials not configured');
+    throw new Error("Twilio credentials not configured");
   }
 
   const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
-  const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+  const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
   try {
     const response = await fetch(url, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Authorization': `Basic ${auth}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({
         Body: `Your verification code is: ${code}`,
@@ -280,10 +433,10 @@ async function sendTwilioSms(phoneNumber: string, code: string): Promise<void> {
       }).toString(),
     });
     if (!response.ok) {
-      log.error({ status: response.status }, '[Twilio] SMS send failed');
+      log.error({ status: response.status }, "[Twilio] SMS send failed");
     }
   } catch (err) {
-    log.error({ err }, '[Twilio] SMS API error');
+    log.error({ err }, "[Twilio] SMS API error");
     throw err;
   }
 }
@@ -303,21 +456,27 @@ async function sendAfricasTalkingSms(
   }
 
   try {
-    const response = await fetch('https://api.africastalking.com/version1/messaging', {
-      method: 'POST',
-      headers: {
-        'apiKey': apiKey,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json',
-      },
-      body: new URLSearchParams({
-        username,
-        to: phoneNumber,
-        message: `Your verification code is: ${code}`,
-      }).toString(),
-    });
+    const response = await fetch(
+      "https://api.africastalking.com/version1/messaging",
+      {
+        method: "POST",
+        headers: {
+          apiKey: apiKey,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        body: new URLSearchParams({
+          username,
+          to: phoneNumber,
+          message: `Your verification code is: ${code}`,
+        }).toString(),
+      }
+    );
     if (!response.ok) {
-      log.error({ status: response.status }, "[Africa's Talking] SMS send failed");
+      log.error(
+        { status: response.status },
+        "[Africa's Talking] SMS send failed"
+      );
     }
   } catch (err) {
     log.error({ err }, "[Africa's Talking] SMS API error");
@@ -337,9 +496,28 @@ interface TwoFactorAttempt {
 
 const attemptCache = new Map<number, TwoFactorAttempt>();
 
-export function checkTwoFactorRateLimit(
-  userId: number
-): { allowed: boolean; remainingAttempts: number; lockedUntil?: Date } {
+export async function checkTwoFactorRateLimit(userId: number): Promise<{
+  allowed: boolean;
+  remainingAttempts: number;
+  lockedUntil?: Date;
+}> {
+  try {
+    const redis = await getTwoFactorRedis();
+    const key = `paymentswitch:2fa:attempts:${userId}`;
+    const count = Number((await redis.get(key)) ?? 0);
+    const ttl = Math.max(1, Number(await redis.ttl(key)));
+    if (count >= 5) {
+      return {
+        allowed: false,
+        remainingAttempts: 0,
+        lockedUntil: new Date(Date.now() + ttl * 1000),
+      };
+    }
+    return { allowed: true, remainingAttempts: Math.max(0, 5 - count) };
+  } catch (error) {
+    if (twoFactorRedisRequired) throw error;
+  }
+
   const now = new Date();
   const attempt = attemptCache.get(userId);
 
@@ -384,7 +562,26 @@ export function checkTwoFactorRateLimit(
   };
 }
 
-export function recordTwoFactorAttempt(userId: number, success: boolean): void {
+export async function recordTwoFactorAttempt(
+  userId: number,
+  success: boolean
+): Promise<void> {
+  try {
+    const redis = await getTwoFactorRedis();
+    const key = `paymentswitch:2fa:attempts:${userId}`;
+    if (success) {
+      await redis.del(key);
+    } else {
+      await redis.eval(TWO_FACTOR_ATTEMPT_SCRIPT, {
+        keys: [key],
+        arguments: ["900"],
+      });
+    }
+    return;
+  } catch (error) {
+    if (twoFactorRedisRequired) throw error;
+  }
+
   const now = new Date();
   const attempt = attemptCache.get(userId);
 

@@ -1,9 +1,9 @@
 # Production Promotion: Live Blockers, Implementation Walkthrough, and Cutover Checklist
 
-**Repository:** `munisp/paymentswitch`  
-**Current branch:** `main`  
-**Current revision:** `6035714`  
-**Prepared:** 2026-08-19  
+**Repository:** `munisp/paymentswitch`
+**Current branch:** `main`
+**Current revision:** `6035714`
+**Prepared:** 2026-08-19
 **Author:** Manus AI
 
 ## Executive Release Decision

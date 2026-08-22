@@ -1,12 +1,12 @@
 # Executive Release Sign-Off Summary
 
-**Service:** Payment Switch  
-**Release candidate:** `<tag-or-commit>`  
-**Environment:** `<isolated-staging-identifier>`  
-**Evidence window UTC:** `<start>` through `<end>`  
-**Prepared by:** `<name>`  
-**Review date UTC:** `<date>`  
-**Decision:** `PENDING`  
+**Service:** Payment Switch
+**Release candidate:** `<tag-or-commit>`
+**Environment:** `<isolated-staging-identifier>`
+**Evidence window UTC:** `<start>` through `<end>`
+**Prepared by:** `<name>`
+**Review date UTC:** `<date>`
+**Decision:** `PENDING`
 
 > This document is an approval record, not a test substitute. The decision must remain `PENDING` unless the immutable identity-gate and dependency-recovery evidence files are present, timestamped, tied to the exact release candidate, and contain no `FAIL`, `NOT RUN`, `SKIPPED`, or missing required assertion.
 
@@ -38,8 +38,8 @@ Secret values, bearer tokens, private keys, and database passwords must never ap
 
 ## 3. Stage 3 identity-gate result
 
-**Source:** `LIVE_GATE_RESULTS_FILE=<path>`  
-**Gate exit status:** `<0/nonzero>`  
+**Source:** `LIVE_GATE_RESULTS_FILE=<path>`
+**Gate exit status:** `<0/nonzero>`
 **Gate completion line:** `<exact final line>`
 
 Every required route assertion must be copied or machine-checked from the evidence file. A partial list is not approval evidence.
@@ -64,8 +64,8 @@ Every required route assertion must be copied or machine-checked from the eviden
 
 ## 4. Stage 4 dependency-recovery result
 
-**Source:** `DEPENDENCY_RECOVERY_RESULTS_FILE=<path>`  
-**Gate exit status:** `<0/nonzero>`  
+**Source:** `DEPENDENCY_RECOVERY_RESULTS_FILE=<path>`
+**Gate exit status:** `<0/nonzero>`
 **Destructive-test authorization:** `ALLOW_DESTRUCTIVE_RECOVERY_TESTS=true` confirmed in isolated staging only: `<yes/no>`
 
 | Dependency | Injected action | Expected outage behavior | Actual outage result | Recovery deadline | Actual recovery | Status |
@@ -107,7 +107,7 @@ The release is approved only when all of the following are true:
 
 **Release decision:** `APPROVED | REJECTED | PENDING`
 
-**Approver name and role:** `<name / role>`  
-**Approval reference:** `<change/release/incident ID>`  
-**Signature or electronic approval:** `<reference>`  
+**Approver name and role:** `<name / role>`
+**Approval reference:** `<change/release/incident ID>`
+**Signature or electronic approval:** `<reference>`
 **UTC timestamp:** `<timestamp>`

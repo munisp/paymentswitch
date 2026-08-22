@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: payment-switch
+data:
+  temporal-address: temporal-frontend.temporal.svc.cluster.local:7233
+  apisix-admin-url: http://apisix.payment-switch.svc.cluster.local:9180
+  apisix-public-url: http://apisix.payment-switch.svc.cluster.local:9080
+  tigerbeetle-replica-addresses: tigerbeetle-0.tigerbeetle.payment-switch.svc.cluster.local:3000,tigerbeetle-1.tigerbeetle.payment-switch.svc.cluster.local:3000,tigerbeetle-2.tigerbeetle.payment-switch.svc.cluster.local:3000

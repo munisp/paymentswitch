@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
@@ -41,8 +42,9 @@ type MiddlewareConfig struct {
 	KeycloakSecret   string
 
 	// Permify
-	PermifyURL string
-	PermifyKey string
+	PermifyURL      string
+	PermifyKey      string
+	PermifyTenantID string
 
 	// APISIX
 	APISIXURL    string
@@ -87,8 +89,9 @@ func DefaultMiddlewareConfig() *MiddlewareConfig {
 		KeycloakSecret:   getEnv("KEYCLOAK_SECRET", ""),
 
 		// Permify
-		PermifyURL: getEnv("PERMIFY_URL", "http://permify.payment-switch.svc.cluster.local:3476"),
-		PermifyKey: getEnv("PERMIFY_KEY", ""),
+		PermifyURL:      getEnv("PERMIFY_URL", ""),
+		PermifyKey:      getEnv("PERMIFY_KEY", ""),
+		PermifyTenantID: getEnv("PERMIFY_TENANT_ID", ""),
 
 		// APISIX
 		APISIXURL:    getEnv("APISIX_ADMIN_URL", "http://apisix-admin.payment-switch.svc.cluster.local:9180"),
@@ -317,7 +320,14 @@ func NewPermifyActivities(config *MiddlewareConfig) *PermifyActivities {
 
 // CheckPermifyPermission checks if a subject has permission on a resource
 func (p *PermifyActivities) CheckPermifyPermission(ctx context.Context, subject, resource, action string) (bool, error) {
-	url := fmt.Sprintf("%s/v1/tenants/t1/permissions/check", p.config.PermifyURL)
+	if p.config.PermifyURL == "" || p.config.PermifyTenantID == "" {
+		return false, fmt.Errorf("permify URL and tenant are required")
+	}
+	resourceType, resourceID := "resource", resource
+	if parts := strings.SplitN(resource, ":", 2); len(parts) == 2 {
+		resourceType, resourceID = parts[0], parts[1]
+	}
+	url := fmt.Sprintf("%s/v1/tenants/%s/permissions/check", strings.TrimRight(p.config.PermifyURL, "/"), p.config.PermifyTenantID)
 
 	checkRequest := map[string]interface{}{
 		"metadata": map[string]interface{}{
@@ -326,8 +336,8 @@ func (p *PermifyActivities) CheckPermifyPermission(ctx context.Context, subject,
 			"depth":          20,
 		},
 		"entity": map[string]interface{}{
-			"type": resource,
-			"id":   subject,
+			"type": resourceType,
+			"id":   resourceID,
 		},
 		"permission": action,
 		"subject": map[string]interface{}{
@@ -352,43 +362,57 @@ func (p *PermifyActivities) CheckPermifyPermission(ctx context.Context, subject,
 	}
 	defer resp.Body.Close()
 
-	var result map[string]interface{}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return false, fmt.Errorf("permify check failed: %s: %s", resp.Status, string(body))
+	}
+	var result struct {
+		Can interface{} `json:"can"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return false, err
 	}
-
-	if can, ok := result["can"].(string); ok {
+	if can, ok := result.Can.(bool); ok {
+		return can, nil
+	}
+	if can, ok := result.Can.(string); ok {
 		return can == "CHECK_RESULT_ALLOWED", nil
 	}
-
-	return false, nil
+	return false, fmt.Errorf("permify response did not contain a boolean permission result")
 }
 
-// GrantPermifyPermission grants a permission to a subject
-func (p *PermifyActivities) GrantPermifyPermission(ctx context.Context, subject, resource, action string) error {
-	url := fmt.Sprintf("%s/v1/tenants/t1/relationships/write", p.config.PermifyURL)
-
-	writeRequest := map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"schema_version": "",
-		},
-		"tuples": []map[string]interface{}{
-			{
-				"entity": map[string]interface{}{
-					"type": resource,
-					"id":   subject,
-				},
-				"relation": action,
-				"subject": map[string]interface{}{
-					"type": "user",
-					"id":   subject,
-				},
-			},
-		},
+// WritePermifyTuple writes one explicitly typed relationship tuple. References
+// must use type:id form, for example merchant:merchant-a and user:user-a.
+func (p *PermifyActivities) WritePermifyTuple(ctx context.Context, entityRef, relation, subjectRef string) error {
+	if p.config.PermifyURL == "" || p.config.PermifyTenantID == "" {
+		return fmt.Errorf("permify URL and tenant are required")
+	}
+	entityType, entityID, err := parsePermifyRef(entityRef)
+	if err != nil {
+		return fmt.Errorf("invalid entity reference: %w", err)
+	}
+	subjectType, subjectID, err := parsePermifyRef(subjectRef)
+	if err != nil {
+		return fmt.Errorf("invalid subject reference: %w", err)
+	}
+	if strings.TrimSpace(relation) == "" {
+		return fmt.Errorf("permify relation is required")
 	}
 
-	data, _ := json.Marshal(writeRequest)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
+	url := fmt.Sprintf("%s/v1/tenants/%s/relationships/write", strings.TrimRight(p.config.PermifyURL, "/"), p.config.PermifyTenantID)
+	writeRequest := map[string]interface{}{
+		"metadata": map[string]interface{}{"schema_version": "paymentswitch-v1"},
+		"tuples": []map[string]interface{}{{
+			"entity": map[string]interface{}{"type": entityType, "id": entityID},
+			"relation": relation,
+			"subject": map[string]interface{}{"type": subjectType, "id": subjectID},
+		}},
+	}
+	data, err := json.Marshal(writeRequest)
+	if err != nil {
+		return fmt.Errorf("marshal permify relationship: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -396,46 +420,49 @@ func (p *PermifyActivities) GrantPermifyPermission(ctx context.Context, subject,
 	if p.config.PermifyKey != "" {
 		req.Header.Set("Authorization", "Bearer "+p.config.PermifyKey)
 	}
-
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to grant permission: %d", resp.StatusCode)
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("permify relationship write failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
-
 	return nil
 }
 
-// SetupPermifyRelationships sets up relationships for an organization
+func parsePermifyRef(ref string) (string, string, error) {
+	parts := strings.SplitN(strings.TrimSpace(ref), ":", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("reference must be type:id")
+	}
+	return parts[0], parts[1], nil
+}
+
+// GrantPermifyPermission preserves the existing workflow contract while
+// requiring explicit type:id references at the boundary.
+func (p *PermifyActivities) GrantPermifyPermission(ctx context.Context, subject, resource, action string) error {
+	if !strings.Contains(subject, ":") {
+		subject = "user:" + subject
+	}
+	if !strings.Contains(resource, ":") {
+		resource = "resource:" + resource
+	}
+	return p.WritePermifyTuple(ctx, resource, action, subject)
+}
+
+// SetupPermifyRelationships creates only relationships with authoritative IDs.
+// Child payment/settlement/report tuples are written when those resources are
+// created, because their IDs are not known at organization-provision time.
 func (p *PermifyActivities) SetupPermifyRelationships(ctx context.Context, orgID, orgType string) error {
-	// Define default relationships based on organization type
-	relationships := []struct {
-		resource string
-		relation string
-	}{
-		{"organization", "member"},
-		{"payment", "process"},
-		{"settlement", "view"},
-		{"report", "view"},
+	tenantRef := "tenant:" + orgID
+	if err := p.WritePermifyTuple(ctx, "organization:"+orgID, "tenant", tenantRef); err != nil {
+		return err
 	}
-
 	if orgType == "bank" || orgType == "fintech" {
-		relationships = append(relationships, struct {
-			resource string
-			relation string
-		}{"settlement", "initiate"})
+		return p.WritePermifyTuple(ctx, "merchant:"+orgID, "tenant", tenantRef)
 	}
-
-	for _, rel := range relationships {
-		if err := p.GrantPermifyPermission(ctx, orgID, rel.resource, rel.relation); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 

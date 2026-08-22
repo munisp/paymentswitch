@@ -1,6 +1,6 @@
 /**
  * Outbound Remittance tRPC Router
- * 
+ *
  * Complete CRUD + business workflows with server-side RBAC filtering.
  * Participants see only their own data; admin/CBN users receive their authorized scope.
  * PostgreSQL, the ledger bridge, and the external operations service are mandatory

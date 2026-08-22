@@ -1,0 +1,42 @@
+{
+  auto_https disable_redirects
+  servers {
+    trusted_proxies static private_ranges
+    trusted_proxies_strict
+  }
+}
+
+https://paymentswitch.example.com {
+  encode zstd gzip
+
+  request_body {
+    max_size 2MB
+  }
+
+  header {
+    Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+    Content-Security-Policy "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    -Server
+  }
+
+  @health path /healthz /livez /readyz
+  handle @health {
+    reverse_proxy paymentswitch-api:3000
+  }
+
+  @api path /api/*
+  handle @api {
+    reverse_proxy paymentswitch-apisix:9080 {
+      header_up X-Forwarded-Proto {scheme}
+      header_up X-Real-IP {remote_host}
+    }
+  }
+
+  handle {
+    reverse_proxy paymentswitch-web:3000
+  }
+}

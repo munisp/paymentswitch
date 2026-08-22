@@ -1,16 +1,16 @@
 # Architecture Review Presentation Script: Admin PKCE Migration and Security Posture
 
-**Audience:** Architecture Review Committee  
-**Revision under review:** `main` at commit `584ce5c`  
-**Classification:** Evidence-bounded prerelease briefing  
+**Audience:** Architecture Review Committee
+**Revision under review:** `main` at commit `584ce5c`
+**Classification:** Evidence-bounded prerelease briefing
 **Recommended duration:** 15–18 minutes, followed by committee questions
 
 > **Decision requested:** Confirm that the replacement of the admin password-grant/local-storage flow with server-mediated Authorization Code + PKCE is the required design for controlled integration environments, while retaining the release candidate classification until the live identity and recovery gates have executed.
 
 ## Cover
 
-**Payment Switch Admin Identity Hardening**  
-**Authorization Code + PKCE, encrypted refresh sessions, and fail-closed gateway assurance**  
+**Payment Switch Admin Identity Hardening**
+**Authorization Code + PKCE, encrypted refresh sessions, and fail-closed gateway assurance**
 Architecture Review Committee
 
 **Speaker notes.** This briefing separates what is implemented and locally verified from what remains dependent on an isolated runtime. It does not seek production approval. The current release remains `v0.1.0-rc.1` until evidence is collected from real APISIX, Keycloak, PostgreSQL, TigerBeetle, Redis, and provider environments.
@@ -155,8 +155,8 @@ Browser              Admin server routes                 Keycloak
 
 ## Closing
 
-**PKCE and encrypted HttpOnly refresh sessions are implemented.**  
-**The gateway and dashboard now fail closed rather than fabricate operational data.**  
+**PKCE and encrypted HttpOnly refresh sessions are implemented.**
+**The gateway and dashboard now fail closed rather than fabricate operational data.**
 **Production promotion remains denied until live evidence exists.**
 
 ## References

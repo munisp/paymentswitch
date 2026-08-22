@@ -1,0 +1,258 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: opa-authz-server
+  namespace: paymentswitch
+spec:
+  secretName: opa-authz-server-tls
+  issuerRef:
+    kind: ClusterIssuer
+    name: paymentswitch-ca
+  dnsNames:
+    - opa-authz
+    - opa-authz.paymentswitch
+    - opa-authz.paymentswitch.svc
+    - opa-authz.paymentswitch.svc.cluster.local
+  usages:
+    - server auth
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: apisix-opa-client
+  namespace: paymentswitch
+spec:
+  secretName: apisix-opa-client
+  issuerRef:
+    kind: ClusterIssuer
+    name: paymentswitch-ca
+  commonName: apisix-opa-authz
+  usages:
+    - client auth
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: paymentswitch-opa-policy
+  namespace: paymentswitch
+data:
+  paymentswitch_authz.rego: |
+    package paymentswitch.authz
+
+    default allow := false
+
+    allow if {
+      input.subject.id != ""
+      input.tenantId != ""
+      input.resource.id != ""
+      same_tenant
+      input.action in allowed_actions[input.subject.roles[_]]
+      input.source in {"api", "worker", "admin"}
+      not privileged_action[input.action]
+    }
+
+    allow if {
+      input.subject.id != ""
+      input.tenantId != ""
+      input.resource.id != ""
+      same_tenant
+      input.action in allowed_actions[input.subject.roles[_]]
+      privileged_action[input.action]
+      input.subject.mfa_verified == true
+    }
+
+    same_tenant if {
+      input.subject.tenant_id == input.tenantId
+      input.resource.tenant_id == input.tenantId
+    }
+
+    same_tenant if {
+      input.subject.tenantId == input.tenantId
+      input.resource.tenantId == input.tenantId
+    }
+
+    privileged_action := {
+      "approve_payment",
+      "approve_payout",
+      "release_hold",
+      "change_credentials",
+      "manage_roles",
+      "override_kyc",
+    }
+
+    allowed_actions := {
+      "admin": ["read", "write", "approve_payment", "approve_payout", "release_hold", "change_credentials", "manage_roles", "override_kyc"],
+      "security": ["read", "write", "override_kyc"],
+      "operations": ["read", "write", "approve_payment", "approve_payout", "release_hold"],
+      "merchant": ["read", "write"],
+      "participant": ["read"],
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opa-authz
+  namespace: paymentswitch
+  labels:
+    app.kubernetes.io/name: opa-authz
+    app.kubernetes.io/component: authorization
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opa-authz
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opa-authz
+        app.kubernetes.io/component: authorization
+    spec:
+      serviceAccountName: opa-authz
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: opa
+          image: openpolicyagent/opa:0.70.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            - --addr=https://0.0.0.0:8443
+            - --diagnostic-addr=0.0.0.0:8282
+            - --tls-cert-file=/tls/tls.crt
+            - --tls-private-key-file=/tls/tls.key
+            - --tls-ca-cert-file=/tls/ca.crt
+            - --authentication=tls
+            - --tls-cert-refresh-period=1m
+            - /policies
+          ports:
+            - name: https
+              containerPort: 8443
+            - name: diagnostics
+              containerPort: 8282
+          readinessProbe:
+            httpGet:
+              path: /health?bundles
+              port: diagnostics
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: diagnostics
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: policy
+              mountPath: /policies
+              readOnly: true
+            - name: server-tls
+              mountPath: /tls
+              readOnly: true
+      volumes:
+        - name: policy
+          configMap:
+            name: paymentswitch-opa-policy
+        - name: server-tls
+          secret:
+            secretName: opa-authz-server-tls
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opa-authz
+  namespace: paymentswitch
+  automountServiceAccountToken: false
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: opa-authz
+  namespace: paymentswitch
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opa-authz
+---
+# Strategic-merge patch for the APISIX Deployment. The image tag is a build
+# input only; the production overlay MUST replace it with an immutable digest.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apisix
+  namespace: paymentswitch
+spec:
+  template:
+    spec:
+      containers:
+        - name: apisix
+          env:
+            - name: KEYCLOAK_APISIX_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: apisix-keycloak-client
+                  key: client-secret
+        - name: opa-authz-sidecar
+          image: ghcr.io/munisp/paymentswitch-opa-authz-sidecar:v1.0.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LISTEN_ADDRESS
+              value: 127.0.0.1:9444
+            - name: OPA_URL
+              value: https://opa-authz.paymentswitch.svc.cluster.local:8443
+            - name: OPA_CA_CERT
+              value: /tls/ca.crt
+            - name: OPA_CLIENT_CERT
+              value: /tls/tls.crt
+            - name: OPA_CLIENT_KEY
+              value: /tls/tls.key
+          readinessProbe:
+            exec:
+              command: ["/opa-authz-sidecar", "--healthcheck"]
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: ["/opa-authz-sidecar", "--healthcheck"]
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: apisix-opa-client-tls
+              mountPath: /tls
+              readOnly: true
+      volumes:
+        - name: apisix-opa-client-tls
+          secret:
+            secretName: apisix-opa-client

@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: paymentswitch-keycloak-hardening
+  namespace: paymentswitch
+  labels:
+    app.kubernetes.io/name: paymentswitch
+    app.kubernetes.io/component: identity
+    security.paymentswitch.io/profile: enterprise
+data:
+  realm-hardening.json: |
+    {
+      "bruteForceProtected": true,
+      "permanentLockout": false,
+      "maxFailureWaitSeconds": 900,
+      "minimumQuickLoginWaitSeconds": 2,
+      "waitIncrementSeconds": 60,
+      "quickLoginCheckMilliSeconds": 1000,
+      "maxDeltaTimeSeconds": 43200,
+      "passwordPolicy": "length(14) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername() and passwordHistory(5)",
+      "otpPolicyType": "totp",
+      "otpPolicyAlgorithm": "HmacSHA512",
+      "otpPolicyDigits": 8,
+      "otpPolicyPeriod": 30,
+      "otpPolicyLookAheadWindow": 1,
+      "otpPolicyInitialCounter": 0,
+      "rememberMe": false,
+      "accessTokenLifespan": 300,
+      "ssoSessionIdleTimeout": 1800,
+      "ssoSessionMaxLifespan": 28800,
+      "offlineSessionIdleTimeout": 2592000,
+      "defaultSignatureAlgorithm": "RS256",
+      "accessCodeLifespan": 60,
+      "accessCodeLifespanUserAction": 300,
+      "requiredActions": ["CONFIGURE_TOTP", "VERIFY_EMAIL"],
+      "registrationAllowed": false,
+      "resetPasswordAllowed": true,
+      "rememberMe": false
+    }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: paymentswitch-keycloak-admin-isolation
+  namespace: paymentswitch
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: paymentswitch
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8443
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: paymentswitch-data
+      ports:
+        - protocol: TCP
+          port: 5432

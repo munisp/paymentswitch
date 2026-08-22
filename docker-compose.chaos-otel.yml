@@ -1,0 +1,49 @@
+name: paymentswitch-chaos-otel
+
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_USER: paymentswitch
+      POSTGRES_PASSWORD: paymentswitch
+      POSTGRES_DB: paymentswitch
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paymentswitch -d paymentswitch"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  localstack:
+    image: localstack/localstack:3.8
+    environment:
+      SERVICES: s3
+      DEFAULT_REGION: us-east-1
+    ports:
+      - "4566:4566"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:4566/_localstack/health >/dev/null",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  toxiproxy:
+    image: shopify/toxiproxy:2.5.0
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8474:8474"
+      - "4567:4567"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.221.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    ports:
+      - "4318:4318"
+    volumes:
+      - ./deploy/local-integration/otel/config.yaml:/etc/otelcol-contrib/config.yaml:ro

@@ -1,0 +1,48 @@
+name: Production Render Gate
+
+on:
+  pull_request:
+    branches: [main, production-ready-platform]
+    paths:
+      - "deploy/k8s/**"
+      - "docker-compose*.yml"
+      - "server/**"
+      - "client/src/**"
+      - "scripts/assurance/**"
+      - ".github/workflows/production-render-gate.yml"
+  push:
+    branches: [main, production-ready-platform]
+
+permissions:
+  contents: read
+
+jobs:
+  production-render-gate:
+    name: Fail-closed production render checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Reject production mockware and fail-open healthchecks
+        run: python3 scripts/assurance/check_production_render.py --repo-root .
+
+      - name: Type check production code path
+        run: pnpm exec tsc --noEmit
+
+      - name: Verify repository formatting
+        run: git diff --check
