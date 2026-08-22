@@ -166,3 +166,58 @@ describe('CircuitBreaker', () => {
     expect(stateChanges).toContain(CircuitState.OPEN);
   });
 });
+
+
+describe('distributed circuit-breaker coordination contract', () => {
+  it('shares an open state across worker-like breaker instances', async () => {
+    const state = new Map<string, { openUntil: number; probes: number }>();
+    const coordinator = {
+      async beforeCall(name: string, now: number, _reset: number, max: number) {
+        const current = state.get(name) ?? { openUntil: 0, probes: 0 };
+        if (current.openUntil > now) {
+          return { state: CircuitState.OPEN, probeGranted: false, nextAttempt: current.openUntil };
+        }
+        if (current.probes >= max) {
+          return { state: CircuitState.HALF_OPEN, probeGranted: false, nextAttempt: current.openUntil };
+        }
+        current.probes++;
+        state.set(name, current);
+        return {
+          state: current.openUntil ? CircuitState.HALF_OPEN : CircuitState.CLOSED,
+          probeGranted: true,
+          nextAttempt: current.openUntil,
+        };
+      },
+      async recordOutcome(
+        name: string,
+        outcome: 'success' | 'failure' | 'neutral',
+        _threshold: number,
+        _successThreshold: number,
+        now: number,
+        reset: number,
+      ) {
+        const current = state.get(name) ?? { openUntil: 0, probes: 0 };
+        if (current.probes > 0) current.probes--;
+        if (outcome === 'failure') current.openUntil = now + reset;
+        if (outcome === 'success') current.openUntil = 0;
+        state.set(name, current);
+      },
+    };
+
+    const first = new CircuitBreaker({
+      name: 'shared',
+      distributedState: coordinator,
+      failureThreshold: 1,
+    });
+    const second = new CircuitBreaker({
+      name: 'shared',
+      distributedState: coordinator,
+      failureThreshold: 1,
+    });
+
+    await expect(first.execute(async () => {
+      throw new Error('dependency');
+    })).rejects.toThrow('dependency');
+    await expect(second.execute(async () => 'blocked')).rejects.toThrow(/OPEN/);
+  });
+});

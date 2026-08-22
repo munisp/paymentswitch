@@ -5,6 +5,7 @@
  * Each service gets its own circuit breaker instance.
  */
 import { CircuitBreaker, CircuitState } from '../middleware/circuitBreaker';
+import { createRedisCircuitBreakerState } from '../middleware/redisCircuitBreakerState';
 import { createChildLogger } from './logger';
 
 const log = createChildLogger('grpc-client');
@@ -73,9 +74,13 @@ interface GrpcServiceConfig {
   resetTimeout?: number;
   maxHalfOpenRequests?: number;
   isFailure?: (error: Error) => boolean;
+  distributedCircuitBreaker?: boolean;
 }
 
 const circuitBreakers = new Map<string, CircuitBreaker>();
+const distributedCircuitState = process.env.CIRCUIT_BREAKER_DISTRIBUTED === 'true'
+  ? createRedisCircuitBreakerState()
+  : undefined;
 
 function getCircuitBreaker(config: GrpcServiceConfig): CircuitBreaker {
   let cb = circuitBreakers.get(config.name);
@@ -87,6 +92,10 @@ function getCircuitBreaker(config: GrpcServiceConfig): CircuitBreaker {
       maxHalfOpenRequests: config.maxHalfOpenRequests ?? 1,
       isFailure: config.isFailure ?? ((error: Error) =>
         error instanceof GrpcClientError && error.retryable),
+      distributedState: (config.distributedCircuitBreaker
+        ?? process.env.CIRCUIT_BREAKER_DISTRIBUTED === 'true')
+        ? distributedCircuitState
+        : undefined,
       onStateChange: (from: CircuitState, to: CircuitState) => {
         log.warn({ service: config.name, from, to }, 'gRPC circuit breaker state change');
       },
