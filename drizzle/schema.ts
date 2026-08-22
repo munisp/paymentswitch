@@ -71,6 +71,7 @@ export const sessionStatusEnum = pgEnum("session_status", [
   "completed",
   "failed",
   "cancelled",
+  "reconciliation_required",
 ]);
 export const paymentMethodEnum = pgEnum("payment_method", [
   "card",

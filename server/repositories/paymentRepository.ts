@@ -187,6 +187,28 @@ export class PaymentRepository {
     return updated;
   }
 
+  /** Atomically claims dispatch before an external payment rail is contacted. */
+  async claimWorkflowDispatch(
+    tenantId: string,
+    sessionId: string
+  ): Promise<{ payment: PaymentSession; claimed: boolean }> {
+    const rows = await this.db
+      .update(paymentSessions)
+      .set({ status: "processing", updatedAt: new Date() })
+      .where(
+        and(
+          eq(paymentSessions.tenantId, tenantId),
+          eq(paymentSessions.sessionId, sessionId),
+          eq(paymentSessions.status, "pending")
+        )
+      )
+      .returning();
+    if (rows[0]) return { payment: rows[0], claimed: true };
+    const existing = await this.findForTenant(tenantId, sessionId);
+    if (!existing) throw new PaymentSessionNotFoundError(sessionId);
+    return { payment: existing, claimed: false };
+  }
+
   async setWorkflowForTenant(
     tenantId: string,
     sessionId: string,
@@ -194,16 +216,40 @@ export class PaymentRepository {
   ): Promise<PaymentSession> {
     const rows = await this.db
       .update(paymentSessions)
-      .set({ workflowId, status: "processing", updatedAt: new Date() })
+      .set({ workflowId, updatedAt: new Date() })
       .where(
         and(
           eq(paymentSessions.tenantId, tenantId),
-          eq(paymentSessions.sessionId, sessionId)
+          eq(paymentSessions.sessionId, sessionId),
+          eq(paymentSessions.status, "processing")
         )
       )
       .returning();
-    if (!rows[0]) throw new PaymentSessionNotFoundError(sessionId);
-    return rows[0];
+    if (rows[0]) return rows[0];
+    const existing = await this.findForTenant(tenantId, sessionId);
+    if (!existing) throw new PaymentSessionNotFoundError(sessionId);
+    if (existing.workflowId === workflowId) return existing;
+    throw new PaymentStateConflictError(existing.status);
+  }
+
+  /**
+   * A network timeout or ambiguous external error cannot be called a failed payment.
+   * Preserve it for ledger/provider reconciliation instead of allowing automatic replay.
+   */
+  async markReconciliationRequiredForTenant(
+    tenantId: string,
+    sessionId: string
+  ): Promise<void> {
+    await this.db
+      .update(paymentSessions)
+      .set({ status: "reconciliation_required", updatedAt: new Date() })
+      .where(
+        and(
+          eq(paymentSessions.tenantId, tenantId),
+          eq(paymentSessions.sessionId, sessionId),
+          eq(paymentSessions.status, "processing")
+        )
+      );
   }
 
   async failAdmissionForTenant(
@@ -216,7 +262,8 @@ export class PaymentRepository {
       .where(
         and(
           eq(paymentSessions.tenantId, tenantId),
-          eq(paymentSessions.sessionId, sessionId)
+          eq(paymentSessions.sessionId, sessionId),
+          eq(paymentSessions.status, "pending")
         )
       );
   }

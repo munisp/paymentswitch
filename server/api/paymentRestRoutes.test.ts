@@ -85,9 +85,19 @@ function repository(initial = payment()): PaymentRestRepository & {
       value.state = { ...value.state, ...input } as PaymentSession;
       return { payment: value.state, created: true };
     },
+    async claimWorkflowDispatch() {
+      if (value.state.status !== "pending") {
+        return { payment: value.state, claimed: false };
+      }
+      value.state = { ...value.state, status: "processing" };
+      return { payment: value.state, claimed: true };
+    },
     async setWorkflowForTenant(_tenantId, _sessionId, workflowId) {
       value.state = { ...value.state, workflowId, status: "processing" };
       return value.state;
+    },
+    async markReconciliationRequiredForTenant() {
+      value.state = { ...value.state, status: "reconciliation_required" };
     },
     async failAdmissionForTenant() {
       value.state = { ...value.state, status: "failed" };
@@ -202,6 +212,31 @@ describe("payment REST routes", () => {
     expect(response.body.error).toBe("AUTHORIZATION_DEPENDENCY_UNAVAILABLE");
   });
 
+  it("does not resubmit an external workflow for an idempotency replay", async () => {
+    const deps = dependencies();
+    let created = true;
+    const claimWorkflowDispatch = vi.spyOn(deps.repo, "claimWorkflowDispatch");
+    deps.repo.admitIdempotent = vi.fn(async input => {
+      deps.repo.state = { ...deps.repo.state, ...input } as PaymentSession;
+      const result = { payment: deps.repo.state, created };
+      created = false;
+      return result;
+    });
+    const first = await request(app(deps))
+      .post("/api/v1/payments")
+      .set("idempotency-key", "replay-safe-key")
+      .send(validCommand);
+    const replay = await request(app(deps))
+      .post("/api/v1/payments")
+      .set("idempotency-key", "replay-safe-key")
+      .send(validCommand);
+    expect(first.status).toBe(202);
+    expect(replay.status).toBe(200);
+    expect(replay.body.idempotencyReplayed).toBe(true);
+    expect(deps.submitWorkflow).toHaveBeenCalledTimes(1);
+    expect(claimWorkflowDispatch).toHaveBeenCalledTimes(1);
+  });
+
   it("requires a valid idempotency key for payment admission", async () => {
     const deps = dependencies();
     const response = await request(app(deps))
@@ -268,7 +303,7 @@ describe("payment REST routes", () => {
     expect(response.status).toBe(409);
   });
 
-  it("marks an admitted payment failed and returns 503 if orchestration is unavailable", async () => {
+  it("marks an admitted payment reconciliation-required and returns 503 if orchestration is unavailable", async () => {
     const deps = dependencies({
       submitWorkflow: vi.fn(async () => {
         throw new PaymentOrchestratorUnavailableError();
@@ -279,7 +314,7 @@ describe("payment REST routes", () => {
       .set("idempotency-key", "idem-outage")
       .send(validCommand);
     expect(response.status).toBe(503);
-    expect(deps.repo.state.status).toBe("failed");
+    expect(deps.repo.state.status).toBe("reconciliation_required");
   });
 
   it("requires verified MFA before evaluating an admin approval", async () => {

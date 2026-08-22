@@ -78,11 +78,19 @@ export interface PaymentRestRepository {
   admitIdempotent(
     input: Parameters<PaymentRepository["admitIdempotent"]>[0]
   ): ReturnType<PaymentRepository["admitIdempotent"]>;
+  claimWorkflowDispatch(
+    tenantId: string,
+    sessionId: string
+  ): Promise<{ payment: PaymentSession; claimed: boolean }>;
   setWorkflowForTenant(
     tenantId: string,
     sessionId: string,
     workflowId: string
   ): Promise<PaymentSession>;
+  markReconciliationRequiredForTenant(
+    tenantId: string,
+    sessionId: string
+  ): Promise<void>;
   failAdmissionForTenant(tenantId: string, sessionId: string): Promise<void>;
   approveForTenant(
     tenantId: string,
@@ -535,24 +543,31 @@ export function createPaymentRestRouter(
         subjectType: "merchant",
         subjectId: String(merchant.id),
       });
-      if (!command.requiresApproval && !payment.workflowId) {
-        try {
-          const workflow = await dependencies.submitWorkflow(
-            payment,
-            command,
-            traceHeaders(getTraceContext(response))
-          );
-          payment = await repository.setWorkflowForTenant(
-            principal.tenantId,
-            payment.sessionId,
-            workflow.workflowId
-          );
-        } catch (error) {
-          await repository.failAdmissionForTenant(
-            principal.tenantId,
-            payment.sessionId
-          );
-          throw error;
+      if (admitted.created && !command.requiresApproval && !payment.workflowId) {
+        const dispatch = await repository.claimWorkflowDispatch(
+          principal.tenantId,
+          payment.sessionId
+        );
+        payment = dispatch.payment;
+        if (dispatch.claimed) {
+          try {
+            const workflow = await dependencies.submitWorkflow(
+              payment,
+              command,
+              traceHeaders(getTraceContext(response))
+            );
+            payment = await repository.setWorkflowForTenant(
+              principal.tenantId,
+              payment.sessionId,
+              workflow.workflowId
+            );
+          } catch (error) {
+            await repository.markReconciliationRequiredForTenant(
+              principal.tenantId,
+              payment.sessionId
+            );
+            throw error;
+          }
         }
       }
 
@@ -620,7 +635,7 @@ export function createPaymentRestRouter(
           principal.subject
         );
         let approved = approval.payment;
-        if (!approved.workflowId) {
+        if (approval.transitioned && !approved.workflowId) {
           try {
             const workflow = await dependencies.submitWorkflow(
               approved,
@@ -633,7 +648,7 @@ export function createPaymentRestRouter(
               workflow.workflowId
             );
           } catch (error) {
-            await repository.failAdmissionForTenant(
+            await repository.markReconciliationRequiredForTenant(
               principal.tenantId,
               approved.sessionId
             );
