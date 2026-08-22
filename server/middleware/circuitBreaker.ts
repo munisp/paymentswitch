@@ -21,6 +21,22 @@ export enum CircuitState {
   HALF_OPEN = 'HALF_OPEN'
 }
 
+export interface DistributedCircuitBreakerStore {
+  beforeCall(name: string, nowMs: number, resetTimeout: number, maxHalfOpenRequests: number): Promise<{
+    state: CircuitState;
+    probeGranted: boolean;
+    nextAttempt: number;
+  }>;
+  recordOutcome(
+    name: string,
+    outcome: 'success' | 'failure' | 'neutral',
+    failureThreshold: number,
+    successThreshold: number,
+    nowMs: number,
+    resetTimeout: number,
+  ): Promise<void>;
+}
+
 export interface CircuitBreakerOptions {
   name: string;
   failureThreshold?: number;
@@ -28,11 +44,13 @@ export interface CircuitBreakerOptions {
   timeout?: number;
   resetTimeout?: number;
   monitorInterval?: number;
+  maxHalfOpenRequests?: number;
   fallback?: <T>() => T | Promise<T>;
   onStateChange?: (from: CircuitState, to: CircuitState) => void;
   onFailure?: (error: Error) => void;
   onSuccess?: () => void;
   isFailure?: (error: Error) => boolean;
+  distributedState?: DistributedCircuitBreakerStore;
 }
 
 export interface CircuitBreakerStats {
@@ -54,6 +72,8 @@ export class CircuitBreaker extends EventEmitter {
   private successThreshold: number;
   private timeout: number;
   private resetTimeout: number;
+  private maxHalfOpenRequests: number;
+  private halfOpenInFlight: number = 0;
   private failures: number = 0;
   private successes: number = 0;
   private totalRequests: number = 0;
@@ -67,6 +87,7 @@ export class CircuitBreaker extends EventEmitter {
   private onFailure?: (error: Error) => void;
   private onSuccess?: () => void;
   private isFailure: (error: Error) => boolean;
+  private distributedState?: DistributedCircuitBreakerStore;
 
   constructor(options: CircuitBreakerOptions) {
     super();
@@ -75,15 +96,52 @@ export class CircuitBreaker extends EventEmitter {
     this.successThreshold = options.successThreshold || 2;
     this.timeout = options.timeout || 30000; // 30 seconds
     this.resetTimeout = options.resetTimeout || 60000; // 60 seconds
+    this.maxHalfOpenRequests = Math.max(1, options.maxHalfOpenRequests ?? 1);
     this.fallback = options.fallback;
     this.onStateChange = options.onStateChange;
     this.onFailure = options.onFailure;
     this.onSuccess = options.onSuccess;
     this.isFailure = options.isFailure || ((error: Error) => true);
+    this.distributedState = options.distributedState;
   }
 
   async execute<T>(fn: () => Promise<T>): Promise<T> {
     this.totalRequests++;
+    let halfOpenProbe = false;
+
+    if (this.distributedState) {
+      const remote = await this.distributedState.beforeCall(
+        this.name,
+        Date.now(),
+        this.resetTimeout,
+        this.maxHalfOpenRequests,
+      );
+      if (remote.state === CircuitState.OPEN) {
+        this.state = CircuitState.OPEN;
+        this.nextAttempt = remote.nextAttempt;
+        throw new CircuitBreakerError(
+          `Circuit breaker '${this.name}' is OPEN (distributed state)`,
+          this.name,
+          this.state,
+        );
+      }
+      if (remote.state === CircuitState.HALF_OPEN && !remote.probeGranted) {
+        throw new CircuitBreakerError(
+          `Circuit breaker '${this.name}' is HALF_OPEN and distributed probe capacity is exhausted`,
+          this.name,
+          CircuitState.HALF_OPEN,
+        );
+      }
+      if (remote.state === CircuitState.HALF_OPEN) {
+        this.state = CircuitState.HALF_OPEN;
+        this.nextAttempt = remote.nextAttempt;
+      } else if (remote.state === CircuitState.CLOSED) {
+        this.state = CircuitState.CLOSED;
+        this.nextAttempt = 0;
+        this.consecutiveFailures = 0;
+        this.consecutiveSuccesses = 0;
+      }
+    }
 
     if (this.state === CircuitState.OPEN) {
       if (Date.now() < this.nextAttempt) {
@@ -101,15 +159,51 @@ export class CircuitBreaker extends EventEmitter {
       this.transitionTo(CircuitState.HALF_OPEN);
     }
 
+    if (this.state === CircuitState.HALF_OPEN) {
+      if (this.halfOpenInFlight >= this.maxHalfOpenRequests) {
+        if (this.fallback) return this.fallback() as T;
+        throw new CircuitBreakerError(
+          `Circuit breaker '${this.name}' is HALF_OPEN and probe capacity is exhausted`,
+          this.name,
+          this.state,
+        );
+      }
+      this.halfOpenInFlight++;
+      halfOpenProbe = true;
+    }
+
     try {
       const result = await this.executeWithTimeout(fn);
       this.recordSuccess();
+      if (this.distributedState) {
+        await this.distributedState.recordOutcome(
+          this.name,
+          'success',
+          this.failureThreshold,
+          this.successThreshold,
+          Date.now(),
+          this.resetTimeout,
+        );
+      }
       return result;
     } catch (error) {
-      if (this.isFailure(error as Error)) {
+      const failure = this.isFailure(error as Error);
+      if (failure) {
         this.recordFailure(error as Error);
       }
+      if (this.distributedState) {
+        await this.distributedState.recordOutcome(
+          this.name,
+          failure ? 'failure' : 'neutral',
+          this.failureThreshold,
+          this.successThreshold,
+          Date.now(),
+          this.resetTimeout,
+        );
+      }
       throw error;
+    } finally {
+      if (halfOpenProbe) this.halfOpenInFlight--;
     }
   }
 
@@ -179,6 +273,11 @@ export class CircuitBreaker extends EventEmitter {
 
     if (newState === CircuitState.OPEN) {
       this.nextAttempt = Date.now() + this.resetTimeout;
+      this.halfOpenInFlight = 0;
+    }
+
+    if (newState === CircuitState.HALF_OPEN) {
+      this.halfOpenInFlight = 0;
     }
 
     if (newState === CircuitState.CLOSED) {
@@ -218,6 +317,7 @@ export class CircuitBreaker extends EventEmitter {
     this.consecutiveFailures = 0;
     this.consecutiveSuccesses = 0;
     this.nextAttempt = 0;
+    this.halfOpenInFlight = 0;
     this.emit('reset', this.getStats());
   }
 

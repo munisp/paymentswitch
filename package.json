@@ -11,6 +11,7 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "bench:circuit-breaker": "vitest bench server/middleware/circuitBreaker.bench.ts",
     "test:unit": "vitest run",
     "test:integration": "vitest run tests/",
     "test:live-gateway": "LIVE_GATEWAY_TESTS=true vitest run --config vitest.live.config.ts",
