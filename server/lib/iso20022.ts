@@ -64,6 +64,9 @@ function escapeXml(value: string): string {
 function tag(name: string, value: string | undefined): string {
   return value === undefined ? '' : `<${name}>${escapeXml(value)}</${name}>`;
 }
+function element(name: string, children: string): string {
+  return `<${name}>${children}</${name}>`;
+}
 function normalizeDate(date: Date): string {
   return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
@@ -101,26 +104,20 @@ export function createCamt029(input: Omit<IsoResolution, 'messageId'> & Partial<
 
 export function pacs008ToXml(payment: IsoPayment, createdAt = new Date()): string {
   const p = isoPaymentSchema.parse(payment);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n` +
-    `<Envelope xmlns="urn:iso:std:iso:20022:tech:xsd:head.001.001.03">` +
-    `<AppHdr>` +
-    tag('Fr', tag('FIId', tag('FinInstnId', tag('BICFI', p.debtor.agent)))) +
-    tag('To', tag('FIId', tag('FinInstnId', tag('BICFI', p.creditor.agent)))) +
-    tag('BizMsgIdr', p.messageId) + tag('MsgDefIdr', 'pacs.008.001.13') +
-    tag('CreDt', createdAt.toISOString()) + tag('BizSvc', 'paymentswitch.realtime') +
-    tag('PssblDplct', 'false') +
-    `</AppHdr></Envelope>` .replace('</Envelope>',
-      `<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.13"><FIToFICstmrCdtTrf>` +
-      `<GrpHdr>${tag('MsgId', p.messageId)}${tag('CreDtTm', createdAt.toISOString())}${tag('NbOfTxs', '1')}` +
-      `<SttlmInf>${tag('SttlmMtd', p.settlementMethod)}</SttlmInf></GrpHdr>` +
-      `<CdtTrfTxInf>${tag('PmtId', tag('InstrId', p.instructionId) + tag('EndToEndId', p.endToEndId) + tag('TxId', p.transactionId) + tag('UETR', p.uetr))}` +
-      `<Amt>${tag('InstdAmt', p.amount).replace('<InstdAmt>', `<InstdAmt Ccy="${escapeXml(p.currency)}">`)}</Amt>` +
-      `<Dbtr>${tag('Nm', p.debtor.name)}${tag('Id', tag('PrvtId', tag('Othr', tag('Id', p.debtor.account))))}</Dbtr>` +
-      `<DbtrAgt>${tag('FinInstnId', tag('BICFI', p.debtor.agent))}</DbtrAgt>` +
-      `<CdtrAgt>${tag('FinInstnId', tag('BICFI', p.creditor.agent))}</CdtrAgt>` +
-      `<Cdtr>${tag('Nm', p.creditor.name)}${tag('Id', tag('PrvtId', tag('Othr', tag('Id', p.creditor.account))))}</Cdtr>` +
-      (p.remittanceInformation ? `<RmtInf>${tag('Ustrd', p.remittanceInformation)}</RmtInf>` : '') +
-      `</CdtTrfTxInf></FIToFICstmrCdtTrf></Document></Envelope>`);
+  const debtorAgent = element('Fr', element('FIId', element('FinInstnId', tag('BICFI', p.debtor.agent))));
+  const creditorAgent = element('To', element('FIId', element('FinInstnId', tag('BICFI', p.creditor.agent))));
+  const appHeader = element('AppHdr',
+    debtorAgent + creditorAgent + tag('BizMsgIdr', p.messageId) + tag('MsgDefIdr', 'pacs.008.001.13') +
+    tag('CreDt', createdAt.toISOString()) + tag('BizSvc', 'paymentswitch.realtime') + tag('PssblDplct', 'false'));
+  const paymentId = element('PmtId', tag('InstrId', p.instructionId) + tag('EndToEndId', p.endToEndId) + tag('TxId', p.transactionId) + tag('UETR', p.uetr));
+  const amount = `<Amt><InstdAmt Ccy="${escapeXml(p.currency)}">${escapeXml(p.amount)}</InstdAmt></Amt>`;
+  const debtor = element('Dbtr', tag('Nm', p.debtor.name) + element('Id', element('PrvtId', element('Othr', tag('Id', p.debtor.account)))));
+  const creditor = element('Cdtr', tag('Nm', p.creditor.name) + element('Id', element('PrvtId', element('Othr', tag('Id', p.creditor.account)))));
+  const body = `<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.13">` +
+    element('FIToFICstmrCdtTrf',
+      element('GrpHdr', tag('MsgId', p.messageId) + tag('CreDtTm', createdAt.toISOString()) + tag('NbOfTxs', '1') + element('SttlmInf', tag('SttlmMtd', p.settlementMethod))) +
+      element('CdtTrfTxInf', paymentId + amount + debtor + element('DbtrAgt', element('FinInstnId', tag('BICFI', p.debtor.agent))) + element('CdtrAgt', element('FinInstnId', tag('BICFI', p.creditor.agent))) + creditor + (p.remittanceInformation ? element('RmtInf', tag('Ustrd', p.remittanceInformation)) : ''))) + `</Document>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<Envelope xmlns="urn:iso:std:iso:20022:tech:xsd:head.001.001.03">${appHeader}${body}</Envelope>`;
 }
 
 export function pacs002ToXml(report: IsoStatusReport, createdAt = new Date()): string {

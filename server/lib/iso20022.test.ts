@@ -38,6 +38,10 @@ describe('ISO 20022 payment profile', () => {
     expect(xml).toContain('Creditor &lt;Ltd&gt;');
     expect(xml).toContain('Ccy="NGN"');
     expect(xml).toContain(payment.uetr);
+    expect(xml).toContain('<PmtId>');
+    expect(xml).toContain('<Dbtr>');
+    expect(xml).not.toContain('&lt;PmtId&gt;');
+    expect(xml).not.toContain('&lt;Dbtr&gt;');
   });
 
   it('serializes status reports, cancellation requests, and resolutions', () => {
