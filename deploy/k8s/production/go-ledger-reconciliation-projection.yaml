@@ -175,6 +175,15 @@ metadata:
 immutable: true
 data:
   reconciliation-route.yaml: |
+    ssls:
+      - id: apisix-internal-reconciliation-mtls
+        snis:
+          - apisix-internal.payment-switch.svc.cluster.local
+        cert: ${APISIX_INTERNAL_RECONCILIATION_TLS_CERT_PEM}
+        key: ${APISIX_INTERNAL_RECONCILIATION_TLS_KEY_PEM}
+        client:
+          ca: ${SETTLEMENT_RECONCILIATION_CLIENT_CA_PEM}
+          depth: 1
     upstreams:
       - id: go-ledger-reconciliation
         type: roundrobin
@@ -194,13 +203,8 @@ data:
         priority: 1000
         upstream_id: go-ledger-reconciliation
         plugins:
-          openid-connect:
-            client_id: apisix-gateway
-            client_secret: ${KEYCLOAK_APISIX_CLIENT_SECRET}
-            discovery: ${KEYCLOAK_DISCOVERY_URL}
-            bearer_only: true
-            realm: payment-switch
-            token_signing_alg_values_expected: RS256
+          # Worker mTLS is enforced by the SSL `client.ca` contract above.
+          # The endpoint additionally validates LEDGER_RECONCILIATION_TOKEN in Go.
           proxy-rewrite:
             uri: /v1/reconciliation/settlements/lookup
           limit-req:
@@ -212,3 +216,20 @@ data:
               - 10.0.0.0/8
               - 172.16.0.0/12
               - 192.168.0.0/16
+          request-validation:
+            body_schema:
+              type: object
+              required: [settlementId, windowId, canonicalTransferId128]
+              additionalProperties: false
+              properties:
+                settlementId:
+                  type: string
+                  minLength: 1
+                  maxLength: 140
+                windowId:
+                  type: string
+                  minLength: 1
+                  maxLength: 140
+                canonicalTransferId128:
+                  type: string
+                  pattern: "^[0-9A-Fa-f]{32}$"
